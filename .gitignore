@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Build / dist
+build/
+dist/
+*.whl
+
+# Northbound runtime
+*.db
+*.db-shm
+*.db-wal
+/var/
+/data/
+config.toml
+.env
+.env.*
+!.env.example
+
+# Credentials / secrets
+*.pem
+*.key
+secrets/
+.credentials
+
+# Logs
+*.log
+logs/
+
+# Local AI cache
+chroma_db/
+.cache/
+ollama_models/
+
+# Frontend
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+frontend/dist/
+frontend/.cache/
+frontend/.vite/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/

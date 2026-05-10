@@ -1,0 +1,227 @@
+// Northbound — mock data
+// Devices, ports, requests, audit, users.
+
+const HOST_MODELS = ['Dell R740', 'Dell R650', 'Supermicro X11', 'Supermicro X12', 'HPE DL380 G10', 'HPE DL360', 'Lenovo SR650', 'Custom 1U build'];
+const VLANS = [10, 20, 100, 200, 300, 999];
+
+function rand(seed) {
+  // mulberry32
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6D2B79F5;
+    let r = t;
+    r = Math.imul(r ^ (r >>> 15), r | 1);
+    r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const seedRand = rand(42);
+const pick = (arr, r = seedRand) => arr[Math.floor(r() * arr.length)];
+
+const DEVICES = [
+  { id: 'd-lab-leaf-1', name: 'lab-leaf-1', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.11', model: 'CRS326-24G-2S+', portCount: 24, portKind: 'rj45-24-2sfp', reachable: true },
+  { id: 'd-lab-leaf-2', name: 'lab-leaf-2', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.12', model: 'CRS326-24G-2S+', portCount: 24, portKind: 'rj45-24-2sfp', reachable: true },
+  { id: 'd-lab-leaf-3', name: 'lab-leaf-3', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.13', model: 'CRS326-24G-2S+', portCount: 24, portKind: 'rj45-24-2sfp', reachable: false },
+  { id: 'd-lab-spine-1', name: 'lab-spine-1', env: 'lab', platform: 'mikrotik', role: 'spine', mgmt_ip: '10.10.0.10', model: 'CRS305', portCount: 5, portKind: 'sfp-5', reachable: true },
+  { id: 'd-lab-rtr-1', name: 'lab-rtr-1', env: 'lab', platform: 'freebsd', role: 'router', mgmt_ip: '10.10.0.1', model: 'FreeBSD 14.0', portCount: 4, portKind: 'rj45-4', reachable: true },
+  { id: 'd-dc-arista-1', name: 'dc-arista-1', env: 'dc', platform: 'arista', role: 'leaf', mgmt_ip: '10.20.0.11', model: '7050X3-32S 100G', portCount: 32, portKind: 'qsfp-32', reachable: true },
+  { id: 'd-dc-pica-10g', name: 'dc-pica-10g', env: 'dc', platform: 'pica8', role: 'leaf', mgmt_ip: '10.20.0.12', model: 'PicOS 48×10G', portCount: 48, portKind: 'sfp-48', reachable: true },
+  { id: 'd-dc-pica-100g', name: 'dc-pica-100g', env: 'dc', platform: 'pica8', role: 'spine', mgmt_ip: '10.20.0.13', model: 'PicOS 32×100G', portCount: 32, portKind: 'qsfp-32', reachable: true },
+  { id: 'd-dc-rtr-1', name: 'dc-rtr-1', env: 'dc', platform: 'freebsd', role: 'router', mgmt_ip: '10.20.0.1', model: 'FreeBSD 14.0 + FRR', portCount: 4, portKind: 'rj45-4', reachable: true },
+  { id: 'd-dc-vpn-1', name: 'dc-vpn-1', env: 'dc', platform: 'freebsd', role: 'vpn', mgmt_ip: '10.20.0.2', model: 'WireGuard node', portCount: 4, portKind: 'rj45-4', reachable: true },
+];
+
+function portNameFor(device, idx) {
+  switch (device.platform) {
+    case 'mikrotik':
+      if (device.role === 'spine') return `sfp-sfpplus${idx + 1}`;
+      if (idx < 24) return `ether${idx + 1}`;
+      return `sfp-sfpplus${idx - 23}`;
+    case 'arista':
+      return `Ethernet${idx + 1}/1`;
+    case 'pica8':
+      return device.portCount === 48 ? `te-1/1/${idx + 1}` : `hu-1/1/${idx + 1}`;
+    case 'freebsd':
+      return ['igb0', 'igb1', 'ix0', 'ix1'][idx];
+  }
+  return `port${idx + 1}`;
+}
+
+function generatePorts() {
+  const r = rand(7);
+  const map = {};
+  for (const d of DEVICES) {
+    const ports = [];
+    for (let i = 0; i < d.portCount; i++) {
+      const v = r();
+      let state;
+      if (v < 0.7) state = 'up';
+      else if (v < 0.85) state = 'down';
+      else state = 'disabled';
+      const untagged = pick(VLANS, r);
+      const tagged = r() < 0.18 ? VLANS.filter(x => x !== untagged && r() < 0.35) : [];
+      const hasMeta = state === 'up' && r() < 0.5;
+      const hostModel = hasMeta ? pick(HOST_MODELS, r) : '';
+      const bmcIp = hasMeta ? `10.0.${Math.floor(r() * 4)}.${10 + Math.floor(r() * 240)}` : '';
+      const description = hasMeta ? `VLAN-${untagged} | ${hostModel} | ${bmcIp}` : '';
+      ports.push({
+        device_id: d.id,
+        name: portNameFor(d, i),
+        index: i,
+        state, // up | down | disabled
+        admin_up: state !== 'disabled',
+        link_up: state === 'up',
+        speed_mbps: state === 'up' ? (d.portKind.startsWith('qsfp') ? 100000 : d.portKind.startsWith('sfp') ? 10000 : 1000) : null,
+        duplex: state === 'up' ? 'full' : null,
+        mac: state === 'up' ? Array.from({length:6},() => Math.floor(r()*256).toString(16).padStart(2,'0')).join(':') : null,
+        mtu: 1500,
+        untagged_vlan: untagged,
+        tagged_vlans: tagged,
+        description,
+        host_model: hostModel,
+        bmc_ip: bmcIp,
+        notes: '',
+        services: {
+          lldp: r() < 0.9,
+          stp: d.role !== 'router' && r() < 0.7,
+          mstp: false,
+          lacp: r() < 0.1,
+          bgp: d.role === 'router' && i < 2,
+          ospf: false,
+          erspan: false,
+        },
+        traffic: state === 'up' ? r() * 0.9 + 0.05 : 0, // 0..1 gentle pulse driver
+        last_change: Date.now() - Math.floor(r() * 1000 * 60 * 60 * 24 * 30),
+      });
+    }
+    map[d.id] = ports;
+  }
+  return map;
+}
+
+const PORTS = generatePorts();
+
+// Topology links — [a, b, kind] kind = 'fiber' (SFP+/QSFP) or 'copper' (RJ45)
+const LINKS = [
+  // Lab — leaf<->spine fiber, router<->spine copper
+  ['d-lab-spine-1', 'd-lab-leaf-1', 'fiber'],
+  ['d-lab-spine-1', 'd-lab-leaf-2', 'fiber'],
+  ['d-lab-spine-1', 'd-lab-leaf-3', 'fiber'],
+  ['d-lab-spine-1', 'd-lab-rtr-1', 'copper'],
+  // DC — backbone fiber, vpn copper
+  ['d-dc-pica-100g', 'd-dc-arista-1', 'fiber'],
+  ['d-dc-pica-100g', 'd-dc-pica-10g', 'fiber'],
+  ['d-dc-pica-10g', 'd-dc-rtr-1', 'fiber'],
+  ['d-dc-rtr-1', 'd-dc-vpn-1', 'copper'],
+];
+
+// Change requests
+const CHANGE_REQUESTS = [
+  {
+    id: 'r-001',
+    device_id: 'd-lab-leaf-1',
+    port_name: 'ether14',
+    requested_by: 'alice',
+    requested_changes: { untagged_vlan: 200, tagged_vlans: [], host_model: 'Dell R740', bmc_ip: '10.0.0.55', notes: 'New tenant deploy' },
+    reason: 'Moving the new tenant rack into VLAN 200 per ticket NB-218.',
+    status: 'pending',
+    reviewer_id: null,
+    reviewer_comment: '',
+    created_at: Date.now() - 1000 * 60 * 12,
+    reviewed_at: null,
+    applied_at: null,
+  },
+  {
+    id: 'r-002',
+    device_id: 'd-dc-arista-1',
+    port_name: 'Ethernet7/1',
+    requested_by: 'alice',
+    requested_changes: { untagged_vlan: 100, tagged_vlans: [200, 300], host_model: 'Supermicro X12', bmc_ip: '10.0.1.42', notes: 'Trunking for k8s' },
+    reason: 'k8s node needs trunked uplink with mgmt on 100, app on 200, storage on 300.',
+    status: 'pending',
+    reviewer_id: null,
+    reviewer_comment: '',
+    created_at: Date.now() - 1000 * 60 * 60 * 2,
+    reviewed_at: null,
+    applied_at: null,
+  },
+  {
+    id: 'r-003',
+    device_id: 'd-dc-pica-10g',
+    port_name: 'te-1/1/24',
+    requested_by: 'alice',
+    requested_changes: { untagged_vlan: 999, tagged_vlans: [], host_model: '', bmc_ip: '', notes: 'decommission' },
+    reason: 'Decommission — node returned to pool.',
+    status: 'approved',
+    reviewer_id: 'admin',
+    reviewer_comment: 'Confirmed with rack ops, port is empty.',
+    created_at: Date.now() - 1000 * 60 * 60 * 4,
+    reviewed_at: Date.now() - 1000 * 60 * 60 * 1,
+    applied_at: null,
+  },
+  {
+    id: 'r-004',
+    device_id: 'd-lab-leaf-2',
+    port_name: 'ether3',
+    requested_by: 'alice',
+    requested_changes: { untagged_vlan: 20, tagged_vlans: [], host_model: 'HPE DL380 G10', bmc_ip: '10.0.2.13', notes: '' },
+    reason: 'Replacing the existing host in this slot.',
+    status: 'applied',
+    reviewer_id: 'admin',
+    reviewer_comment: '',
+    created_at: Date.now() - 1000 * 60 * 60 * 28,
+    reviewed_at: Date.now() - 1000 * 60 * 60 * 27,
+    applied_at: Date.now() - 1000 * 60 * 60 * 27,
+  },
+  {
+    id: 'r-005',
+    device_id: 'd-dc-pica-100g',
+    port_name: 'hu-1/1/8',
+    requested_by: 'alice',
+    requested_changes: { untagged_vlan: 300, tagged_vlans: [10], host_model: '', bmc_ip: '', notes: 'storage backbone' },
+    reason: 'Aligning storage backbone with new VLAN plan.',
+    status: 'rejected',
+    reviewer_id: 'admin',
+    reviewer_comment: 'Hold off — VLAN 300 plan is changing next week. Resubmit after Friday.',
+    created_at: Date.now() - 1000 * 60 * 60 * 50,
+    reviewed_at: Date.now() - 1000 * 60 * 60 * 48,
+    applied_at: null,
+  },
+];
+
+// Audit log per port (a sample, generated)
+function generateAudit() {
+  const r = rand(101);
+  const out = [];
+  for (let i = 0; i < 60; i++) {
+    const d = DEVICES[Math.floor(r() * DEVICES.length)];
+    const ports = PORTS[d.id];
+    const p = ports[Math.floor(r() * ports.length)];
+    const action = pick(['port.edit', 'port.vlan.set', 'port.description.set', 'port.disabled', 'port.enabled', 'request.applied'], r);
+    out.push({
+      id: 'a-' + i,
+      device_id: d.id,
+      port_name: p.name,
+      user: r() < 0.7 ? 'admin' : 'alice',
+      action,
+      ago_minutes: Math.floor(r() * 60 * 24 * 14),
+      summary: action === 'port.vlan.set'
+        ? `VLAN ${pick([10,20,100,200,300], r)} → ${p.untagged_vlan}`
+        : action === 'port.description.set'
+        ? `Updated host model & BMC`
+        : action === 'request.applied'
+        ? `Applied change request r-${100+i}`
+        : action,
+    });
+  }
+  return out;
+}
+const AUDIT = generateAudit();
+
+const USERS = [
+  { username: 'admin', role: 'admin', name: 'Avery Park' },
+  { username: 'alice', role: 'requester', name: 'Alice Liu' },
+];
+
+window.NB_DATA = { DEVICES, PORTS, LINKS, CHANGE_REQUESTS, AUDIT, USERS, VLANS };

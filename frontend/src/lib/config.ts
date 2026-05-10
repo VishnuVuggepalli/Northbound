@@ -1,0 +1,211 @@
+/**
+ * Per-platform config snippet rendering.
+ *
+ * The UI shows what would be pushed when an admin applies a change. Real
+ * apply-time rendering is the backend's job (see `Driver.render_change`); the
+ * frontend just shows a representative snippet so requesters can sanity-check
+ * what they're asking for before submitting.
+ */
+
+import type { Device, Port, RequestedChanges } from '@/types';
+
+export function portToRequestedChanges(p: Port): Required<RequestedChanges> {
+  return {
+    untagged_vlan: p.untagged_vlan,
+    tagged_vlans: [...p.tagged_vlans],
+    host_model: p.host_model,
+    bmc_ip: p.bmc_ip,
+    notes: p.notes,
+  };
+}
+
+export function mergeChange(p: Port, change: RequestedChanges): Required<RequestedChanges> {
+  return {
+    untagged_vlan: change.untagged_vlan ?? p.untagged_vlan,
+    tagged_vlans: change.tagged_vlans ?? p.tagged_vlans,
+    host_model: change.host_model ?? p.host_model,
+    bmc_ip: change.bmc_ip ?? p.bmc_ip,
+    notes: change.notes ?? p.notes,
+  };
+}
+
+export function applyChangeToPort(p: Port, change: RequestedChanges): Port {
+  const merged = mergeChange(p, change);
+  return {
+    ...p,
+    ...merged,
+    description:
+      merged.untagged_vlan && merged.host_model && merged.bmc_ip
+        ? `VLAN-${merged.untagged_vlan} | ${merged.host_model} | ${merged.bmc_ip}`
+        : p.description,
+  };
+}
+
+export function renderConfigSnippet(device: Device, port: Port): string {
+  const v = port.untagged_vlan;
+  const tagged = port.tagged_vlans;
+  const desc = port.description ?? '';
+  switch (device.platform) {
+    case 'mikrotik':
+      return [
+        `/interface ethernet`,
+        `set [find name="${port.name}"] comment="${desc}" ${
+          port.admin_up ? 'disabled=no' : 'disabled=yes'
+        }`,
+        `/interface bridge vlan`,
+        `add bridge=br1 vlan-ids=${v} untagged="${port.name}"`,
+        ...tagged.map((t) => `add bridge=br1 vlan-ids=${t} tagged="${port.name}"`),
+      ].join('\n');
+    case 'arista':
+      return [
+        `interface ${port.name}`,
+        `   description ${desc}`,
+        `   ${port.admin_up ? 'no shutdown' : 'shutdown'}`,
+        `   switchport mode ${tagged.length ? 'trunk' : 'access'}`,
+        tagged.length
+          ? `   switchport trunk native vlan ${v}`
+          : `   switchport access vlan ${v}`,
+        tagged.length ? `   switchport trunk allowed vlan ${[v, ...tagged].join(',')}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    case 'pica8':
+      return [
+        `set interface ${port.name} description "${desc}"`,
+        `set interface ${port.name} ${port.admin_up ? 'enable' : 'disable'}`,
+        `set vlans v${v} interface ${port.name} untagged`,
+        ...tagged.map((t) => `set vlans v${t} interface ${port.name} tagged`),
+      ].join('\n');
+    case 'freebsd':
+      return [
+        `# /etc/rc.conf snippet`,
+        `ifconfig_${port.name}="up"`,
+        `# vlans on ${port.name}: ${[v, ...tagged].join(',')}`,
+        `ifconfig_${port.name}_${v}="inet 10.0.${v}.1/24"`,
+      ].join('\n');
+  }
+}
+
+export function renderFullConfig(device: Device, ports: Port[]): string[] {
+  switch (device.platform) {
+    case 'mikrotik':
+      return renderMikrotik(device, ports);
+    case 'arista':
+      return renderArista(device, ports);
+    case 'pica8':
+      return renderPica8(device, ports);
+    case 'freebsd':
+      return renderFreeBSD(device, ports);
+  }
+}
+
+function renderMikrotik(device: Device, ports: Port[]): string[] {
+  const lines: string[] = [
+    `# RouterOS 7.x · ${device.model}`,
+    `# system identity = "${device.name}"`,
+    ``,
+    `/interface bridge`,
+    `add name=br1 vlan-filtering=yes`,
+    ``,
+    `/interface ethernet`,
+  ];
+  for (const p of ports) {
+    lines.push(
+      `set [find name="${p.name}"] comment="${p.description}" ${
+        p.admin_up ? 'disabled=no' : 'disabled=yes'
+      }`,
+    );
+  }
+  lines.push(``, `/interface bridge vlan`);
+  const byVlan = new Map<number, { u: string[]; t: string[] }>();
+  for (const p of ports) {
+    if (!byVlan.has(p.untagged_vlan)) byVlan.set(p.untagged_vlan, { u: [], t: [] });
+    byVlan.get(p.untagged_vlan)!.u.push(p.name);
+    for (const t of p.tagged_vlans) {
+      if (!byVlan.has(t)) byVlan.set(t, { u: [], t: [] });
+      byVlan.get(t)!.t.push(p.name);
+    }
+  }
+  for (const v of [...byVlan.keys()].sort((a, b) => a - b)) {
+    const grp = byVlan.get(v)!;
+    lines.push(
+      `add bridge=br1 vlan-ids=${v} untagged="${grp.u.join(',')}"${
+        grp.t.length ? ` tagged="${grp.t.join(',')}"` : ''
+      }`,
+    );
+  }
+  lines.push(``, `/ip service`, `set telnet disabled=yes`, `set api disabled=yes`, `set winbox disabled=no`);
+  return lines;
+}
+
+function renderArista(device: Device, ports: Port[]): string[] {
+  const lines: string[] = [`! EOS · ${device.model}`, `hostname ${device.name}`, `!`];
+  const vlans = new Set<number>();
+  for (const p of ports) {
+    vlans.add(p.untagged_vlan);
+    p.tagged_vlans.forEach((v) => vlans.add(v));
+  }
+  for (const v of [...vlans].sort((a, b) => a - b)) {
+    lines.push(`vlan ${v}`, `   name VLAN_${v}`, `!`);
+  }
+  for (const p of ports) {
+    lines.push(`interface ${p.name}`);
+    if (p.description) lines.push(`   description ${p.description}`);
+    lines.push(`   ${p.admin_up ? 'no shutdown' : 'shutdown'}`);
+    if (p.tagged_vlans.length) {
+      lines.push(
+        `   switchport mode trunk`,
+        `   switchport trunk native vlan ${p.untagged_vlan}`,
+        `   switchport trunk allowed vlan ${[p.untagged_vlan, ...p.tagged_vlans].join(',')}`,
+      );
+    } else {
+      lines.push(`   switchport mode access`, `   switchport access vlan ${p.untagged_vlan}`);
+    }
+    lines.push(`!`);
+  }
+  return lines;
+}
+
+function renderPica8(device: Device, ports: Port[]): string[] {
+  const lines: string[] = [`# PicOS · ${device.model}`, `set system hostname ${device.name}`, ``];
+  const vlans = new Set<number>();
+  for (const p of ports) {
+    vlans.add(p.untagged_vlan);
+    p.tagged_vlans.forEach((v) => vlans.add(v));
+  }
+  for (const v of [...vlans].sort((a, b) => a - b)) {
+    lines.push(`set vlans v${v} description "VLAN ${v}"`);
+  }
+  lines.push(``);
+  for (const p of ports) {
+    lines.push(`set interface ${p.name} description "${p.description}"`);
+    lines.push(`set interface ${p.name} ${p.admin_up ? 'enable' : 'disable'}`);
+    lines.push(`set vlans v${p.untagged_vlan} interface ${p.name} untagged`);
+    for (const t of p.tagged_vlans) lines.push(`set vlans v${t} interface ${p.name} tagged`);
+  }
+  return lines;
+}
+
+function renderFreeBSD(device: Device, ports: Port[]): string[] {
+  const lines: string[] = [
+    `# /etc/rc.conf`,
+    `hostname="${device.name}"`,
+    `gateway_enable="YES"`,
+    `# interfaces`,
+  ];
+  for (const p of ports) lines.push(`ifconfig_${p.name}="${p.admin_up ? 'up' : 'down'}"`);
+  lines.push(`# vlans`);
+  for (const p of ports) {
+    for (const v of [p.untagged_vlan, ...p.tagged_vlans]) {
+      lines.push(`ifconfig_${p.name}_${v}="inet 10.0.${v}.1/24"`);
+    }
+  }
+  lines.push(
+    ``,
+    `# /usr/local/etc/frr/frr.conf (excerpt)`,
+    `frr defaults traditional`,
+    `router bgp 65001`,
+    `   bgp router-id 10.20.0.1`,
+  );
+  return lines;
+}

@@ -1,0 +1,28 @@
+import { Outlet, useParams } from 'react-router-dom';
+import { Sidebar } from '@/components/layout/Sidebar';
+import { useUIStore } from '@/store/ui';
+import { useEffect } from 'react';
+import type { Environment } from '@/types';
+
+export function EnvironmentPage() {
+  const { env } = useParams<{ env: Environment }>();
+  const setEnv = useUIStore((s) => s.setEnv);
+
+  useEffect(() => {
+    if (env === 'lab' || env === 'dc') setEnv(env);
+  }, [env, setEnv]);
+
+  if (env !== 'lab' && env !== 'dc') return null;
+
+  return (
+    <div className="flex h-[calc(100vh-3.5rem)]">
+      <Sidebar env={env} />
+      <section
+        aria-label={env === 'lab' ? 'Lab environment' : 'Datacenter environment'}
+        className="relative flex-1 overflow-hidden"
+      >
+        <Outlet />
+      </section>
+    </div>
+  );
+}
