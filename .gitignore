@@ -1,4 +1,4 @@
-# Python
+# ───── Python ─────
 __pycache__/
 *.py[cod]
 *$py.class
@@ -11,23 +11,28 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Virtual envs
+# ───── Virtual envs ─────
 .venv/
 venv/
 env/
 
-# Editors / OS
+# ───── Editors / OS ─────
 .vscode/
 .idea/
 *.swp
+*.swo
+*.bak
+*.orig
+*.tmp
 .DS_Store
+Thumbs.db
 
-# Build / dist
+# ───── Build / dist ─────
 build/
 dist/
 *.whl
 
-# Northbound runtime
+# ───── Northbound runtime ─────
 *.db
 *.db-shm
 *.db-wal
@@ -36,31 +41,35 @@ dist/
 config.toml
 .env
 .env.*
+.envrc
 !.env.example
 
-# Credentials / secrets
+# ───── Credentials / secrets ─────
 *.pem
 *.key
 secrets/
 .credentials
 
-# Logs
+# ───── Logs ─────
 *.log
 logs/
 
-# Local AI cache
+# ───── Local AI cache ─────
 chroma_db/
 .cache/
 ollama_models/
 
-# Frontend
+# ───── Frontend (Vite) ─────
 node_modules/
-.next/
-.turbo/
 *.tsbuildinfo
 frontend/dist/
 frontend/.cache/
 frontend/.vite/
 frontend/coverage/
+
+# ───── Playwright artifacts ─────
 frontend/playwright-report/
 frontend/test-results/
+frontend/playwright/.cache/
+frontend/playwright/reports/
+frontend/playwright/test-results/
