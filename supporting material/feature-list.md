@@ -44,6 +44,7 @@
 | F12 | `GET /platforms` (registry list with capabilities) | A |
 | F13 | Onboarding wizard backend (test → discover → atomic save) | A |
 | F14 | Onboarding wizard UI (7 steps) | A |
+| F14a | Onboarding cred step adapts per `auth_methods` (password / ssh_key / api_token / snmp_v2c_community) | A |
 | F15 | Encrypted creds at rest (CredVault interface, Fernet impl) | A |
 | F16 | Master key from env (`NB_MASTER_KEY`) | A |
 | F17 | Credential rotation flow | B |
@@ -51,8 +52,13 @@
 | F19 | Preview mode (one-shot creds, nothing stored) | A (recommended) |
 | F20 | Reachability stub at onboard, real polling later | A → E |
 | F21 | Hard read-only lock on `role in (router, vpn)` | A |
+| F21a | Hard read-only lock on `platform = mikrotik_swos` (writable=false at driver) | A |
+| F21b | `isWriteLocked` helper hoisted to `frontend/src/lib/devicePolicy.ts` (single source of truth) | A |
+| F21c | Vendor UI deep-link button on device detail + port detail (opens `web_ui_url_template` in new tab) | A |
+| F21d | FreeBSD: SSH command copy-to-clipboard chip in place of vendor UI button | A |
 | F22 | Auto-discovery (subnet scan) | N |
 | F23 | Bulk CSV device import | N |
+| F24 | LLDP-driven auto-onboarding of neighbor devices | N |
 
 ## Ports — read
 
@@ -66,7 +72,9 @@
 | F35 | Active services per port (LLDP, STP, BGP, etc.) | A |
 | F36 | Global search across env (port name, desc, VLAN, model, BMC IP) | A |
 | F37 | Port history (audit log filtered) | B |
-| F38 | MAC/ARP/neighbor tables | L |
+| F37a | LLDP neighbor display in port detail panel (collapsible, hidden when empty) | A |
+| F37b | Stale-data warning band on PortPanel (>60s = amber, refetch CTA) | A (shipped) |
+| F38 | MAC/ARP/neighbor tables (beyond LLDP) | L |
 
 ## Ports — write (admin direct edit)
 
@@ -176,15 +184,15 @@
 
 | # | Feature | Tier |
 |---|---|---|
-| F140 | Pydantic Settings from TOML + env | A |
+| F140 | Pydantic Settings from TOML + env | A (shipped) |
 | F141 | structlog JSON logs | A |
 | F142 | Request-id contextvar on every log line | A |
 | F143 | Cred redaction at log layer | A |
 | F144 | Alembic migrations from day 1 | A |
 | F145 | Per-driver recorded fixtures (test without live device) | A |
 | F146 | MockDriver (frontend unblocker, e2e tests) | A |
-| F147 | Health endpoint | A |
-| F148 | OpenAPI docs at `/docs` | A |
+| F147 | Health endpoint | A (shipped) |
+| F148 | OpenAPI docs at `/docs` | A (shipped) |
 | F149 | OpenAPI types codegen for frontend | A |
 | F150 | Versioned API (`Accept` header) | A |
 | F151 | Rate limit on write endpoints | B |
@@ -194,33 +202,59 @@
 | F155 | Postgres migration (when SQLite hurts) | L |
 | F156 | Multi-worker + Redis cache | L |
 | F157 | SSE/WebSocket for live state | L |
+| F160 | Custom LRU cache (`_lib/cache.py`, DLL + hashmap) | A (shipped) |
+| F161 | TTL extension to LRU cache (for port_state) | A |
+| F162 | Shared SNMP transport (`_lib/transport/snmp_client.py`, puresnmp) | A |
+| F163 | Shared httpx transport (auth + retry + circuit-breaker) | A |
+| F164 | Shared asyncssh transport | A |
+| F165 | Shared NETCONF transport (ncclient + threadpool adapter) | A |
+| F166 | HTML scrape helper (`_lib/transport/html_scrape.py`, SwOS only) | A |
+| F167 | LLDP parser (`_lib/lldp.py`, normalizes per-platform encoding) | A |
+| F168 | DriverCapabilities extended: `supports_snmp_read`, `supports_lldp`, `auth_methods`, `web_ui_url_template` | A |
+| F169 | Driver contract test suite (every driver passes shared assertions) | A |
+| F170 | About page in UI with "what NB is and isn't" positioning copy | A |
+| F171 | README v0 positioning paragraph (ecosystem complement, not replacement) | A |
 
 ## Anti-features (hard NO)
 
 - IPAM, host inventory, rack/cable modeling
-- Monitoring/alerting (use existing tools)
+- Monitoring/alerting (use LibreNMS / Prometheus / Observium)
 - Multi-tenancy
 - Auto-discovery (subnet scan)
+- **LLDP-driven auto-onboarding** (display only, never action)
 - Mobile app
 - External public REST API / webhooks
 - Analytics dashboard
 - Bulk operations (one device, one port at a time)
 - Scheduled changes
 - **FreeBSD writes** (forever)
+- **MikroTik SwOS writes** (forever — SNMP read only)
+- **SNMP-set for config change** (fragile; writes via native API only)
+- **Multi-vendor abstraction lib** (Napalm — overkill for 5 platforms)
+- **Iframe-embedded vendor UIs** (deep-link in new tab instead)
 - Two-way Zoho Projects sync
 - In-app comment threads (Cliq exists)
 - Bulk CSV device import
 - Pre-shipped vendor configs
 - Auto-listen DM bot
 
-## Counts (rough)
+## Counts (rough — post-ecosystem-survey)
 
 | Tier | Count |
 |---|---|
-| A (M1) | 30 |
+| A (M1) | 47 (was 30; added SNMP transport, LLDP, SwOS read, vendor deep-link, About page, etc.) |
 | B (M2) | 26 |
 | C (M3) | 14 |
 | D (M4) | 2 |
 | E (M5) | 3 |
-| L (later) | 9 |
-| N (never) | 18 |
+| L (later) | 10 |
+| N (never) | 21 (added SwOS writes, SNMP-set, LLDP-auto-onboard, Napalm, iframe embeds) |
+
+## Recently shipped (M1 progress)
+
+- F140 Pydantic Settings
+- F147 /health
+- F148 OpenAPI /docs
+- F160 Custom LRU cache (DLL + hashmap)
+- F37b Stale-data warning band on PortPanel (UI agent)
+- Frontend: all 10 screens, onboarding wizard, hotkeys, role switcher, 3D switch, palette switcher, 44 Playwright tests + UX audit clean

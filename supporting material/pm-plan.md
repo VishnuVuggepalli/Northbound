@@ -156,20 +156,53 @@ One-way mirror NB request → Zoho task. Defer until Avery says "I want sprint p
 | Cliq webhook spoofed | High | HMAC signature verify, mandatory. |
 | Cliq down → no approvals possible | Low | Portal still works as fallback. |
 
+## Ecosystem positioning (added after open-source tool survey)
+
+Northbound is a **request-mediated port-change workflow**. It is NOT:
+
+- **A monitoring/alerting platform** — use LibreNMS, Observium, Prometheus + Grafana
+- **A bulk config push tool** — use Ansible, MikroWizard, Napalm
+- **A network source-of-truth / intent model** — use NetBox, Nautobot
+- **A multi-vendor abstraction layer** — Northbound has direct drivers for 5 platforms; Napalm is overkill at this scale
+- **A firmware update orchestrator** — out of scope forever
+
+It **complements** those tools. Run LibreNMS for graphs + alerts; run Northbound for "Alice needs port 14 on VLAN 200, here's the diff, click apply, done in 30 seconds."
+
+This paragraph ships in the README v0 and on the in-app `/about` page. Sets expectations day 1 and answers 60% of "why doesn't Northbound do X?" questions in advance.
+
+## SwOS scope (decided after vendor research)
+
+MikroTik SwOS is a different product line from RouterOS — different API surface, different capabilities. Decision:
+
+**Option B selected: SwOS read-only via SNMP + HTTP scrape (backup-only).**
+
+Rationale:
+- Colleagues asking "what's on SwOS port X?" get answered → moves north-star metric
+- Writes blocked at driver layer (`writable=False`) — explicit, defensible, "use SwOS web UI for changes"
+- SwOS SNMP MIBs are well-supported (IF-MIB, BRIDGE-MIB, MIKROTIK-MIB) — read path is vendor-supported
+- ~2 days work; mostly identifying the right MIBs
+
+SwOS write attempts via HTTP scrape are **never** in scope — firmware-bump fragility is real and unacceptable for ops trust.
+
 ## Hard NO list (anti-features)
 
 Tempting; would fragment the product. Reject every time:
 
 - IPAM, host inventory, rack/cable modeling
-- Monitoring/alerting (use existing tools)
+- Monitoring/alerting (use existing tools — see Ecosystem positioning above)
 - Multi-tenancy
 - Auto-discovery of devices (subnet scan)
+- **LLDP-driven auto-onboarding** — LLDP info displayed only, never used to register devices automatically
 - Mobile app
 - External public REST API / webhooks
 - Analytics dashboard
 - Bulk operations (one device, one port at a time)
 - Scheduled changes ("apply at 2am")
 - **FreeBSD writes** — never
+- **SwOS writes** — never (read-only via SNMP only)
+- **SNMP-set for any config change** — half-supported across platforms, fragile
+- Multi-vendor abstraction lib (Napalm, NAPALM-automation)
+- **Iframe-embedded vendor UIs** (deep-link in new tab instead)
 - Two-way Zoho Projects sync
 - In-app comment threads (Cliq exists)
 - Bulk CSV device import
@@ -192,3 +225,5 @@ Track interrupt count by hand for 4 weeks before launch + 4 after to prove north
 3. **Day-1 empty state** — guided tour or just "Add device" CTA?
 4. **Email digest cadence** — daily 9am? Real-time per-event? Hybrid?
 5. **Tier 2 Cliq commands** — ship with M1 (read-only `/nb port`) or wait until M2?
+6. **SwOS lab fixtures** — do we have a reachable SwOS device to record SNMP-walk + HTTP-scrape fixtures from, or do we generate synthetic fixtures from MIB definitions?
+7. **LLDP scope** — display `chassis_id`, `port_id`, `system_name` only, or also `mgmt_address`? Adding mgmt_address opens the door to "click neighbor → onboard it" later. Recommend defer; display only the basics now.

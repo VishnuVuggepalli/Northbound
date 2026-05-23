@@ -161,12 +161,31 @@ class DriverCapabilities(BaseModel):
     writable: bool
     supports_commit_confirm: bool
     native_api_available: bool
+    supports_snmp_read: bool                   # SwOS-driven addition
+    supports_lldp: bool                        # LLDP neighbor display
     max_concurrency: int
-    auth_kinds: list[Literal["password", "ssh_key", "api_token"]]
+    auth_methods: list[AuthMethod]             # renamed from auth_kinds; richer enum
+    web_ui_url_template: str | None = None     # vendor UI deep-link
+
+class AuthMethod(StrEnum):
+    PASSWORD = "password"
+    SSH_KEY = "ssh_key"
+    API_TOKEN = "api_token"
+    SNMP_V2C_COMMUNITY = "snmp_v2c_community"
+    SNMP_V3 = "snmp_v3"
+
+
+@dataclass
+class Neighbor:                                # LLDP neighbor info
+    chassis_id: str
+    port_id: str
+    system_name: str | None
+    system_description: str | None = None
+
 
 class Driver(ABC):
     capabilities: ClassVar[DriverCapabilities]
-    platform_id: ClassVar[str]   # registry key
+    platform_id: ClassVar[str]                 # registry key
 
     def __init__(self, conn: ConnectionParams, creds: Credentials): ...
 
@@ -179,6 +198,7 @@ class Driver(ABC):
     async def get_ports(self) -> list[PortState]: ...
     async def get_running_config(self) -> str: ...
     async def backup_config(self) -> str: ...
+    async def get_neighbors(self, port: str | None = None) -> list[Neighbor]: ...
 
     # write — raise NotSupported if writable=False
     async def render_change(self, port: str, change: PortChange) -> ConfigDiff: ...
@@ -188,6 +208,86 @@ class Driver(ABC):
 ```
 
 New platform = subclass + registry entry. Wizard, API, UI all use it generically.
+
+### Driver capability matrix (concrete per-platform defaults)
+
+| Platform ID | writable | commit_confirm | native_api | snmp_read | lldp | max_conc | auth_methods | web_ui_url_template |
+|---|---|---|---|---|---|---|---|---|
+| `mikrotik_routeros` | ✓ | ✗ (no native; backup-wrap) | ✓ REST | optional | ✓ | 5 REST / 1 SSH | password, api_token | `http://{mgmt_ip}/webfig/` |
+| `mikrotik_swos` | **✗ forever** | n/a | ✗ (HTTP scrape only) | **required** | ✓ via SNMP | 1 | password, snmp_v2c_community | `http://{mgmt_ip}/` |
+| `arista` | ✓ | ✓ (commit timer) | ✓ eAPI | optional | ✓ via eAPI | 5 | password | `https://{mgmt_ip}/` |
+| `pica8` | ✓ | ✓ (NETCONF confirmed-commit) | ✓ NETCONF | optional | ✓ via NETCONF | 1 | password, ssh_key | `https://{mgmt_ip}:8888/` |
+| `freebsd` | **✗ forever** | n/a | n/a (SSH only) | ✗ | ✗ | 1 | ssh_key | `null` (show SSH chip) |
+
+### Transport layer (composable)
+
+Drivers compose from shared transport utilities. **Not** "one driver per protocol" — drivers pick what they need.
+
+```
+src/northbound/_lib/transport/
+├── snmp_client.py        SnmpReader — async wrapper over puresnmp; recorded-replay-aware
+├── httpx_client.py       Thin httpx wrapper; auth, timeout, retry, circuit-breaker
+├── asyncssh_client.py    Async SSH command runner; key + password auth
+├── netconf_client.py     ncclient adapter (sync lib → asyncio.run_in_executor)
+└── html_scrape.py        BeautifulSoup + lxml helpers; SwOS HTML form pages
+```
+
+Per-driver composition:
+- `MikrotikRouterOSDriver` → `httpx_client` (primary) + `asyncssh_client` (fallback) + `snmp_client` (optional)
+- `MikrotikSwOSDriver` → `snmp_client` (primary, reads) + `html_scrape` (backup snapshot only)
+- `AristaDriver` → `httpx_client` (eAPI) + `snmp_client` (optional)
+- `Pica8Driver` → `netconf_client` (primary) + `snmp_client` (optional)
+- `FreeBSDDriver` → `asyncssh_client` only
+
+**Why composable**: PM proposed deferring SNMP to M2. Architect overrode — front-loaded as shared transport means later integration is `import SnmpReader` in any driver, not refactoring 5 drivers.
+
+### LLDP architecture
+
+`get_neighbors()` default impl returns `[]`. Each driver overrides where supported.
+
+Implementation paths:
+- **Arista**: `show lldp neighbors detail | json` via eAPI
+- **RouterOS**: `/ip/neighbor/print` via REST (proprietary discovery, plus LLDP if enabled)
+- **Pica8**: NETCONF get on `<lldp>` subtree
+- **SwOS**: `LLDP-MIB::lldpRemoteSystemsData` via SNMP walk
+- **FreeBSD**: empty list
+
+`_lib/lldp.py` normalizes the various formats into the canonical `Neighbor` dataclass.
+
+UI surfaces neighbors as a collapsible row in PortPanel **only when non-empty**. Display only; never used for auto-onboarding (hard NO per PM).
+
+## Vendor UI deep-link
+
+Northbound is deliberately scoped — when something falls outside (SwOS writes, complex BGP config on Pica8, vendor-specific knobs), the user should escape cleanly to the vendor's own web UI.
+
+### Pattern
+
+Each platform exposes a `web_ui_url_template` in its capabilities. Frontend renders an **"Open in vendor UI ↗"** button on every device detail page and port detail panel. Click opens new tab.
+
+### UX rules
+
+- Button positioned top-right on device detail and port detail
+- Text: "Open in vendor UI ↗" (with external-link icon)
+- `target="_blank" rel="noopener noreferrer"` mandatory (security)
+- Tooltip: "Northbound is scoped — use {VendorName} for advanced changes"
+- For port-level details: opens **device-level** vendor UI (vendor URLs rarely deep-link per port)
+- For FreeBSD: show `ssh {ssh_user}@{mgmt_ip}` copy-to-clipboard chip instead
+
+### Why this matters (PM angle)
+
+Without escape hatches, Northbound becomes a wall. Colleagues hit a feature Northbound doesn't expose (custom firewall rule, BGP peer, VLAN trunk filtering edge case) and message Avery — defeating the north-star metric.
+
+With the escape hatch, "I need to do X that NB doesn't support" → click → vendor UI → done. **Northbound stays scoped, user stays unblocked.** That's the whole game.
+
+### Anti-pattern to avoid
+
+**Do not iframe** the vendor UI inside NB. Reasons:
+- CSP / X-Frame-Options on vendor UIs blocks it
+- Auth handoff is brittle (different cookies, sessions)
+- Confuses audit trail ("did this change happen in NB or in the iframe?")
+- Vendor UIs aren't designed for embedded use
+
+External-tab navigation is the correct shape.
 
 ## Onboarding architecture
 
@@ -237,6 +337,10 @@ Prevents: "I filed at 9am, you applied at 5pm, but at noon someone else changed 
 | 3D render perf with 280-port Pica8 | M1 testing | Instanced meshes, frustum cull, LOD on zoom-out | n/a |
 | Apply mid-flight, app crashes | Anytime | DB state machine + reconciler resumes | n/a |
 | Stale state apply (UI 30s old) | Race | Fingerprint at file, re-validate at apply | n/a |
+| SwOS firmware bump breaks HTTP scrape | Random | Scrape only for opaque backup; if garbage, garbage is what we save (not load-bearing) | n/a |
+| SNMP community string in DB | Always | CredVault encrypts; UI labels as secret; audit redacts | n/a |
+| LLDP data inconsistent across platforms (chassis-ID, port-ID encoding) | Always | Normalize in `_lib/lldp.py`; recorded fixtures per platform | n/a |
+| `puresnmp` upstream breakage | Random | Pin minor version; thin wrapper isolates the dependency | Swap to pysnmp behind same interface |
 
 ## Testing pyramid
 
@@ -266,6 +370,22 @@ Coverage targets: services 85%, drivers 70%, state machine 95%.
 | Audit hash chain | build (~30 LOC) | — | Custom semantics |
 | Cred vault | build interface, Fernet impl | — | Future-swap to KMS |
 
+## Sequenced wave plan
+
+7-wave plan; each wave is shippable, tested, and unblocks the next.
+
+| Wave | Scope | Duration |
+|---|---|---|
+| **A. Backend foundation** | `_lib/transport/{snmp,httpx,asyncssh,netconf,html_scrape}.py`, Driver ABC + dataclasses, registry, MockDriver, `GET /api/platforms` | 1–2 d |
+| **B. MikrotikRouterOS read path** | REST primary + SSH fallback; recorded fixtures; contract suite passes | 2 d |
+| **C. SwOS driver read-only** | SNMP read + HTTP scrape backup; writable=False; SNMP-walk fixture | 1 d |
+| **D. LLDP across drivers** | `_lib/lldp.py` + `get_neighbors()` per driver; recorded fixtures | 1 d |
+| **E. UI integration** | platform registry, onboarding cred-step adapts, PortPanel Neighbor row, vendor UI deep-link button, About page, `isWriteLocked` hoist, README positioning copy, Playwright additions | 1–2 d |
+| **F. Arista driver (read+write)** | eAPI + commit-timer; contract suite; lab fixture | 2 d |
+| **G. Pica8 + FreeBSD drivers** | NETCONF confirmed-commit (write) + FreeBSD SSH (read-only) | 2–3 d |
+
+Total: ~10–13 days for full M1 driver coverage.
+
 ## What's NOT in the architecture (and why)
 
 - **No message bus** (RabbitMQ, Kafka, NATS) — events are intra-process; APScheduler + DB rows suffice. Adding bus = 10× ops.
@@ -275,6 +395,9 @@ Coverage targets: services 85%, drivers 70%, state machine 95%.
 - **No GraphQL** — REST is enough for ~30 endpoints.
 - **No service mesh, no k8s** — single VM. If we need k8s, the product failed in a different way.
 - **No SSE/WebSocket v1** — polling on port_state suffices. Add WS only if "live tail" UX justifies.
+- **No iframe-embedded vendor UIs** — see vendor UI deep-link section
+- **No SNMP-set for writes** — half-supported across platforms; NB writes go through native APIs only
+- **No multi-vendor abstraction lib (Napalm)** — <5 platforms; direct drivers clearer
 
 ## Open architecture questions
 
@@ -285,6 +408,8 @@ Coverage targets: services 85%, drivers 70%, state machine 95%.
 5. **State drift on apply** — hard block or soft warn? (recommend hard block + explicit re-confirm override)
 6. **Frontend served by FastAPI or separate?** (recommend FastAPI for v1)
 7. **OpenAPI codegen** — types-only or full client? (recommend types-only)
+8. **`puresnmp` vs `pysnmp`** — recommend puresnmp (async-native, cleaner API)
+9. **SwOS lab fixture source** — real device walk vs synthetic from MIB definitions?
 
 ## Spec deviations (this doc supersedes `plan.md` where they conflict)
 
@@ -296,3 +421,7 @@ Coverage targets: services 85%, drivers 70%, state machine 95%.
 | Audit log just appends | Hash-chained, nightly verified | Tamper evidence, near-zero cost |
 | No state machine mention | Persisted state machine + reconciler | Crash safety, trust ladder dependency |
 | Stale state not addressed | Fingerprint at file, re-check at apply | Prevents stale-read clobber |
+| All MikroTiks treated as RouterOS | Split: `mikrotik_routeros` (write-capable) vs `mikrotik_swos` (read-only via SNMP) | SwOS has no API; conflating breaks both drivers |
+| No SNMP mentioned | SNMP is a first-class shared transport (`_lib/transport/snmp_client`) | Required for SwOS, useful for fallback across all platforms |
+| No LLDP | Driver ABC exposes `get_neighbors()`; UI shows neighbor row in PortPanel | Display-only; never used for auto-discovery (PM hard NO) |
+| No vendor UI escape hatch | Each driver exposes `web_ui_url_template`; UI renders "Open in vendor UI ↗" button | Keeps NB scoped; lets user escape cleanly when feature isn't covered |
