@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import ClassVar
 
 import pytest
@@ -61,7 +62,7 @@ class _DummyDriver(Driver):
 
 
 @pytest.fixture(autouse=True)
-def _cleanup_dummy() -> None:
+def _cleanup_dummy() -> Generator[None, None, None]:
     yield
     _REGISTRY.pop(_DummyDriver.platform_id, None)
 

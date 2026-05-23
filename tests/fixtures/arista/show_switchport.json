@@ -1,0 +1,48 @@
+{
+  "switchports": {
+    "Ethernet1": {
+      "enabled": true,
+      "switchportInfo": {
+        "mode": "access",
+        "accessVlanId": 10,
+        "accessVlanName": "users",
+        "trunkingNativeVlanId": 1,
+        "trunkingNativeVlanName": "default",
+        "trunkAllowedVlans": "ALL"
+      }
+    },
+    "Ethernet2": {
+      "enabled": true,
+      "switchportInfo": {
+        "mode": "access",
+        "accessVlanId": 1,
+        "accessVlanName": "default",
+        "trunkingNativeVlanId": 1,
+        "trunkingNativeVlanName": "default",
+        "trunkAllowedVlans": "ALL"
+      }
+    },
+    "Ethernet3": {
+      "enabled": false,
+      "switchportInfo": {
+        "mode": "access",
+        "accessVlanId": 1,
+        "accessVlanName": "default",
+        "trunkingNativeVlanId": 1,
+        "trunkingNativeVlanName": "default",
+        "trunkAllowedVlans": "ALL"
+      }
+    },
+    "Ethernet4": {
+      "enabled": true,
+      "switchportInfo": {
+        "mode": "trunk",
+        "accessVlanId": 1,
+        "accessVlanName": "default",
+        "trunkingNativeVlanId": 100,
+        "trunkingNativeVlanName": "native",
+        "trunkAllowedVlans": "100,200,300"
+      }
+    }
+  }
+}

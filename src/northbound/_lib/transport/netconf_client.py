@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 
 class _NetconfManager(Protocol):
@@ -62,9 +62,11 @@ class NetconfClient:
             return self._manager
         if self._manager_factory is not None:
             factory = self._manager_factory
-            self._manager = await asyncio.to_thread(factory)  # type: ignore[arg-type]
+            # asyncio.to_thread loses the factory's return-type narrowing; cast back.
+            result = await asyncio.to_thread(factory)  # type: ignore[arg-type]
+            self._manager = cast(_NetconfManager, result)
             return self._manager
-        from ncclient import manager
+        from ncclient import manager  # type: ignore[import-untyped]  # ncclient has no stubs
 
         def _connect() -> _NetconfManager:
             kwargs: dict[str, object] = {

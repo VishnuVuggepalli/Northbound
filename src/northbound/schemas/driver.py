@@ -63,10 +63,19 @@ class Neighbor:
 
 @dataclass(frozen=True)
 class ConfigDiff:
+    """A rendered, not-yet-applied configuration change.
+
+    ``metadata`` is a free-form, string-typed bag of driver-specific hints
+    that travel with the diff between ``render_change`` and ``apply_change``
+    (e.g. Arista session name, Pica8 pending token). Keep it small — the
+    UI surfaces ``summary`` / ``commands``; metadata is internal-only.
+    """
+
     summary: str
     raw_before: str
     raw_after: str
     commands: tuple[str, ...]
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -79,6 +88,7 @@ class ApplyResult:
 
 @dataclass(frozen=True)
 class TestResult:
+    __test__ = False  # not a pytest test class
     ok: bool
     latency_ms: float
     platform_version: str | None

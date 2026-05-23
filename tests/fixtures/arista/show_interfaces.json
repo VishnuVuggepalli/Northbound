@@ -1,0 +1,52 @@
+{
+  "interfaces": {
+    "Ethernet1": {
+      "name": "Ethernet1",
+      "forwardingModel": "dataLink",
+      "lineProtocolStatus": "up",
+      "interfaceStatus": "connected",
+      "hardware": "ethernet",
+      "mtu": 9214,
+      "duplex": "duplexFull",
+      "bandwidth": 10000000000,
+      "description": "to-r720-01",
+      "physicalAddress": "00:1c:73:aa:bb:01"
+    },
+    "Ethernet2": {
+      "name": "Ethernet2",
+      "forwardingModel": "dataLink",
+      "lineProtocolStatus": "down",
+      "interfaceStatus": "notconnect",
+      "hardware": "ethernet",
+      "mtu": 9214,
+      "duplex": "duplexFull",
+      "bandwidth": 0,
+      "description": "spare",
+      "physicalAddress": "00:1c:73:aa:bb:02"
+    },
+    "Ethernet3": {
+      "name": "Ethernet3",
+      "forwardingModel": "dataLink",
+      "lineProtocolStatus": "down",
+      "interfaceStatus": "disabled",
+      "hardware": "ethernet",
+      "mtu": 9214,
+      "duplex": "duplexFull",
+      "bandwidth": 0,
+      "description": "",
+      "physicalAddress": "00:1c:73:aa:bb:03"
+    },
+    "Ethernet4": {
+      "name": "Ethernet4",
+      "forwardingModel": "dataLink",
+      "lineProtocolStatus": "up",
+      "interfaceStatus": "connected",
+      "hardware": "ethernet",
+      "mtu": 9214,
+      "duplex": "duplexFull",
+      "bandwidth": 10000000000,
+      "description": "trunk-to-core",
+      "physicalAddress": "00:1c:73:aa:bb:04"
+    }
+  }
+}

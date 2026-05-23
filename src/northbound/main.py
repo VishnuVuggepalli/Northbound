@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-# Importing the mock driver registers it via the @register decorator.
-# Future drivers go through the same pattern.
-import northbound.drivers.mock  # noqa: F401
+# Importing a driver module triggers @register at import time.
+# Order is alphabetical to keep /api/platforms output stable.
+import northbound.drivers.arista
+import northbound.drivers.mock
+import northbound.drivers.pica8  # noqa: F401  (registers)
 from northbound.api import platforms
 
 

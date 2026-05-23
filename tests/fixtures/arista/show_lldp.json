@@ -1,0 +1,39 @@
+{
+  "tablesLastChangeTime": 1700000123.45,
+  "tablesInserts": 5,
+  "tablesDeletes": 0,
+  "tablesDrops": 0,
+  "tablesAgeouts": 0,
+  "lldpNeighbors": {
+    "Ethernet1": {
+      "lldpNeighborInfo": [
+        {
+          "chassisIdType": "macAddress",
+          "chassisId": "aa:bb:cc:dd:ee:01",
+          "systemName": "r720-01",
+          "systemDescription": "Dell PowerEdge R720 iDRAC",
+          "neighborInterfaceInfo": {
+            "interfaceIdType": "macAddress",
+            "interfaceId": "aa:bb:cc:dd:ee:01",
+            "interfaceDescription": ""
+          }
+        }
+      ]
+    },
+    "Ethernet4": {
+      "lldpNeighborInfo": [
+        {
+          "chassisIdType": "macAddress",
+          "chassisId": "aa:bb:cc:dd:ee:99",
+          "systemName": "core-switch",
+          "systemDescription": "Arista DCS-7280, trunk uplink",
+          "neighborInterfaceInfo": {
+            "interfaceIdType": "interfaceName",
+            "interfaceId": "Ethernet1/1",
+            "interfaceDescription": ""
+          }
+        }
+      ]
+    }
+  }
+}

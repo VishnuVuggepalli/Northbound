@@ -1,0 +1,17 @@
+{
+  "imageFormatVersion": "1.0",
+  "uptime": 12345.67,
+  "modelName": "DCS-7050SX-64",
+  "internalVersion": "4.27.0F-26023468.4270F",
+  "memTotal": 8051324,
+  "serialNumber": "JAS12345678",
+  "systemMacAddress": "00:1c:73:11:22:33",
+  "bootupTimestamp": 1700000000.0,
+  "memFree": 5012928,
+  "version": "4.27.0F",
+  "architecture": "x86_64",
+  "isIntlVersion": false,
+  "internalBuildId": "abc-123",
+  "hardwareRevision": "11.00",
+  "hwMacAddress": "00:1c:73:11:22:33"
+}

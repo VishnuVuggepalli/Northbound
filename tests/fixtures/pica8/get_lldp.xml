@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" message-id="1">
+  <data>
+    <configuration xmlns="http://xml.juniper.net/xnm/1.1/xnm">
+      <protocols>
+        <lldp>
+          <neighbor>
+            <interface-name>ge-1/1/1</interface-name>
+            <chassis-id>aa:bb:cc:dd:ee:01</chassis-id>
+            <port-id>eth0</port-id>
+            <system-name>host-01</system-name>
+            <system-description>Dell R720 iDRAC</system-description>
+          </neighbor>
+          <neighbor>
+            <interface-name>ge-1/1/3</interface-name>
+            <chassis-id>aa:bb:cc:dd:ee:99</chassis-id>
+            <port-id>Ethernet1/1</port-id>
+            <system-name>core-switch</system-name>
+            <system-description>Arista DCS-7280</system-description>
+          </neighbor>
+        </lldp>
+      </protocols>
+    </configuration>
+  </data>
+</rpc-reply>
