@@ -1,0 +1,102 @@
+"""Driver ABC — the plugin contract.
+
+Every platform adapter subclasses :class:`Driver` and registers itself
+via :func:`northbound.drivers.registry.register`. The wizard, API, and UI
+all consume drivers generically through this interface.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import ClassVar
+
+from northbound.schemas.driver import (
+    ApplyResult,
+    ConfigDiff,
+    ConnectionParams,
+    Credentials,
+    DiscoveryResult,
+    DriverCapabilities,
+    Neighbor,
+    PortChange,
+    PortState,
+    TestResult,
+)
+
+
+class DriverError(Exception):
+    """Base class for driver-layer failures."""
+
+
+class NotSupported(DriverError):
+    """Operation is not supported by this platform."""
+
+
+class AuthError(DriverError):
+    """Credentials were rejected by the device."""
+
+
+class ReachabilityError(DriverError):
+    """Device is unreachable at the network layer."""
+
+
+class ReadOnlyDevice(DriverError):
+    """Write attempted against a read-only platform."""
+
+
+class Driver(ABC):
+    """Plugin contract. Each platform = one subclass + registry entry."""
+
+    capabilities: ClassVar[DriverCapabilities]
+    platform_id: ClassVar[str]
+    display_name: ClassVar[str]
+
+    def __init__(self, conn: ConnectionParams, creds: Credentials) -> None:
+        self._conn = conn
+        self._creds = creds
+
+    # ---------- onboarding ----------
+
+    @abstractmethod
+    async def test_credentials(self) -> TestResult:
+        """Probe the device with the supplied creds. Cheap, idempotent."""
+
+    @abstractmethod
+    async def discover(self) -> DiscoveryResult:
+        """Snapshot the device for onboarding: ports, config, services."""
+
+    # ---------- read ----------
+
+    @abstractmethod
+    async def reachable(self) -> bool:
+        """Is the device reachable right now?"""
+
+    @abstractmethod
+    async def get_ports(self) -> list[PortState]:
+        """Live port inventory + per-port state."""
+
+    @abstractmethod
+    async def get_running_config(self) -> str:
+        """Raw running-config as the device returns it."""
+
+    @abstractmethod
+    async def backup_config(self) -> str:
+        """Opaque blob suitable for archival. May equal running-config."""
+
+    async def get_neighbors(self, port: str | None = None) -> list[Neighbor]:
+        """LLDP neighbors. Default: none. Override per platform."""
+        return []
+
+    # ---------- write (NotSupported if writable=False) ----------
+
+    async def render_change(self, port: str, change: PortChange) -> ConfigDiff:
+        raise NotSupported(f"{self.platform_id}: render_change not supported")
+
+    async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
+        raise NotSupported(f"{self.platform_id}: apply_change not supported")
+
+    async def confirm(self, apply_token: str) -> None:
+        raise NotSupported(f"{self.platform_id}: confirm not supported")
+
+    async def revert(self, apply_token: str) -> None:
+        raise NotSupported(f"{self.platform_id}: revert not supported")
