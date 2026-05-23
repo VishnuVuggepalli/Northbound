@@ -383,21 +383,27 @@ export interface ConfirmOnboardResult {
 
 export async function confirmOnboard(draft: OnboardingDraft): Promise<ConfirmOnboardResult> {
   await delay(700);
-  if (!draft.platform) throw new Error('platform is required');
-  const platform = findPlatform(draft.platform);
-  if (!platform) throw new Error(`Unknown platform ${draft.platform}`);
+  if (!draft.platform_id) throw new Error('platform is required');
+  const platform = findPlatform(draft.platform_id);
+  if (!platform) throw new Error(`Unknown platform ${draft.platform_id}`);
   const id = `d-${draft.env}-${draft.name.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
-  const portKind = portKindForPlatform(draft.platform);
+  const portKind = portKindForPlatform(platform.platform);
   const portCount =
-    draft.platform === 'arista' ? 32 : draft.platform === 'pica8' ? 48 : draft.platform === 'freebsd' ? 4 : 24;
+    platform.platform === 'arista'
+      ? 32
+      : platform.platform === 'pica8'
+        ? 48
+        : platform.platform === 'freebsd'
+          ? 4
+          : 24;
   const device: Device = {
     id,
     name: draft.name,
     env: draft.env,
-    platform: draft.platform,
+    platform: platform.platform,
     role: draft.role,
     mgmt_ip: draft.mgmt_ip,
-    model: `${platform.label}`,
+    model: platform.display_name,
     portCount,
     portKind,
     reachable: true,

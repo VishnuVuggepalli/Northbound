@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Inbox,
+  Info,
   Keyboard,
   ListChecks,
   LogOut,
@@ -195,6 +196,14 @@ export function TopBar() {
                   onClick={() => {
                     setMenuOpen(false);
                     navigate('/requests');
+                  }}
+                />
+                <MenuItem
+                  icon={<Info size={14} />}
+                  label="About Northbound"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    navigate('/about');
                   }}
                 />
                 <div className="my-1 border-t border-border" />

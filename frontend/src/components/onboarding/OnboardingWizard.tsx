@@ -21,11 +21,11 @@ import {
 } from '@/api/queries';
 import { pushToast } from '@/store/toast';
 import type {
-  AuthKind,
+  AuthMethod,
   DeviceRole,
   Environment,
   OnboardingDraft,
-  Platform,
+  PlatformId,
   PlatformRegistryEntry,
 } from '@/types';
 
@@ -42,6 +42,7 @@ const STEPS: Array<{ id: StepId; title: string; subtitle: string }> = [
 ];
 
 const initialDraft: OnboardingDraft = {
+  platform_id: null,
   platform: null,
   name: '',
   env: 'lab',
@@ -49,11 +50,20 @@ const initialDraft: OnboardingDraft = {
   mgmt_ip: '',
   port: 443,
   prefer_native_api: true,
-  auth_kind: 'password',
+  auth_method: 'password',
   username: '',
   password: '',
   ssh_key: '',
   api_token: '',
+  snmp_community: 'public',
+};
+
+const AUTH_LABELS: Record<AuthMethod, string> = {
+  password: 'Password',
+  ssh_key: 'SSH key',
+  api_token: 'API token',
+  snmp_v2c_community: 'SNMP v2c',
+  snmp_v3: 'SNMP v3',
 };
 
 export function OnboardingWizard() {
@@ -66,24 +76,33 @@ export function OnboardingWizard() {
   const confirm = useConfirmOnboard();
 
   const selectedPlatform =
-    draft.platform ? platforms.find((p) => p.platform === draft.platform) : undefined;
+    draft.platform_id ? platforms.find((p) => p.platform_id === draft.platform_id) : undefined;
 
   const update = (patch: Partial<OnboardingDraft>) => setDraft((d) => ({ ...d, ...patch }));
 
   const canProceed = (): boolean => {
     switch (step) {
       case 1:
-        return !!draft.platform;
+        return !!draft.platform_id;
       case 2:
         return !!draft.name && !!draft.env && !!draft.role;
       case 3:
         return /^\d{1,3}(\.\d{1,3}){3}$/.test(draft.mgmt_ip) && draft.port > 0;
-      case 4:
-        if (!draft.username) return false;
-        if (draft.auth_kind === 'password') return !!draft.password;
-        if (draft.auth_kind === 'ssh_key') return !!draft.ssh_key;
-        if (draft.auth_kind === 'api_token') return !!draft.api_token;
+      case 4: {
+        // Username is only required when the auth method actually uses one.
+        // SNMP v2c uses a community string, no username.
+        const usesUsername =
+          draft.auth_method === 'password' ||
+          draft.auth_method === 'ssh_key' ||
+          draft.auth_method === 'snmp_v3';
+        if (usesUsername && !draft.username) return false;
+        if (draft.auth_method === 'password') return !!draft.password;
+        if (draft.auth_method === 'ssh_key') return !!draft.ssh_key;
+        if (draft.auth_method === 'api_token') return !!draft.api_token;
+        if (draft.auth_method === 'snmp_v2c_community') return !!draft.snmp_community;
+        if (draft.auth_method === 'snmp_v3') return !!draft.password;
         return false;
+      }
       case 5:
         return test.isSuccess;
       case 6:
@@ -142,8 +161,17 @@ export function OnboardingWizard() {
         {step === 1 && (
           <Step1Platform
             platforms={platforms}
-            selected={draft.platform}
-            onPick={(p) => update({ platform: p.platform, port: p.defaultPort })}
+            selected={draft.platform_id}
+            onPick={(p) =>
+              update({
+                platform_id: p.platform_id,
+                platform: p.platform,
+                port: p.defaultPort,
+                // Reset auth_method to a value valid for the new platform so the
+                // segmented control doesn't render an option the driver rejects.
+                auth_method: (p.capabilities.auth_methods[0] ?? 'password') as AuthMethod,
+              })
+            }
           />
         )}
         {step === 2 && <Step2Identity draft={draft} update={update} />}
@@ -248,7 +276,7 @@ function Stepper({ steps, current }: StepperProps) {
 
 interface Step1Props {
   platforms: readonly PlatformRegistryEntry[];
-  selected: Platform | null;
+  selected: PlatformId | null;
   onPick: (p: PlatformRegistryEntry) => void;
 }
 
@@ -262,12 +290,12 @@ function Step1Platform({ platforms, selected, onPick }: Step1Props) {
       <div className="grid grid-cols-2 gap-3">
         {platforms.map((p) => (
           <button
-            key={p.platform}
+            key={p.platform_id}
             type="button"
             onClick={() => onPick(p)}
             className={cn(
               'flex items-start gap-3 rounded-lg border p-4 text-left transition-colors',
-              selected === p.platform
+              selected === p.platform_id
                 ? 'border-accent bg-accent-soft'
                 : 'border-border bg-bg-elev-1 hover:border-border-strong',
             )}
@@ -275,7 +303,7 @@ function Step1Platform({ platforms, selected, onPick }: Step1Props) {
             <PlatformIcon platform={p.platform} role="leaf" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <div className="font-semibold text-fg">{p.label}</div>
+                <div className="font-semibold text-fg">{p.display_name}</div>
                 {!p.capabilities.writable && (
                   <Badge variant="warn" title="Read-only forever">
                     <ShieldAlert size={10} className="mr-1" />
@@ -288,8 +316,11 @@ function Step1Platform({ platforms, selected, onPick }: Step1Props) {
               </div>
               <p className="mt-1 text-xs text-fg-muted">{p.description}</p>
               <div className="mt-2 text-[10px] uppercase tracking-wider text-fg-subtle">
-                Auth: {p.capabilities.auth_kinds.join(' · ')}
+                Auth: {p.capabilities.auth_methods.map((m) => AUTH_LABELS[m]).join(' · ')}
               </div>
+              {p.notes && (
+                <p className="mt-1 text-[11px] italic text-fg-muted">{p.notes}</p>
+              )}
             </div>
           </button>
         ))}
@@ -407,40 +438,51 @@ interface Step4Props {
 }
 
 function Step4Credentials({ draft, update, platform }: Step4Props) {
-  const allowed = platform?.capabilities.auth_kinds ?? ['password'];
+  const allowed: AuthMethod[] = platform?.capabilities.auth_methods ?? ['password'];
+  // SNMP v2c uses a community string instead of a username/password. We hide
+  // the username field for it so the form mirrors how SwOS actually authenticates.
+  const showUsername =
+    draft.auth_method === 'password' ||
+    draft.auth_method === 'ssh_key' ||
+    draft.auth_method === 'snmp_v3';
   return (
     <div className="space-y-4">
-      <Field label="Username">
-        <Input
-          value={draft.username}
-          onChange={(e) => update({ username: e.target.value })}
-          placeholder="admin"
-          className="nb-mono"
-        />
-      </Field>
-      <Field label="Auth kind">
-        <Segmented<AuthKind>
-          value={draft.auth_kind}
-          options={(
-            [
-              { value: 'password', label: 'Password' },
-              { value: 'ssh_key', label: 'SSH key' },
-              { value: 'api_token', label: 'API token' },
-            ] as Array<{ value: AuthKind; label: string }>
-          ).filter((o) => allowed.includes(o.value))}
-          onChange={(v) => update({ auth_kind: v })}
-        />
-      </Field>
-      {draft.auth_kind === 'password' && (
+      {allowed.length > 1 && (
+        <Field label="Auth method">
+          <Segmented<AuthMethod>
+            value={draft.auth_method}
+            options={allowed.map((m) => ({ value: m, label: AUTH_LABELS[m] }))}
+            onChange={(v) => update({ auth_method: v })}
+          />
+        </Field>
+      )}
+      {allowed.length === 1 && (
+        <div className="rounded-md border border-border bg-bg-elev-1 px-3 py-2 text-xs text-fg-muted">
+          This driver only supports <strong className="text-fg">{AUTH_LABELS[allowed[0]!]}</strong>.
+        </div>
+      )}
+      {showUsername && (
+        <Field label="Username">
+          <Input
+            value={draft.username}
+            onChange={(e) => update({ username: e.target.value })}
+            placeholder="admin"
+            className="nb-mono"
+            data-testid="onboard-username"
+          />
+        </Field>
+      )}
+      {draft.auth_method === 'password' && (
         <Field label="Password">
           <Input
             type="password"
             value={draft.password}
             onChange={(e) => update({ password: e.target.value })}
+            data-testid="onboard-password"
           />
         </Field>
       )}
-      {draft.auth_kind === 'ssh_key' && (
+      {draft.auth_method === 'ssh_key' && (
         <Field label="SSH private key">
           <Textarea
             rows={5}
@@ -448,16 +490,45 @@ function Step4Credentials({ draft, update, platform }: Step4Props) {
             onChange={(e) => update({ ssh_key: e.target.value })}
             placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
             className="nb-mono text-[11px]"
+            data-testid="onboard-ssh-key"
           />
         </Field>
       )}
-      {draft.auth_kind === 'api_token' && (
+      {draft.auth_method === 'api_token' && (
         <Field label="API token">
           <Input
             type="password"
             value={draft.api_token}
             onChange={(e) => update({ api_token: e.target.value })}
             className="nb-mono"
+            data-testid="onboard-api-token"
+          />
+        </Field>
+      )}
+      {draft.auth_method === 'snmp_v2c_community' && (
+        <Field label="SNMP community">
+          <Input
+            type="password"
+            value={draft.snmp_community}
+            onChange={(e) => update({ snmp_community: e.target.value })}
+            placeholder="public"
+            className="nb-mono"
+            data-testid="onboard-snmp-community"
+            aria-describedby="snmp-help"
+          />
+          <span id="snmp-help" className="mt-1 block text-[11px] text-fg-muted">
+            Treated as a secret — masked here and never logged.
+          </span>
+        </Field>
+      )}
+      {draft.auth_method === 'snmp_v3' && (
+        <Field label="SNMP v3 auth passphrase">
+          <Input
+            type="password"
+            value={draft.password}
+            onChange={(e) => update({ password: e.target.value })}
+            className="nb-mono"
+            data-testid="onboard-snmp-v3-pass"
           />
         </Field>
       )}
@@ -567,13 +638,20 @@ function Step7Confirm({ draft, platform, discoverData }: Step7Props) {
         initial config_backup, and the audit entry. If any step fails we roll back — no half-state.
       </p>
       <div className="space-y-1.5 rounded-md border border-border bg-bg-elev-1 p-4 text-sm">
-        <Row k="Platform" v={platform?.label ?? draft.platform ?? '—'} />
+        <Row k="Platform" v={platform?.display_name ?? draft.platform_id ?? '—'} />
         <Row k="Name" v={draft.name} mono />
         <Row k="Environment" v={draft.env.toUpperCase()} />
         <Row k="Role" v={draft.role} />
         <Row k="Management IP" v={`${draft.mgmt_ip}:${draft.port}`} mono />
         <Row k="Native API" v={draft.prefer_native_api ? 'preferred' : 'off'} />
-        <Row k="Auth" v={`${draft.username} · ${draft.auth_kind}`} />
+        <Row
+          k="Auth"
+          v={
+            draft.auth_method === 'snmp_v2c_community'
+              ? `SNMP v2c community`
+              : `${draft.username} · ${AUTH_LABELS[draft.auth_method]}`
+          }
+        />
         <Row k="Discovered ports" v={discoverData?.port_count ?? '—'} />
       </div>
     </div>

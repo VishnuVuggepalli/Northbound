@@ -13,6 +13,7 @@ import { RequestsPage } from '@/pages/RequestsPage';
 import { AdminQueuePage } from '@/pages/AdminQueuePage';
 import { OnboardPage } from '@/pages/OnboardPage';
 import { SearchResultsPage } from '@/pages/SearchResultsPage';
+import { AboutPage } from '@/pages/About';
 import { useAuthStore } from '@/store/auth';
 import { useUIStore } from '@/store/ui';
 import { useThemeStore } from '@/store/theme';
@@ -43,6 +44,7 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedShell />}>
         <Route path="/" element={<EnvPickerPage />} />
+        <Route path="/about" element={<AboutPage />} />
         <Route path="/onboard" element={<OnboardPage />} />
         <Route path="/requests" element={<RequestsPage />} />
         <Route path="/queue" element={<AdminQueuePage />} />

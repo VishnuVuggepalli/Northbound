@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { AlertCircle, Clock, RefreshCw, Send, X } from 'lucide-react';
+import { AlertCircle, Clock, Network, RefreshCw, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Section } from '@/components/ui/Section';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { VlanChip } from '@/components/ui/VlanChip';
 import { Kbd } from '@/components/ui/Kbd';
 import { Diff } from '@/components/Diff';
+import { VendorActions } from '@/components/VendorActions';
 import { renderConfigSnippet } from '@/lib/config';
 import { portToRequestedChanges, mergeChange } from '@/lib/config';
 import { fmtAge, formatSpeed, timeAgo, timeAgoMin } from '@/lib/format';
@@ -19,6 +20,8 @@ import type {
 } from '@/types';
 import { useApplyRequest, useRejectRequest } from '@/api/queries';
 import { pushToast } from '@/store/toast';
+import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
+import { PLATFORM_REGISTRY } from '@/mocks/registry';
 
 interface PortPanelProps {
   device: Device;
@@ -66,7 +69,11 @@ export function PortPanel({
   const ageMs = fetchedAt ? Math.max(0, now - fetchedAt) : null;
   const stale = ageMs != null && ageMs > STALE_THRESHOLD_MS;
   const aging = ageMs != null && ageMs > CACHE_TTL_MS && ageMs <= STALE_THRESHOLD_MS;
+  const platform = findPlatformForDevice(device, PLATFORM_REGISTRY);
+  const writeLocked = isWriteLocked(device, platform);
   const isAdmin = user.role === 'admin';
+  const showNeighbors =
+    (platform?.capabilities.supports_lldp ?? false) && (port.neighbors?.length ?? 0) > 0;
   const pending = requests.filter(
     (r) =>
       r.device_id === device.id && r.port_name === port.name && r.status === 'pending',
@@ -196,6 +203,32 @@ export function PortPanel({
           </div>
         </Section>
 
+        {showNeighbors && (
+          <Section title="Neighbor (LLDP)">
+            <ul className="space-y-1.5">
+              {port.neighbors!.map((n, idx) => (
+                <li
+                  key={`${n.chassis_id}-${n.port_id}-${idx}`}
+                  className="flex items-start gap-2 rounded-md border border-border bg-bg-elev-1 px-2.5 py-1.5 text-xs"
+                  title={n.system_description ?? undefined}
+                >
+                  <Network size={12} className="mt-0.5 shrink-0 text-fg-muted" aria-hidden />
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-fg">{n.system_name || <em className="text-fg-subtle">unknown system</em>}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-fg-muted">
+                      <span className="nb-mono">{n.chassis_id}</span>
+                      <span>›</span>
+                      <span className="nb-mono">{n.port_id}</span>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
         <Section
           title="Live config"
           right={
@@ -254,25 +287,27 @@ export function PortPanel({
                 />
                 {isAdmin && (
                   <div className="mt-2 flex gap-1.5">
-                    <Button
-                      kind="success"
-                      size="sm"
-                      onClick={() => {
-                        apply.mutate(
-                          { id: req.id, reviewer: user.username },
-                          {
-                            onSuccess: () =>
-                              pushToast({
-                                kind: 'success',
-                                title: 'Applied',
-                                message: `#${req.id} pushed to ${device.name}`,
-                              }),
-                          },
-                        );
-                      }}
-                    >
-                      Approve & apply
-                    </Button>
+                    {!writeLocked && (
+                      <Button
+                        kind="success"
+                        size="sm"
+                        onClick={() => {
+                          apply.mutate(
+                            { id: req.id, reviewer: user.username },
+                            {
+                              onSuccess: () =>
+                                pushToast({
+                                  kind: 'success',
+                                  title: 'Applied',
+                                  message: `#${req.id} pushed to ${device.name}`,
+                                }),
+                            },
+                          );
+                        }}
+                      >
+                        Approve & apply
+                      </Button>
+                    )}
                     <Button
                       kind="ghost"
                       size="sm"
@@ -323,11 +358,12 @@ export function PortPanel({
         </Section>
       </div>
 
-      <footer className="flex items-center gap-2 border-t border-border bg-bg-elev-1/60 px-4 py-3">
+      <footer className="flex items-center justify-between gap-2 border-t border-border bg-bg-elev-1/60 px-4 py-3">
+        <div className="flex items-center gap-2">
         {isAdmin ? (
           <>
             {/* TODO(M2): admin direct edit — see feature-list F40 */}
-            {pending.length > 0 && (
+            {pending.length > 0 && !writeLocked && (
               <Button
                 kind="success"
                 onClick={() => {
@@ -353,10 +389,14 @@ export function PortPanel({
             </Button>
           </>
         ) : (
-          <Button kind="primary" leftIcon={<Send size={14} />} onClick={onOpenRequest}>
-            Request change <Kbd>r</Kbd>
-          </Button>
+          !writeLocked && (
+            <Button kind="primary" leftIcon={<Send size={14} />} onClick={onOpenRequest}>
+              Request change <Kbd>r</Kbd>
+            </Button>
+          )
         )}
+        </div>
+        <VendorActions device={device} platform={platform} />
       </footer>
     </aside>
   );

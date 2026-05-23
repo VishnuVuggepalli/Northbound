@@ -12,6 +12,8 @@ import { timeAgo } from '@/lib/format';
 import type { ThemeMode } from '@/lib/palette';
 import type { ChangeRequest, Device, Port, User } from '@/types';
 import { cn } from '@/lib/cn';
+import { isWriteLocked, findPlatformForDevice } from '@/lib/devicePolicy';
+import { PLATFORM_REGISTRY } from '@/mocks/registry';
 
 type Mode = 'mine' | 'queue';
 
@@ -52,12 +54,12 @@ export function RequestRow({
   const isAdmin = user.role === 'admin';
   if (!device || !port) return null;
   const after = applyChangeToPort(port, request.requested_changes);
-  // router / vpn devices are read-only regardless of role; the device header
-  // already shows a "Read-only" badge but the queue row would otherwise still
-  // expose Approve & apply. Mirror the badge here so the apply path is a hard
-  // block, not a soft warning. Approve-only stays available so admins can
-  // still triage the queue.
-  const isWriteLocked = device.role === 'router' || device.role === 'vpn';
+  // Write-lock check is centralized in lib/devicePolicy. Combines role
+  // (router/vpn) with platform capability (writable=false on SwOS+FreeBSD).
+  // Approve-only stays available so admins can still triage the queue; the
+  // apply path is a hard block.
+  const platform = findPlatformForDevice(device, PLATFORM_REGISTRY);
+  const writeLocked = isWriteLocked(device, platform);
 
   return (
     <div
@@ -192,7 +194,7 @@ export function RequestRow({
                   <Button kind="ghost" size="sm" onClick={() => onApprove?.(request.id)}>
                     Approve only
                   </Button>
-                  {!isWriteLocked && (
+                  {!writeLocked && (
                     <Button
                       kind="success"
                       size="sm"
@@ -207,7 +209,7 @@ export function RequestRow({
                   </Button>
                 </>
               )}
-              {isAdmin && request.status === 'approved' && !isWriteLocked && (
+              {isAdmin && request.status === 'approved' && !writeLocked && (
                 <Button
                   kind="success"
                   size="sm"

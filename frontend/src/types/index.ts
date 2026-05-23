@@ -40,6 +40,11 @@ export interface Device {
   portCount: number;
   portKind: PortKind;
   reachable: boolean;
+  /**
+   * SSH login user (FreeBSD copy-chip). Optional; the UI defaults to `root`
+   * when absent.
+   */
+  ssh_user?: string;
 }
 
 export interface PortServices {
@@ -74,6 +79,11 @@ export interface Port {
   traffic: number;
   /** Epoch ms of the last change. */
   last_change: number;
+  /**
+   * Optional LLDP neighbor list, populated by drivers that support LLDP. When
+   * undefined or empty, the UI hides the Neighbor row entirely.
+   */
+  neighbors?: Neighbor[];
 }
 
 export type LinkKind = 'fiber' | 'copper';
@@ -133,25 +143,60 @@ export interface PortMap {
  * Onboarding wizard — what the registry surfaces about a platform driver.
  * Mirrors `DriverCapabilities` from `principal-engineering.md` D5/D8.
  */
-export type AuthKind = 'password' | 'ssh_key' | 'api_token';
+export type AuthMethod =
+  | 'password'
+  | 'ssh_key'
+  | 'api_token'
+  | 'snmp_v2c_community'
+  | 'snmp_v3';
+
+/**
+ * Granular driver identifier (e.g. `mikrotik_routeros` vs `mikrotik_swos`).
+ * Distinct from `Platform` which is the broad device-facing category. The
+ * registry uses these IDs because MikroTik ships two different OSes with
+ * different capabilities.
+ */
+export type PlatformId =
+  | 'mikrotik_routeros'
+  | 'mikrotik_swos'
+  | 'arista'
+  | 'pica8'
+  | 'freebsd';
 
 export interface PlatformCapabilities {
   writable: boolean;
   supports_commit_confirm: boolean;
   native_api_available: boolean;
+  /** SwOS-driven addition: device exposes a readable SNMP surface. */
+  supports_snmp_read: boolean;
+  /** Driver can return LLDP neighbors via its primary transport. */
+  supports_lldp: boolean;
   max_concurrency: number;
-  auth_kinds: AuthKind[];
+  auth_methods: AuthMethod[];
 }
 
 export interface PlatformRegistryEntry {
+  /** Granular driver ID — `mikrotik_routeros`, `mikrotik_swos`, etc. */
+  platform_id: PlatformId;
+  /** Broad platform category used by `Device.platform`. */
   platform: Platform;
-  label: string;
+  /** Human-readable label shown in the onboarding wizard. */
+  display_name: string;
   description: string;
   defaultPort: number;
   capabilities: PlatformCapabilities;
+  /**
+   * Template for the vendor's own web UI. `{mgmt_ip}` is the only placeholder.
+   * `null` means there is no web UI (FreeBSD); UI surfaces an SSH chip instead.
+   */
+  web_ui_url_template: string | null;
+  /** Optional short note shown alongside the platform in the wizard. */
+  notes?: string;
 }
 
 export interface OnboardingDraft {
+  platform_id: PlatformId | null;
+  /** Broad category, derived from the selected platform_id. */
   platform: Platform | null;
   name: string;
   env: Environment;
@@ -159,11 +204,24 @@ export interface OnboardingDraft {
   mgmt_ip: string;
   port: number;
   prefer_native_api: boolean;
-  auth_kind: AuthKind;
+  auth_method: AuthMethod;
   username: string;
   password: string;
   ssh_key: string;
   api_token: string;
+  /** SNMP v2c community string (used when auth_method === 'snmp_v2c_community'). */
+  snmp_community: string;
+}
+
+/**
+ * Single LLDP neighbor as normalized by the driver layer (`_lib/lldp.py`).
+ * Display-only — Northbound never uses this to auto-onboard.
+ */
+export interface Neighbor {
+  chassis_id: string;
+  port_id: string;
+  system_name: string | null;
+  system_description?: string | null;
 }
 
 /**

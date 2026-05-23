@@ -1,4 +1,9 @@
-import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import {
+  forwardRef,
+  type AnchorHTMLAttributes,
+  type ButtonHTMLAttributes,
+  type ReactNode,
+} from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/cn';
 
@@ -29,22 +34,84 @@ const buttonStyles = cva(
   },
 );
 
-export interface ButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonStyles> {
+interface CommonButtonProps extends VariantProps<typeof buttonStyles> {
   leftIcon?: ReactNode;
   rightIcon?: ReactNode;
 }
 
-export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { className, kind, size, leftIcon, rightIcon, children, ...rest },
-  ref,
-) {
-  return (
-    <button ref={ref} className={cn(buttonStyles({ kind, size }), className)} {...rest}>
-      {leftIcon}
-      {children}
-      {rightIcon}
-    </button>
-  );
-});
+type ButtonAsButton = CommonButtonProps &
+  ButtonHTMLAttributes<HTMLButtonElement> & {
+    href?: undefined;
+  };
+
+type ButtonAsAnchor = CommonButtonProps &
+  Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'type'> & {
+    /**
+     * When set, the Button renders as `<a>` so middle-click / cmd-click / new
+     * tab work — critical for NOC users opening vendor UIs. `target="_blank"`
+     * automatically gets `rel="noopener noreferrer"`.
+     */
+    href: string;
+  };
+
+export type ButtonProps = ButtonAsButton | ButtonAsAnchor;
+
+function isAnchorProps(props: ButtonProps): props is ButtonAsAnchor {
+  return typeof (props as ButtonAsAnchor).href === 'string';
+}
+
+export const Button = forwardRef<HTMLButtonElement | HTMLAnchorElement, ButtonProps>(
+  function Button(props, ref) {
+    const { className, kind, size, leftIcon, rightIcon, children } = props;
+    const classes = cn(buttonStyles({ kind, size }), className);
+
+    if (isAnchorProps(props)) {
+      const {
+        className: _c,
+        kind: _k,
+        size: _s,
+        leftIcon: _l,
+        rightIcon: _r,
+        children: _ch,
+        target,
+        rel,
+        ...rest
+      } = props;
+      // Force-attach noopener for any _blank target. Don't silently overwrite
+      // a caller-supplied rel.
+      const safeRel =
+        target === '_blank' ? (rel ? `${rel} noopener noreferrer` : 'noopener noreferrer') : rel;
+      return (
+        <a
+          ref={ref as React.Ref<HTMLAnchorElement>}
+          className={classes}
+          target={target}
+          rel={safeRel}
+          {...rest}
+        >
+          {leftIcon}
+          {children}
+          {rightIcon}
+        </a>
+      );
+    }
+
+    const {
+      className: _c,
+      kind: _k,
+      size: _s,
+      leftIcon: _l,
+      rightIcon: _r,
+      children: _ch,
+      href: _h,
+      ...rest
+    } = props;
+    return (
+      <button ref={ref as React.Ref<HTMLButtonElement>} className={classes} {...rest}>
+        {leftIcon}
+        {children}
+        {rightIcon}
+      </button>
+    );
+  },
+);

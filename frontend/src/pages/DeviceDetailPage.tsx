@@ -5,9 +5,12 @@ import { Switch3D } from '@/components/three/Switch3D';
 import { PortStrip } from '@/components/PortStrip';
 import { PortPanel } from '@/components/PortPanel';
 import { DeviceConfigView } from '@/components/DeviceConfigView';
+import { VendorActions } from '@/components/VendorActions';
 import { PlatformIcon } from '@/components/ui/PlatformIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Badge } from '@/components/ui/Badge';
+import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
+import { PLATFORM_REGISTRY } from '@/mocks/registry';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
@@ -63,6 +66,8 @@ export function DeviceDetailPage() {
   }
 
   const selectedPortObj = selectedPort ? ports.find((p) => p.name === selectedPort) : null;
+  const platform = findPlatformForDevice(device, PLATFORM_REGISTRY);
+  const readOnly = isWriteLocked(device, platform);
 
   return (
     <div className="flex h-full flex-col">
@@ -92,13 +97,13 @@ export function DeviceDetailPage() {
                 <StatusDot state={device.reachable ? 'up' : 'down'} size={6} />
                 {device.reachable ? 'reachable' : 'unreachable'}
               </span>
-              {(device.role === 'router' || device.role === 'vpn') && (
-                <Badge variant="warn">Read-only</Badge>
-              )}
+              {readOnly && <Badge variant="warn">Read-only</Badge>}
             </div>
           </div>
         </div>
-        <nav className="flex items-center gap-0.5 rounded-md border border-border bg-bg-elev-1 p-0.5 text-xs">
+        <div className="flex items-center gap-2">
+          <VendorActions device={device} platform={platform} />
+          <nav className="flex items-center gap-0.5 rounded-md border border-border bg-bg-elev-1 p-0.5 text-xs">
           <button
             type="button"
             onClick={() => setTab('ports')}
@@ -120,7 +125,8 @@ export function DeviceDetailPage() {
             <FileText size={11} />
             Config
           </button>
-        </nav>
+          </nav>
+        </div>
       </header>
 
       {tab === 'ports' ? (

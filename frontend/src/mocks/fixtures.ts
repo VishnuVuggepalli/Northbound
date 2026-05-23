@@ -11,6 +11,7 @@ import type {
   AuditEntry,
   ChangeRequest,
   Device,
+  Neighbor,
   Port,
   PortMap,
   PortServices,
@@ -54,14 +55,106 @@ export const DEVICES: readonly Device[] = [
   { id: 'd-lab-leaf-1', name: 'lab-leaf-1', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.11', model: 'CRS326-24G-2S+', portCount: 24, portKind: 'rj45-24-2sfp', reachable: true },
   { id: 'd-lab-leaf-2', name: 'lab-leaf-2', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.12', model: 'CRS326-24G-2S+', portCount: 24, portKind: 'rj45-24-2sfp', reachable: true },
   { id: 'd-lab-leaf-3', name: 'lab-leaf-3', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.13', model: 'CRS326-24G-2S+', portCount: 24, portKind: 'rj45-24-2sfp', reachable: false },
+  // SwOS device — same broad platform as RouterOS leaves; the model string
+  // disambiguates via findPlatformForDevice (model =~ /swos/i).
+  { id: 'd-lab-swos-1', name: 'lab-swos-1', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.15', model: 'CRS112-8G-4S (SwOS)', portCount: 5, portKind: 'sfp-5', reachable: true },
   { id: 'd-lab-spine-1', name: 'lab-spine-1', env: 'lab', platform: 'mikrotik', role: 'spine', mgmt_ip: '10.10.0.10', model: 'CRS305', portCount: 5, portKind: 'sfp-5', reachable: true },
-  { id: 'd-lab-rtr-1', name: 'lab-rtr-1', env: 'lab', platform: 'freebsd', role: 'router', mgmt_ip: '10.10.0.1', model: 'FreeBSD 14.0', portCount: 4, portKind: 'rj45-4', reachable: true },
+  { id: 'd-lab-rtr-1', name: 'lab-rtr-1', env: 'lab', platform: 'freebsd', role: 'router', mgmt_ip: '10.10.0.1', model: 'FreeBSD 14.0', portCount: 4, portKind: 'rj45-4', reachable: true, ssh_user: 'root' },
   { id: 'd-dc-arista-1', name: 'dc-arista-1', env: 'dc', platform: 'arista', role: 'leaf', mgmt_ip: '10.20.0.11', model: '7050X3-32S 100G', portCount: 32, portKind: 'qsfp-32', reachable: true },
   { id: 'd-dc-pica-10g', name: 'dc-pica-10g', env: 'dc', platform: 'pica8', role: 'leaf', mgmt_ip: '10.20.0.12', model: 'PicOS 48×10G', portCount: 48, portKind: 'sfp-48', reachable: true },
   { id: 'd-dc-pica-100g', name: 'dc-pica-100g', env: 'dc', platform: 'pica8', role: 'spine', mgmt_ip: '10.20.0.13', model: 'PicOS 32×100G', portCount: 32, portKind: 'qsfp-32', reachable: true },
-  { id: 'd-dc-rtr-1', name: 'dc-rtr-1', env: 'dc', platform: 'freebsd', role: 'router', mgmt_ip: '10.20.0.1', model: 'FreeBSD 14.0 + FRR', portCount: 4, portKind: 'rj45-4', reachable: true },
-  { id: 'd-dc-vpn-1', name: 'dc-vpn-1', env: 'dc', platform: 'freebsd', role: 'vpn', mgmt_ip: '10.20.0.2', model: 'WireGuard node', portCount: 4, portKind: 'rj45-4', reachable: true },
+  { id: 'd-dc-rtr-1', name: 'dc-rtr-1', env: 'dc', platform: 'freebsd', role: 'router', mgmt_ip: '10.20.0.1', model: 'FreeBSD 14.0 + FRR', portCount: 4, portKind: 'rj45-4', reachable: true, ssh_user: 'root' },
+  { id: 'd-dc-vpn-1', name: 'dc-vpn-1', env: 'dc', platform: 'freebsd', role: 'vpn', mgmt_ip: '10.20.0.2', model: 'WireGuard node', portCount: 4, portKind: 'rj45-4', reachable: true, ssh_user: 'root' },
 ];
+
+/**
+ * Pre-baked LLDP neighbor fixtures. We seed a handful of representative ports
+ * across both environments so the PortPanel Neighbor row has something to
+ * render. SwOS device gets neighbors too — it supports LLDP via SNMP.
+ *
+ * Shape matches the canonical `Neighbor` from `_lib/lldp.py` (chassis_id as
+ * a MAC string, port_id as the remote's port name, system_name FQDN or '—').
+ */
+const NEIGHBORS_BY_DEVICE: Record<string, Record<string, Neighbor[]>> = {
+  'd-lab-leaf-1': {
+    ether1: [
+      {
+        chassis_id: '64:d1:54:a3:00:01',
+        port_id: 'sfp-sfpplus1',
+        system_name: 'lab-spine-1',
+        system_description: 'MikroTik CRS305 RouterOS 7.14',
+      },
+    ],
+    ether14: [
+      {
+        chassis_id: 'aa:bb:cc:00:14:01',
+        port_id: 'eno1',
+        system_name: 'host-104.lab.local',
+        system_description: 'Linux 6.6 (Dell R740)',
+      },
+    ],
+  },
+  'd-lab-spine-1': {
+    'sfp-sfpplus1': [
+      {
+        chassis_id: '64:d1:54:a1:11:01',
+        port_id: 'ether1',
+        system_name: 'lab-leaf-1',
+        system_description: 'MikroTik CRS326 RouterOS 7.14',
+      },
+    ],
+    'sfp-sfpplus2': [
+      {
+        chassis_id: '64:d1:54:a1:11:02',
+        port_id: 'ether1',
+        system_name: 'lab-leaf-2',
+        system_description: 'MikroTik CRS326 RouterOS 7.14',
+      },
+    ],
+  },
+  'd-lab-swos-1': {
+    'sfp-sfpplus1': [
+      {
+        chassis_id: '64:d1:54:a3:00:01',
+        port_id: 'sfp-sfpplus3',
+        system_name: 'lab-spine-1',
+        system_description: 'MikroTik CRS305 RouterOS 7.14',
+      },
+    ],
+  },
+  'd-dc-arista-1': {
+    'Ethernet1/1': [
+      {
+        chassis_id: '74:83:ef:00:c0:01',
+        port_id: 'hu-1/1/1',
+        system_name: 'dc-pica-100g',
+        system_description: 'Pica8 PicOS 4.x',
+      },
+    ],
+    'Ethernet7/1': [
+      {
+        chassis_id: 'aa:bb:cc:dc:07:01',
+        port_id: 'eth0',
+        system_name: 'k8s-worker-7.dc.local',
+        system_description: 'Linux (Supermicro X12)',
+      },
+    ],
+  },
+  'd-dc-pica-10g': {
+    'te-1/1/1': [
+      {
+        chassis_id: '74:83:ef:00:c0:02',
+        port_id: 'hu-1/1/2',
+        system_name: 'dc-pica-100g',
+        system_description: 'Pica8 PicOS 4.x',
+      },
+    ],
+  },
+};
+
+function neighborsFor(deviceId: string, portName: string): Neighbor[] | undefined {
+  return NEIGHBORS_BY_DEVICE[deviceId]?.[portName];
+}
 
 export function portNameFor(device: Device, idx: number): string {
   switch (device.platform) {
@@ -127,9 +220,11 @@ function generatePorts(): PortMap {
             ).join(':')
           : null;
 
+      const portName = portNameFor(device, i);
+      const neighbors = neighborsFor(device.id, portName);
       ports.push({
         device_id: device.id,
-        name: portNameFor(device, i),
+        name: portName,
         index: i,
         state,
         admin_up: state !== 'disabled',
@@ -147,6 +242,7 @@ function generatePorts(): PortMap {
         services,
         traffic: state === 'up' ? r() * 0.9 + 0.05 : 0,
         last_change: Date.now() - Math.floor(r() * 1000 * 60 * 60 * 24 * 30),
+        ...(neighbors ? { neighbors } : {}),
       });
     }
     map[device.id] = ports;
