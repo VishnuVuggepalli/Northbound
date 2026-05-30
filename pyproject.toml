@@ -19,6 +19,14 @@ dependencies = [
  "aiosqlite>=0.20",
  "alembic>=1.13",
  "cryptography>=43.0",
+ # Auth layer: JWT (jose), password hashing (passlib/bcrypt), login throttle (slowapi).
+ # Standard, battle-tested — no hand-rolled crypto/JWT.
+ "python-jose[cryptography]>=3.3",
+ "passlib[bcrypt]>=1.7",
+ # bcrypt pinned <4.1: passlib 1.7.4 is incompatible with bcrypt >=4.1 (backend
+ # introspection breaks) and bcrypt 5.0 hard-raises on >72-byte secrets.
+ "bcrypt>=4.0,<4.1",
+ "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

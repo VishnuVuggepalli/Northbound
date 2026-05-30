@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # Fernet master key (urlsafe-base64, 32 bytes). Required outside dev.
     master_key: str | None = Field(default=None)
 
+    # JWT signing secret (env NB_SECRET_KEY). Required outside dev; in dev an
+    # ephemeral key is minted with a warning (mirrors the master-key policy).
+    secret_key: str | None = Field(default=None)
+    jwt_algorithm: str = Field(default="HS256")
+    jwt_expiry_minutes: int = Field(default=480)
+
 
 @lru_cache
 def get_settings() -> Settings:

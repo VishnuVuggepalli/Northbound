@@ -1,0 +1,186 @@
+"""Auth layer + /api/auth tests: password, JWT, login, throttle.
+
+The FastAPI app is exercised via ``httpx.AsyncClient`` over ``ASGITransport``.
+``get_session`` is overridden to bind handlers to the in-memory test session.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import os
+from collections.abc import AsyncIterator
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+# Pin the signing secret before settings are first read (deterministic JWTs).
+os.environ["NB_SECRET_KEY"] = "unit-test-secret-key"
+
+from northbound.api.limiter import limiter
+from northbound.auth.jwt import (
+    InvalidToken,
+    create_access_token,
+    decode_token,
+)
+from northbound.auth.password import hash_password, verify_password
+from northbound.config import Settings, get_settings
+from northbound.db import get_session
+from northbound.main import app
+from northbound.models.enums import UserRole
+from northbound.models.user import User
+
+get_settings.cache_clear()
+
+_TEST_SETTINGS = Settings(environment="development", secret_key="unit-test-secret-key")
+
+
+# --------------------------------------------------------------------------- #
+# Fixtures
+# --------------------------------------------------------------------------- #
+@pytest_asyncio.fixture
+async def seeded_session(db_session: AsyncSession) -> AsyncIterator[AsyncSession]:
+    """Session pre-loaded with an admin and a requester user."""
+    db_session.add_all(
+        [
+            User(
+                username="admin",
+                password_hash=hash_password("admin-pw"),
+                role=UserRole.ADMIN,
+            ),
+            User(
+                username="alice",
+                password_hash=hash_password("alice-pw"),
+                role=UserRole.REQUESTER,
+                email="alice@example.com",
+            ),
+        ]
+    )
+    await db_session.flush()
+    yield db_session
+
+
+@pytest_asyncio.fixture
+async def client(seeded_session: AsyncSession) -> AsyncIterator[AsyncClient]:
+    """AsyncClient bound to the app with ``get_session`` overridden, limiter reset."""
+
+    async def _override_get_session() -> AsyncIterator[AsyncSession]:
+        yield seeded_session
+
+    app.dependency_overrides[get_session] = _override_get_session
+    # Reset the in-memory rate-limit storage so tests don't leak attempts.
+    limiter.reset()
+    transport = ASGITransport(app=app)
+    try:
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+        limiter.reset()
+
+
+# --------------------------------------------------------------------------- #
+# Password hashing
+# --------------------------------------------------------------------------- #
+def test_password_hash_roundtrip() -> None:
+    hashed = hash_password("s3cret")
+    assert hashed != "s3cret"  # never stored in plaintext
+    assert verify_password("s3cret", hashed) is True
+
+
+def test_password_wrong_fails() -> None:
+    hashed = hash_password("s3cret")
+    assert verify_password("nope", hashed) is False
+
+
+def test_password_verify_malformed_hash_returns_false() -> None:
+    assert verify_password("anything", "not-a-real-hash") is False
+
+
+# --------------------------------------------------------------------------- #
+# JWT
+# --------------------------------------------------------------------------- #
+def test_jwt_create_decode_roundtrip() -> None:
+    token = create_access_token(sub="user-1", role=UserRole.ADMIN, settings=_TEST_SETTINGS)
+    payload = decode_token(token, settings=_TEST_SETTINGS)
+    assert payload.sub == "user-1"
+    assert payload.role == UserRole.ADMIN
+
+
+def test_jwt_expired_token_rejected() -> None:
+    token = create_access_token(
+        sub="user-1",
+        role=UserRole.ADMIN,
+        expiry=dt.timedelta(seconds=-1),
+        settings=_TEST_SETTINGS,
+    )
+    with pytest.raises(InvalidToken):
+        decode_token(token, settings=_TEST_SETTINGS)
+
+
+def test_jwt_tampered_token_rejected() -> None:
+    token = create_access_token(sub="user-1", role=UserRole.ADMIN, settings=_TEST_SETTINGS)
+    tampered = token[:-3] + ("abc" if token[-3:] != "abc" else "xyz")
+    with pytest.raises(InvalidToken):
+        decode_token(tampered, settings=_TEST_SETTINGS)
+
+
+def test_jwt_wrong_secret_rejected() -> None:
+    token = create_access_token(sub="user-1", role=UserRole.ADMIN, settings=_TEST_SETTINGS)
+    other = Settings(environment="development", secret_key="a-different-secret")
+    with pytest.raises(InvalidToken):
+        decode_token(token, settings=other)
+
+
+# --------------------------------------------------------------------------- #
+# POST /api/auth/login
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_login_valid_returns_token(client: AsyncClient) -> None:
+    resp = await client.post("/api/auth/login", json={"username": "admin", "password": "admin-pw"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["token_type"] == "bearer"
+    assert body["role"] == "admin"
+    assert body["username"] == "admin"
+    assert body["access_token"]
+
+
+@pytest.mark.asyncio
+async def test_login_bad_password_401_generic(client: AsyncClient) -> None:
+    resp = await client.post("/api/auth/login", json={"username": "admin", "password": "wrong"})
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Incorrect username or password"
+
+
+@pytest.mark.asyncio
+async def test_login_unknown_user_same_message_no_enumeration(client: AsyncClient) -> None:
+    resp = await client.post("/api/auth/login", json={"username": "ghost", "password": "x"})
+    assert resp.status_code == 401
+    # Identical message to the bad-password case → no user enumeration.
+    assert resp.json()["detail"] == "Incorrect username or password"
+
+
+@pytest.mark.asyncio
+async def test_logout_returns_204(client: AsyncClient) -> None:
+    resp = await client.post("/api/auth/logout")
+    assert resp.status_code == 204
+
+
+# --------------------------------------------------------------------------- #
+# Login throttle (slowapi, IP-based: 5 / 5min)
+# --------------------------------------------------------------------------- #
+def test_login_limiter_registered_on_app() -> None:
+    # The limiter must be wired into app.state for slowapi to enforce limits.
+    assert app.state.limiter is limiter
+
+
+@pytest.mark.asyncio
+async def test_login_throttle_sixth_attempt_429(client: AsyncClient) -> None:
+    """5 attempts allowed in the window; the 6th is rejected with 429."""
+    last_status = None
+    for _ in range(6):
+        resp = await client.post("/api/auth/login", json={"username": "admin", "password": "wrong"})
+        last_status = resp.status_code
+    assert last_status == 429
