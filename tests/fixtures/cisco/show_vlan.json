@@ -1,0 +1,37 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "body": {
+      "TABLE_vlanbrief": {
+        "ROW_vlanbrief": [
+          {
+            "vlanshowbr-vlanid": 1,
+            "vlanshowbr-vlanname": "default",
+            "vlanshowbr-vlanstate": "active"
+          },
+          {
+            "vlanshowbr-vlanid": 10,
+            "vlanshowbr-vlanname": "servers",
+            "vlanshowbr-vlanstate": "active"
+          },
+          {
+            "vlanshowbr-vlanid": 100,
+            "vlanshowbr-vlanname": "core-native",
+            "vlanshowbr-vlanstate": "active"
+          },
+          {
+            "vlanshowbr-vlanid": 200,
+            "vlanshowbr-vlanname": "uplink-a",
+            "vlanshowbr-vlanstate": "active"
+          },
+          {
+            "vlanshowbr-vlanid": 300,
+            "vlanshowbr-vlanname": "uplink-b",
+            "vlanshowbr-vlanstate": "active"
+          }
+        ]
+      }
+    }
+  },
+  "id": 1
+}

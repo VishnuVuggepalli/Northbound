@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "body": {
+      "header_str": "Cisco Nexus Operating System (NX-OS) Software\n",
+      "bios_ver_str": "07.69",
+      "kickstart_ver_str": "9.3(8)",
+      "nxos_ver_str": "9.3(8)",
+      "chassis_id": "Nexus9000 C93180YC-EX Chassis",
+      "module_id": "48x10/25G/32x100G Ethernet Module",
+      "cpu_name": "Intel(R) Xeon(R) CPU",
+      "memory": 24632036,
+      "proc_board_id": "FDO12345678",
+      "host_name": "nexus-leaf-01"
+    }
+  },
+  "id": 1
+}

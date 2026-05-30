@@ -4,6 +4,7 @@ from pydantic import BaseModel
 # Importing a driver module triggers @register at import time.
 # Order is alphabetical to keep /api/platforms output stable.
 import northbound.drivers.arista
+import northbound.drivers.cisco
 import northbound.drivers.mock
 import northbound.drivers.pica8  # noqa: F401  (registers)
 from northbound.api import platforms

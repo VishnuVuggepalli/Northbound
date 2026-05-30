@@ -1,0 +1,33 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "body": {
+      "TABLE_interface": {
+        "ROW_interface": [
+          {
+            "interface": "Ethernet1/1",
+            "oper_mode": "access",
+            "access_vlan": 10,
+            "native_vlan": 1,
+            "trunk_vlans": "1-4094"
+          },
+          {
+            "interface": "Ethernet1/2",
+            "oper_mode": "access",
+            "access_vlan": 1,
+            "native_vlan": 1,
+            "trunk_vlans": "1-4094"
+          },
+          {
+            "interface": "Ethernet1/4",
+            "oper_mode": "trunk",
+            "access_vlan": 1,
+            "native_vlan": 100,
+            "trunk_vlans": "100,200,300"
+          }
+        ]
+      }
+    }
+  },
+  "id": 1
+}

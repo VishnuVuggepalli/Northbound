@@ -79,6 +79,71 @@ def _build_arista_http_client() -> HttpxClient:
 
 
 # ---------------------------------------------------------------------------
+# Cisco NX-OS — mock the NX-API HTTPX transport with canned JSON-RPC responses
+# ---------------------------------------------------------------------------
+
+
+def _cisco_fixture(name: str) -> object:
+    """Return the parsed JSON-RPC envelope for a Cisco NX-API fixture."""
+    return json.loads((_FIXTURE_DIR / "cisco" / name).read_text())
+
+
+def _cisco_handler(request: httpx.Request) -> httpx.Response:
+    """Route NX-API ``cli`` / ``cli_ascii`` requests to canned fixtures.
+
+    NX-API takes a single ``cmd`` (not a list). Read commands map to the
+    fixture envelopes; config / checkpoint / rollback commands return a
+    null-result envelope (NX-OS returns no body on successful config).
+    """
+    body = json.loads(request.content.decode("utf-8"))
+    method = body.get("method", "cli")
+    cmd = str(body.get("params", {}).get("cmd", ""))
+    rid = body.get("id", 1)
+
+    fixture_map = {
+        "show interface": "show_interface.json",
+        "show interface switchport": "show_interface_switchport.json",
+        "show vlan": "show_vlan.json",
+        "show lldp neighbors detail": "show_lldp_neighbors_detail.json",
+        "show version": "show_version.json",
+    }
+    if cmd in fixture_map:
+        env = _cisco_fixture(fixture_map[cmd])
+        return httpx.Response(200, json=env)
+    if cmd == "show hostname":
+        return httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "result": {"body": {"hostname": "nexus-leaf-01"}}, "id": rid},
+        )
+    if cmd == "show clock":
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "result": {"body": {"simple_time": "12:00:00 UTC"}},
+                "id": rid,
+            },
+        )
+    if cmd == "show running-config" and method == "cli_ascii":
+        return httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "result": {"msg": "! Cisco NX-OS running-config\nhostname nexus-leaf-01\n"},
+                "id": rid,
+            },
+        )
+    # Config / checkpoint / rollback commands: NX-OS returns null result.
+    return httpx.Response(200, json={"jsonrpc": "2.0", "result": None, "id": rid})
+
+
+def _build_cisco_http_client() -> HttpxClient:
+    client = HttpxClient(HttpxParams(base_url="https://cisco.test", verify_tls=False))
+    client._client._transport = httpx.MockTransport(_cisco_handler)  # type: ignore[attr-defined]
+    return client
+
+
+# ---------------------------------------------------------------------------
 # Pica8 — mock the ncclient manager with a fake that serves the XML fixture
 # ---------------------------------------------------------------------------
 
@@ -144,6 +209,8 @@ def driver_factory() -> Callable[[type[Driver]], Driver]:
     def factory(cls: type[Driver]) -> Driver:
         if cls.platform_id == "arista":
             return cls(conn, creds, http=_build_arista_http_client())  # type: ignore[call-arg]
+        if cls.platform_id == "cisco":
+            return cls(conn, creds, http=_build_cisco_http_client())  # type: ignore[call-arg]
         if cls.platform_id == "pica8":
             return cls(conn, creds, netconf=_build_pica8_netconf_client())  # type: ignore[call-arg]
         return cls(conn, creds)
