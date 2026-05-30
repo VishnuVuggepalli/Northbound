@@ -7,6 +7,8 @@ the harness is wired correctly.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
 # Importing main triggers driver registrations.
@@ -16,8 +18,6 @@ from northbound.drivers.registry import all_platforms
 from northbound.schemas.driver import (
     ApplyResult,
     ConfigDiff,
-    ConnectionParams,
-    Credentials,
     Neighbor,
     PortChange,
     PortState,
@@ -29,16 +29,15 @@ def _all_driver_classes() -> list[type[Driver]]:
     return list(all_platforms().values())
 
 
-def _instantiate(cls: type[Driver]) -> Driver:
-    return cls(
-        ConnectionParams(host="127.0.0.1"),
-        Credentials(username="x", password="y"),
-    )
-
-
 @pytest.fixture(params=_all_driver_classes(), ids=lambda c: c.platform_id)
-def driver(request: pytest.FixtureRequest) -> Driver:
-    return _instantiate(request.param)
+def driver(
+    request: pytest.FixtureRequest,
+    driver_factory: Callable[[type[Driver]], Driver],
+) -> Driver:
+    # driver_factory (conftest.py) injects mocked transports for the
+    # network-backed drivers (Arista eAPI, Pica8 NETCONF) so the contract
+    # suite never touches a live switch. MockDriver passes through untouched.
+    return driver_factory(request.param)
 
 
 @pytest.mark.asyncio
