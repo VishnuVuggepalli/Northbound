@@ -9,7 +9,7 @@ import northbound.drivers.arista
 import northbound.drivers.cisco
 import northbound.drivers.mock
 import northbound.drivers.pica8  # noqa: F401  (registers)
-from northbound.api import auth, platforms, users
+from northbound.api import auth, devices, platforms, users
 from northbound.api.limiter import limiter
 
 
@@ -37,6 +37,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 app.include_router(platforms.router)
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(devices.router)
 
 
 @app.get("/health", response_model=HealthResponse)
