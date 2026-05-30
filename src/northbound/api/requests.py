@@ -1,0 +1,167 @@
+"""Change-requests router — file / approve / apply / reject / confirm.
+
+Requesters may create requests and view their own; admins approve/reject/apply/
+confirm. Service-layer exceptions are mapped to HTTP codes here (the single
+HTTP boundary): illegal transitions → 409, drift → 409, apply failure → 502,
+read-only target → 403 (raised inside the service as an HTTPException already).
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from northbound.api.deps import get_current_user, require_admin
+from northbound.db import get_session
+from northbound.models.change_request import ChangeRequest
+from northbound.models.device import Device
+from northbound.models.enums import ChangeRequestStatus
+from northbound.models.user import User
+from northbound.schemas.request import RequestCreateIn, RequestOut, RequestRejectIn
+from northbound.services import change_apply, requests
+from northbound.services.change_apply import ApplyError, ApplyFailed, StateDrift
+from northbound.services.requests import IllegalTransition, RequestError
+
+router = APIRouter(prefix="/api/requests", tags=["requests"])
+
+
+async def _load_request(session: AsyncSession, request_id: str) -> ChangeRequest:
+    req = await requests.get_request(session, request_id)
+    if req is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+    return req
+
+
+async def _load_device(session: AsyncSession, device_id: str) -> Device:
+    device = await session.scalar(select(Device).where(Device.id == device_id))
+    if device is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
+    return device
+
+
+@router.post("", response_model=RequestOut, status_code=status.HTTP_201_CREATED)
+async def create_request(
+    body: RequestCreateIn,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """File a change request. 403 if the target device is read-only (fail fast)."""
+    device = await _load_device(session, body.device_id)
+    req = await requests.create_request(
+        session,
+        device=device,
+        port_name=body.port_name,
+        requested_changes=body.requested_changes,
+        reason=body.reason,
+        user=user,
+    )
+    return RequestOut.from_model(req)
+
+
+@router.get("", response_model=list[RequestOut])
+async def list_requests(
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    mine: bool = False,
+    request_status: ChangeRequestStatus | None = None,
+) -> list[RequestOut]:
+    """List requests. ``?mine=true`` filters to the caller; ``?request_status=``
+    filters by state."""
+    rows = await requests.list_requests(
+        session,
+        mine_user_id=user.id if mine else None,
+        status=request_status,
+    )
+    return [RequestOut.from_model(r) for r in rows]
+
+
+@router.get("/{request_id}", response_model=RequestOut)
+async def get_request(
+    request_id: str,
+    _user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """Request detail, including the rendered diff if available."""
+    req = await _load_request(session, request_id)
+    return RequestOut.from_model(req)
+
+
+@router.post("/{request_id}/approve", response_model=RequestOut)
+async def approve_request(
+    request_id: str,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """Approve (no apply). pending → approved."""
+    req = await _load_request(session, request_id)
+    try:
+        req = await requests.approve_request(session, req, admin)
+    except IllegalTransition as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return RequestOut.from_model(req)
+
+
+@router.post("/{request_id}/reject", response_model=RequestOut)
+async def reject_request(
+    request_id: str,
+    body: RequestRejectIn,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """Reject with a required comment. pending → rejected."""
+    req = await _load_request(session, request_id)
+    try:
+        req = await requests.reject_request(session, req, admin, body.comment)
+    except IllegalTransition as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except RequestError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return RequestOut.from_model(req)
+
+
+@router.post("/{request_id}/apply", response_model=RequestOut)
+async def apply_request(
+    request_id: str,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """Apply an approved (or pending, approve+apply shortcut) request via the driver."""
+    req = await _load_request(session, request_id)
+    device = await _load_device(session, req.device_id)
+    try:
+        req = await change_apply.apply_request(session, req, device, admin)
+    except StateDrift as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "STATE_DRIFT", "message": str(exc)},
+        ) from exc
+    except ApplyFailed as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except IllegalTransition as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ApplyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return RequestOut.from_model(req)
+
+
+@router.post("/{request_id}/confirm", response_model=RequestOut)
+async def confirm_request(
+    request_id: str,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """Confirm a commit-confirm apply within its window. awaiting_confirm → applied."""
+    req = await _load_request(session, request_id)
+    device = await _load_device(session, req.device_id)
+    try:
+        req = await change_apply.confirm_request(session, req, device, admin)
+    except ApplyFailed as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except IllegalTransition as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ApplyError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return RequestOut.from_model(req)

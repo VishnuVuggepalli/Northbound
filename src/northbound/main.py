@@ -9,7 +9,7 @@ import northbound.drivers.arista
 import northbound.drivers.cisco
 import northbound.drivers.mock
 import northbound.drivers.pica8  # noqa: F401  (registers)
-from northbound.api import auth, devices, platforms, users
+from northbound.api import audit, auth, devices, platforms, ports, requests, users
 from northbound.api.limiter import limiter
 
 
@@ -38,6 +38,9 @@ app.include_router(platforms.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(devices.router)
+app.include_router(ports.router)
+app.include_router(requests.router)
+app.include_router(audit.router)
 
 
 @app.get("/health", response_model=HealthResponse)

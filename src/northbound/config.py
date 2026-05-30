@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256")
     jwt_expiry_minutes: int = Field(default=480)
 
+    # Commit-confirm window (seconds) for platforms with native commit-confirm
+    # (Arista session timer, Pica8 confirmed-commit). The apply flow passes this
+    # to ``driver.apply_change``; the reconciler (next wave) honours the deadline.
+    commit_confirm_seconds: int = Field(default=60, ge=1)
+
+    # Live port-state cache TTL (seconds). principal-engineering D2: 30s.
+    port_state_ttl_seconds: float = Field(default=30.0, gt=0)
+    # Max distinct devices held in the in-mem port-state cache.
+    port_state_cache_capacity: int = Field(default=512, ge=1)
+
 
 @lru_cache
 def get_settings() -> Settings:
