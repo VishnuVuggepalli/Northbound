@@ -9,8 +9,7 @@ import { isWriteLocked, vendorWebUiUrl, findPlatformForDevice } from './devicePo
 import { PLATFORM_REGISTRY, findPlatform } from '@/mocks/registry';
 import type { Device, DeviceRole, PlatformRegistryEntry } from '@/types';
 
-const routerOs = findPlatform('mikrotik_routeros')!;
-const swos = findPlatform('mikrotik_swos')!;
+const cisco = findPlatform('cisco')!;
 const arista = findPlatform('arista')!;
 const freebsd = findPlatform('freebsd')!;
 
@@ -19,10 +18,10 @@ function dev(role: DeviceRole, overrides: Partial<Device> = {}): Device {
     id: 'd-test',
     name: 'test',
     env: 'lab',
-    platform: 'mikrotik',
+    platform: 'cisco',
     role,
     mgmt_ip: '10.10.0.99',
-    model: 'CRS326',
+    model: 'Catalyst 9300-24T',
     portCount: 24,
     portKind: 'rj45-24-2sfp',
     reachable: true,
@@ -39,21 +38,17 @@ describe('isWriteLocked', () => {
     expect(isWriteLocked(dev('vpn'), freebsd)).toBe(true);
   });
 
-  test('returns true on writable=false platform (SwOS)', () => {
-    expect(isWriteLocked(dev('leaf'), swos)).toBe(true);
-  });
-
   test('returns true on writable=false platform (FreeBSD leaf — hypothetical)', () => {
     expect(isWriteLocked(dev('leaf'), freebsd)).toBe(true);
   });
 
   test('returns false for writable platform leaf', () => {
-    expect(isWriteLocked(dev('leaf'), routerOs)).toBe(false);
+    expect(isWriteLocked(dev('leaf'), cisco)).toBe(false);
     expect(isWriteLocked(dev('leaf'), arista)).toBe(false);
   });
 
   test('returns false for writable platform spine', () => {
-    expect(isWriteLocked(dev('spine'), routerOs)).toBe(false);
+    expect(isWriteLocked(dev('spine'), cisco)).toBe(false);
   });
 
   test('returns false when platform is null and role is writable', () => {
@@ -66,9 +61,9 @@ describe('isWriteLocked', () => {
 });
 
 describe('vendorWebUiUrl', () => {
-  test('substitutes {mgmt_ip} for RouterOS', () => {
-    const url = vendorWebUiUrl(dev('leaf', { mgmt_ip: '10.10.0.11' }), routerOs);
-    expect(url).toBe('http://10.10.0.11/webfig/');
+  test('substitutes {mgmt_ip} for Cisco', () => {
+    const url = vendorWebUiUrl(dev('leaf', { mgmt_ip: '10.10.0.11' }), cisco);
+    expect(url).toBe('https://10.10.0.11/');
   });
 
   test('returns null for FreeBSD (no web UI)', () => {
@@ -89,20 +84,18 @@ describe('vendorWebUiUrl', () => {
 });
 
 describe('findPlatformForDevice', () => {
-  test('disambiguates SwOS from RouterOS via model regex', () => {
-    const swosDevice = dev('leaf', { model: 'CRS112-8G-4S (SwOS)' });
-    const got = findPlatformForDevice(swosDevice, PLATFORM_REGISTRY);
-    expect(got?.platform_id).toBe('mikrotik_swos');
+  test('maps Cisco devices 1:1', () => {
+    const ciscoDev = dev('leaf', { platform: 'cisco', model: 'Catalyst 9300-24T' });
+    expect(findPlatformForDevice(ciscoDev, PLATFORM_REGISTRY)?.platform_id).toBe('cisco');
   });
 
-  test('defaults MikroTik devices to RouterOS when model has no SwOS marker', () => {
-    const routerOsDevice = dev('leaf', { model: 'CRS326-24G-2S+' });
-    const got = findPlatformForDevice(routerOsDevice, PLATFORM_REGISTRY);
-    expect(got?.platform_id).toBe('mikrotik_routeros');
-  });
-
-  test('maps non-MikroTik platforms 1:1', () => {
+  test('maps Arista platforms 1:1', () => {
     const aristaDev = dev('leaf', { platform: 'arista', model: '7050X3' });
     expect(findPlatformForDevice(aristaDev, PLATFORM_REGISTRY)?.platform_id).toBe('arista');
+  });
+
+  test('maps Pica8 platforms 1:1', () => {
+    const picaDev = dev('leaf', { platform: 'pica8', model: 'PicOS 48x10G' });
+    expect(findPlatformForDevice(picaDev, PLATFORM_REGISTRY)?.platform_id).toBe('pica8');
   });
 });

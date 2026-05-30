@@ -10,10 +10,11 @@ interface PlatformIconProps {
 }
 
 const PLATFORM_TINT: Record<Platform, string> = {
-  mikrotik: 'text-[oklch(0.78_0.18_145)] bg-[oklch(0.78_0.18_145/0.12)]',
+  cisco: 'text-[oklch(0.74_0.16_200)] bg-[oklch(0.74_0.16_200/0.12)]',
   arista: 'text-[oklch(0.72_0.18_240)] bg-[oklch(0.72_0.18_240/0.12)]',
   pica8: 'text-[oklch(0.78_0.18_55)] bg-[oklch(0.78_0.18_55/0.12)]',
   freebsd: 'text-[oklch(0.72_0.16_300)] bg-[oklch(0.72_0.16_300/0.12)]',
+  mock: 'text-[oklch(0.70_0.02_250)] bg-[oklch(0.70_0.02_250/0.12)]',
 };
 
 export function PlatformIcon({ platform, role, size = 14, className }: PlatformIconProps) {

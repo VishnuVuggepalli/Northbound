@@ -4,12 +4,12 @@ import { Wordmark } from '@/components/ui/Wordmark';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useAuthStore } from '@/store/auth';
-import { login as loginApi } from '@/api/client';
+import { apiClient, USE_MOCKS } from '@/api';
 import { pushToast } from '@/store/toast';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const login = useAuthStore((s) => s.login);
+  const setSession = useAuthStore((s) => s.setSession);
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('••••••••');
   const [submitting, setSubmitting] = useState(false);
@@ -18,8 +18,12 @@ export function LoginPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const result = await loginApi(username, password);
-      login(result.user.username);
+      const result = await apiClient.login(username, password);
+      setSession({
+        access_token: result.access_token,
+        username: result.user.username,
+        role: result.user.role,
+      });
       navigate('/');
     } catch (err) {
       pushToast({
@@ -76,10 +80,12 @@ export function LoginPage() {
           {submitting ? 'Signing in…' : 'Sign in'}
         </Button>
 
-        <div className="rounded-md border border-border bg-bg-elev-1 px-3 py-2 text-xs text-fg-muted">
-          Try <code className="nb-mono text-accent">admin</code> or{' '}
-          <code className="nb-mono text-accent">alice</code>. Mock auth — any password works.
-        </div>
+        {USE_MOCKS && (
+          <div className="rounded-md border border-border bg-bg-elev-1 px-3 py-2 text-xs text-fg-muted">
+            Try <code className="nb-mono text-accent">admin</code> or{' '}
+            <code className="nb-mono text-accent">alice</code>. Mock auth — any password works.
+          </div>
+        )}
 
         <div className="text-center text-[10px] uppercase tracking-wider text-fg-subtle">
           v0.1 · internal

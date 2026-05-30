@@ -114,9 +114,7 @@ export function RequestRow({
                 Apply runs <em>backup → diff → push</em>
                 {device.platform === 'freebsd'
                   ? ' (FreeBSD is read-only)'
-                  : device.platform === 'mikrotik'
-                    ? ' with safe-mode + manual rollback (no commit-confirm)'
-                    : ' with commit-confirm 60s'}
+                  : ' with commit-confirm 60s'}
                 .
               </span>
             </div>

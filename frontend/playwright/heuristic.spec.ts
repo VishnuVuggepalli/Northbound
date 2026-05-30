@@ -46,7 +46,7 @@ const ROUTES: readonly RouteSpec[] = [
   { path: '/env/lab/devices/d-lab-leaf-1', role: 'either' },
   { path: '/env/dc/devices/d-dc-arista-1', role: 'either' },
   { path: '/env/dc/devices/d-dc-pica-10g', role: 'either' },
-  { path: '/env/lab/search?q=ether14', role: 'either' },
+  { path: '/env/lab/search?q=Ethernet14', role: 'either' },
 ];
 
 const SCREENSHOT_DIR = path.resolve(__dirname, 'screenshots');
@@ -194,7 +194,7 @@ test('onboarding wizard: keyboard journey', async ({ page }) => {
   // Step 1: Platform — tab to first platform tile and press Enter.
   await page.keyboard.press('Tab'); // skip skip-link if any
   // click first platform card directly to avoid order coupling
-  const firstPlatform = page.getByRole('button', { name: /MikroTik|Arista|Pica|FreeBSD/i }).first();
+  const firstPlatform = page.getByRole('button', { name: /Cisco|Arista|Pica|FreeBSD/i }).first();
   await firstPlatform.focus();
   await firstPlatform.press('Enter');
 

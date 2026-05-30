@@ -12,10 +12,10 @@ const device: Device = {
   id: 'd1',
   name: 'lab-leaf-1',
   env: 'lab',
-  platform: 'mikrotik',
+  platform: 'cisco',
   role: 'leaf',
   mgmt_ip: '10.10.0.11',
-  model: 'CRS326',
+  model: 'Catalyst 9300-24T',
   portCount: 24,
   portKind: 'rj45-24-2sfp',
   reachable: true,
@@ -23,7 +23,7 @@ const device: Device = {
 
 const port: Port = {
   device_id: 'd1',
-  name: 'ether1',
+  name: 'Ethernet1',
   index: 0,
   state: 'up',
   admin_up: true,
@@ -66,10 +66,11 @@ describe('config helpers', () => {
     expect(out.tagged_vlans).not.toBe(port.tagged_vlans);
   });
 
-  it('renderConfigSnippet emits MikroTik-flavored commands', () => {
+  it('renderConfigSnippet emits Cisco IOS-flavored commands', () => {
     const snippet = renderConfigSnippet(device, port);
-    expect(snippet).toContain('/interface ethernet');
-    expect(snippet).toContain('vlan-ids=100');
+    expect(snippet).toContain('interface Ethernet1');
+    // port has a tagged vlan (200), so it renders as a trunk with native vlan 100.
+    expect(snippet).toContain('switchport trunk native vlan 100');
   });
 
   it('renderFullConfig produces multiple lines', () => {

@@ -11,7 +11,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import * as api from './client';
+import { apiClient as api } from './index';
 import type { ChangeRequestStatus, Environment } from '@/types';
 
 export const queryKeys = {
@@ -117,6 +117,14 @@ export function useApplyRequest() {
   return useMutation({
     mutationFn: ({ id, reviewer }: { id: string; reviewer: string }) =>
       api.applyRequest(id, reviewer),
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
+export function useConfirmRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.confirmRequest(id),
     onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
   });
 }

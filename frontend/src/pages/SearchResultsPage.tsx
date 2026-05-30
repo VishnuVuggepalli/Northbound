@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
-import { searchPorts } from '@/api/client';
+import { apiClient } from '@/api';
 import { useUIStore } from '@/store/ui';
 import { useThemeStore } from '@/store/theme';
 import { VlanChip } from '@/components/ui/VlanChip';
@@ -18,7 +18,7 @@ export function SearchResultsPage() {
 
   useEffect(() => {
     if (!env || (env !== 'lab' && env !== 'dc')) return;
-    void searchPorts(env, q).then(setResults);
+    void apiClient.searchPorts(env, q).then(setResults).catch(() => setResults([]));
   }, [env, q]);
 
   if (env !== 'lab' && env !== 'dc') return null;

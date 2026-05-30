@@ -8,7 +8,12 @@
  */
 
 export type Environment = 'lab' | 'dc';
-export type Platform = 'mikrotik' | 'arista' | 'pica8' | 'freebsd';
+/**
+ * Broad device-facing platform category. Matches the real backend's
+ * `/api/platforms` set: arista, cisco, pica8, freebsd (+ `mock` for testing).
+ * MikroTik was dropped when the backend driver set was finalized.
+ */
+export type Platform = 'arista' | 'cisco' | 'pica8' | 'freebsd' | 'mock';
 export type DeviceRole = 'leaf' | 'spine' | 'router' | 'vpn';
 export type UserRole = 'admin' | 'requester';
 export type PortState = 'up' | 'down' | 'disabled';
@@ -17,7 +22,7 @@ export type PortState = 'up' | 'down' | 'disabled';
  * Port physical layout — drives 3D rendering and 2D card density.
  *
  * - `rj45-24-2sfp`  → 24× RJ45 in 2 rows of 12 + 2× SFP+ on the right
- * - `sfp-5`         → 5× SFP+ inline (MikroTik spine)
+ * - `sfp-5`         → 5× SFP+ inline (legacy compact-spine layout)
  * - `qsfp-32`       → 32× QSFP28 in 2 rows of 16 (Arista / Pica8 100G)
  * - `sfp-48`        → 48× SFP+ in 4 rows of 12 (Pica8 10G)
  * - `rj45-4`        → 4× RJ45 (FreeBSD-style 1U server)
@@ -89,11 +94,20 @@ export interface Port {
 export type LinkKind = 'fiber' | 'copper';
 export type TopologyLink = readonly [from: string, to: string, kind: LinkKind];
 
+/**
+ * Lifecycle states, matching the backend's `ChangeRequestStatus`. `applying`,
+ * `awaiting_confirm` and `reverted` are the commit-confirm transient states the
+ * real apply flow walks through; the mock client only ever emits the terminal
+ * subset.
+ */
 export type ChangeRequestStatus =
   | 'pending'
   | 'approved'
+  | 'applying'
+  | 'awaiting_confirm'
   | 'applied'
   | 'rejected'
+  | 'reverted'
   | 'failed';
 
 export interface RequestedChanges {
@@ -151,17 +165,12 @@ export type AuthMethod =
   | 'snmp_v3';
 
 /**
- * Granular driver identifier (e.g. `mikrotik_routeros` vs `mikrotik_swos`).
- * Distinct from `Platform` which is the broad device-facing category. The
- * registry uses these IDs because MikroTik ships two different OSes with
- * different capabilities.
+ * Granular driver identifier returned by `GET /api/platforms`. For the current
+ * backend the driver IDs map 1:1 onto the broad `Platform` category. The type
+ * is kept distinct so the contract can grow OS-specific drivers later without
+ * a UI-wide rename.
  */
-export type PlatformId =
-  | 'mikrotik_routeros'
-  | 'mikrotik_swos'
-  | 'arista'
-  | 'pica8'
-  | 'freebsd';
+export type PlatformId = 'arista' | 'cisco' | 'pica8' | 'freebsd' | 'mock';
 
 export interface PlatformCapabilities {
   writable: boolean;
@@ -249,4 +258,16 @@ export interface PortListSnapshot {
   ports: Port[];
   fetched_at: number;
   cache_ttl_seconds: number;
+}
+
+/**
+ * Auth payload persisted by the auth store. The real backend's
+ * `POST /api/auth/login` returns `{ access_token, role, username }`; the mock
+ * client mints a fake token but the shape is identical so the store and
+ * components don't branch on which client is active.
+ */
+export interface AuthSession {
+  access_token: string;
+  username: string;
+  role: UserRole;
 }

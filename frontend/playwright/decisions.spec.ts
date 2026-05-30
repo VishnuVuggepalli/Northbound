@@ -40,7 +40,7 @@ test.describe('D1 apply confirmation modal', () => {
     await page.goto('/queue');
     await waitForReady(page);
 
-    // r-001 (alice → d-lab-leaf-1 / ether14, status: pending) is seeded
+    // r-001 (alice → d-lab-leaf-1 / Ethernet14, status: pending) is seeded
     // in fixtures.ts. Expand the row so action buttons render.
     const row = page.getByRole('button').filter({ hasText: '#r-001' }).first();
     await expect(row).toBeVisible();

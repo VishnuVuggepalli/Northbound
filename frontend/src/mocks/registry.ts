@@ -1,58 +1,43 @@
 /**
- * Onboarding wizard — platform registry.
+ * Onboarding wizard — platform registry (mock / fallback dataset).
  *
  * The shape mirrors the `DriverCapabilities` from `principal-engineering.md`
- * (D5/D8 + the SwOS / LLDP / vendor-UI extensions). The future `GET
- * /api/platforms` endpoint returns the same object unchanged, so the wizard
- * UI doesn't need to change when we wire it to the real backend.
+ * (D5/D8 + the SwOS / LLDP / vendor-UI extensions). The real `GET
+ * /api/platforms` endpoint returns the same capability object, so the wizard
+ * UI doesn't change when wired to the backend — `usePlatforms()` swaps the
+ * data source while this stays the offline fallback.
+ *
+ * Platform set matches the real backend: arista, cisco, pica8, freebsd. (MikroTik
+ * RouterOS / SwOS were dropped when the backend driver set was finalized.)
  */
 
 import type { Device, PlatformId, PlatformRegistryEntry } from '@/types';
 
 export const PLATFORM_REGISTRY: readonly PlatformRegistryEntry[] = [
   {
-    platform_id: 'mikrotik_routeros',
-    platform: 'mikrotik',
-    display_name: 'MikroTik RouterOS',
-    description:
-      'RouterOS 7.x. REST API preferred (writes via PATCH); SSH fallback. Backup-then-apply with safe-mode.',
-    defaultPort: 443,
-    capabilities: {
-      writable: true,
-      supports_commit_confirm: false,
-      native_api_available: true,
-      supports_snmp_read: true,
-      supports_lldp: true,
-      max_concurrency: 5,
-      auth_methods: ['password', 'api_token'],
-    },
-    web_ui_url_template: 'http://{mgmt_ip}/webfig/',
-  },
-  {
-    platform_id: 'mikrotik_swos',
-    platform: 'mikrotik',
-    display_name: 'MikroTik SwOS',
-    description:
-      'Read-only via SNMP (LLDP, port stats, VLANs) with HTTP scrape for opaque backups. Writes are blocked at the driver layer.',
-    defaultPort: 161,
-    capabilities: {
-      writable: false,
-      supports_commit_confirm: false,
-      native_api_available: false,
-      supports_snmp_read: true,
-      supports_lldp: true,
-      max_concurrency: 1,
-      auth_methods: ['password', 'snmp_v2c_community'],
-    },
-    web_ui_url_template: 'http://{mgmt_ip}/',
-    notes: 'Read-only. Use the SwOS web UI for changes.',
-  },
-  {
     platform_id: 'arista',
     platform: 'arista',
     display_name: 'Arista EOS',
     description:
       'eAPI over HTTPS. Apply via configure session + commit timer 60 (commit-confirm).',
+    defaultPort: 443,
+    capabilities: {
+      writable: true,
+      supports_commit_confirm: true,
+      native_api_available: true,
+      supports_snmp_read: true,
+      supports_lldp: true,
+      max_concurrency: 5,
+      auth_methods: ['password'],
+    },
+    web_ui_url_template: 'https://{mgmt_ip}/',
+  },
+  {
+    platform_id: 'cisco',
+    platform: 'cisco',
+    display_name: 'Cisco IOS / NX-OS',
+    description:
+      'SSH CLI / NX-API. Apply via configure terminal with commit-confirm (configure replace rollback timer).',
     defaultPort: 443,
     capabilities: {
       writable: true,
@@ -109,18 +94,12 @@ export function findPlatform(id: PlatformId | string): PlatformRegistryEntry | u
 }
 
 /**
- * Disambiguate registry entry for a device. RouterOS and SwOS both share
- * `device.platform === 'mikrotik'`, so we inspect `device.model` for an
- * explicit `/swos/i` marker. All other platforms map 1:1.
+ * Resolve the registry entry for a device. Driver IDs map 1:1 onto the broad
+ * `Platform` category for the current backend, so this is a straight lookup.
  */
 export function findPlatformForDevice(
   device: Pick<Device, 'platform' | 'model'>,
   platforms: readonly PlatformRegistryEntry[] = PLATFORM_REGISTRY,
 ): PlatformRegistryEntry | null {
-  if (device.platform === 'mikrotik') {
-    const isSwOS = /swos/i.test(device.model);
-    const targetId: PlatformId = isSwOS ? 'mikrotik_swos' : 'mikrotik_routeros';
-    return platforms.find((p) => p.platform_id === targetId) ?? null;
-  }
   return platforms.find((p) => p.platform === device.platform) ?? null;
 }

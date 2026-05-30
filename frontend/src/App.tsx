@@ -20,11 +20,38 @@ import { useThemeStore } from '@/store/theme';
 import { useHotkeys, useSequenceHotkeys } from '@/hooks/useHotkeys';
 import { useCreateRequest, useDevice, usePorts } from '@/api/queries';
 import { pushToast } from '@/store/toast';
-import { VLANS } from '@/api/client';
+import { apiClient, isApiError, VLANS } from '@/api';
+
+/**
+ * Validate / refresh the persisted session against `GET /api/users/me` once on
+ * mount. A 401 (expired or revoked token) clears the store; the route guard
+ * then bounces to /login. Mock client always resolves, so E2E is unaffected.
+ */
+function useValidateSession(): void {
+  const token = useAuthStore((s) => s.token);
+  const setUser = useAuthStore((s) => s.setUser);
+  const logout = useAuthStore((s) => s.logout);
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    apiClient
+      .getCurrentUser()
+      .then((user) => {
+        if (!cancelled) setUser(user);
+      })
+      .catch((err) => {
+        if (!cancelled && isApiError(err) && err.status === 401) logout();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, setUser, logout]);
+}
 
 function ProtectedShell() {
   const isAuthed = useAuthStore((s) => s.isAuthenticated);
   const location = useLocation();
+  useValidateSession();
   if (!isAuthed) return <Navigate to="/login" replace state={{ from: location }} />;
   // The TopBar renders its own <header>; the rest of the page lives in
   // <main> so screen-reader landmark navigation works (axe `landmark-one-main`).

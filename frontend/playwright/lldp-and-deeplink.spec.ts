@@ -51,10 +51,10 @@ test.describe('F21b isWriteLocked policy', () => {
     await expect(page.getByText(/Read-only/i).first()).toBeVisible();
   });
 
-  test('SwOS device shows Read-only badge in device header', async ({ page }) => {
+  test('vpn device shows Read-only badge in device header', async ({ page }) => {
     await loginAs(page, 'admin');
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/env/lab/devices/d-lab-swos-1');
+    await page.goto('/env/dc/devices/d-dc-vpn-1');
     await waitForReady(page);
     await expect(page.getByText(/Read-only/i).first()).toBeVisible();
   });
@@ -64,7 +64,7 @@ test.describe('F21b isWriteLocked policy', () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/env/lab/devices/d-lab-leaf-1');
     await waitForReady(page);
-    // Header should NOT show Read-only for a RouterOS leaf.
+    // Header should NOT show Read-only for a writable Cisco leaf.
     const header = page.locator('header').filter({ hasText: 'lab-leaf-1' });
     await expect(header.getByText(/Read-only/i)).toHaveCount(0);
   });
@@ -75,7 +75,7 @@ test.describe('F21b isWriteLocked policy', () => {
  * ------------------------------------------------------------------------- */
 
 test.describe('F21c vendor UI deep-link', () => {
-  test('renders with correct URL on MikroTik RouterOS device', async ({ page }) => {
+  test('renders with correct URL on Cisco device', async ({ page }) => {
     await loginAs(page, 'admin');
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/env/lab/devices/d-lab-leaf-1');
@@ -83,7 +83,7 @@ test.describe('F21c vendor UI deep-link', () => {
 
     const link = page.getByTestId('vendor-ui-link').first();
     await expect(link).toBeVisible();
-    await expect(link).toHaveAttribute('href', 'http://10.10.0.11/webfig/');
+    await expect(link).toHaveAttribute('href', 'https://10.10.0.11/');
     await expect(link).toHaveAttribute('target', '_blank');
     await expect(link).toHaveAttribute('rel', /noopener/);
   });
@@ -136,14 +136,14 @@ test('F21d SSH copy-chip writes ssh command to clipboard on click', async ({ pag
  * ------------------------------------------------------------------------- */
 
 test.describe('F37a PortPanel Neighbor row', () => {
-  test('renders when neighbors present on RouterOS port (ether14)', async ({ page }) => {
+  test('renders when neighbors present on Cisco port (Ethernet14)', async ({ page }) => {
     await loginAs(page, 'admin');
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/env/lab/devices/d-lab-leaf-1');
     await waitForReady(page);
 
-    // ether14 has a seeded neighbor (host-104.lab.local).
-    const port = page.locator('[data-port="ether14"]').first();
+    // Ethernet14 has a seeded neighbor (host-104.lab.local).
+    const port = page.locator('[data-port="Ethernet14"]').first();
     await port.click();
     await expect(page.getByRole('button', { name: /Close panel/i })).toBeVisible();
 
@@ -158,9 +158,9 @@ test.describe('F37a PortPanel Neighbor row', () => {
     await page.goto('/env/lab/devices/d-lab-leaf-1');
     await waitForReady(page);
 
-    // ether5 has no seeded neighbor. Pick by data-port so we don't accidentally
+    // Ethernet5 has no seeded neighbor. Pick by data-port so we don't accidentally
     // match a fixture row that did get one.
-    const port = page.locator('[data-port="ether5"]').first();
+    const port = page.locator('[data-port="Ethernet5"]').first();
     await port.click();
     await expect(page.getByRole('button', { name: /Close panel/i })).toBeVisible();
 
@@ -188,62 +188,55 @@ test.describe('F37a PortPanel Neighbor row', () => {
  * ------------------------------------------------------------------------- */
 
 test.describe('F14a Onboarding step 4 adapts to auth_methods', () => {
-  test('shows community string field when SwOS selected with snmp_v2c_community', async ({
-    page,
-  }) => {
+  test('shows SSH key field when Pica8 + ssh_key selected', async ({ page }) => {
     await loginAs(page, 'admin');
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/onboard');
     await waitForReady(page);
 
-    // Step 1: pick MikroTik SwOS
-    await page.getByText('MikroTik SwOS').click();
+    // Step 1: pick Pica8 (auth_methods = password, ssh_key)
+    await page.getByText('Pica8 PicOS').click();
     await page.getByRole('button', { name: /Continue/ }).click();
 
     // Step 2: name + identity
-    await page.locator('input[placeholder="lab-leaf-4"]').fill('lab-swos-test');
+    await page.locator('input[placeholder="lab-leaf-4"]').fill('lab-pica-test');
     await page.getByRole('button', { name: /Continue/ }).click();
 
     // Step 3: management IP
     await page.locator('input[placeholder="10.10.0.14"]').fill('10.10.0.99');
     await page.getByRole('button', { name: /Continue/ }).click();
 
-    // Step 4: SwOS supports password + snmp_v2c_community. Default is the
-    // first allowed method (password). Switch to SNMP and assert the
-    // community field appears. We pin exact:true because the wrapping
+    // Step 4: default is the first allowed method (password). Switch to SSH
+    // key and assert the key field appears. exact:true because the wrapping
     // <label> bleeds "Auth method" into the accessible name of the first
     // segmented button.
-    await page.getByRole('button', { name: 'SNMP v2c', exact: true }).click();
-    await expect(page.getByTestId('onboard-snmp-community')).toBeVisible();
-    // Username field is hidden for v2c.
-    await expect(page.getByTestId('onboard-username')).toHaveCount(0);
+    await page.getByRole('button', { name: 'SSH key', exact: true }).click();
+    await expect(page.getByTestId('onboard-ssh-key')).toBeVisible();
+    // Password field is swapped out for the key.
+    await expect(page.getByTestId('onboard-password')).toHaveCount(0);
+    // SNMP-only fields are not present for Pica8.
+    await expect(page.getByTestId('onboard-snmp-community')).toHaveCount(0);
   });
 
-  test('shows password + API token fields when MikroTik RouterOS selected', async ({ page }) => {
+  test('shows password fields by default when Cisco selected', async ({ page }) => {
     await loginAs(page, 'admin');
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/onboard');
     await waitForReady(page);
 
-    await page.getByText('MikroTik RouterOS').click();
+    await page.getByText('Cisco IOS / NX-OS').click();
     await page.getByRole('button', { name: /Continue/ }).click();
 
-    await page.locator('input[placeholder="lab-leaf-4"]').fill('lab-ros-test');
+    await page.locator('input[placeholder="lab-leaf-4"]').fill('lab-cisco-test');
     await page.getByRole('button', { name: /Continue/ }).click();
 
     await page.locator('input[placeholder="10.10.0.14"]').fill('10.10.0.98');
     await page.getByRole('button', { name: /Continue/ }).click();
 
-    // Password fields visible by default (first method).
+    // Cisco only allows password — username + password visible, no alternatives.
     await expect(page.getByTestId('onboard-username')).toBeVisible();
     await expect(page.getByTestId('onboard-password')).toBeVisible();
-
-    // Switching to API token swaps the secondary input.
-    await page.getByRole('button', { name: 'API token', exact: true }).click();
-    await expect(page.getByTestId('onboard-api-token')).toBeVisible();
-    await expect(page.getByTestId('onboard-password')).toHaveCount(0);
-
-    // SNMP-only fields should not be present for RouterOS.
+    await expect(page.getByTestId('onboard-api-token')).toHaveCount(0);
     await expect(page.getByTestId('onboard-snmp-community')).toHaveCount(0);
   });
 });

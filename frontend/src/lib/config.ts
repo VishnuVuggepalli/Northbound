@@ -46,16 +46,21 @@ export function renderConfigSnippet(device: Device, port: Port): string {
   const tagged = port.tagged_vlans;
   const desc = port.description ?? '';
   switch (device.platform) {
-    case 'mikrotik':
+    case 'cisco':
       return [
-        `/interface ethernet`,
-        `set [find name="${port.name}"] comment="${desc}" ${
-          port.admin_up ? 'disabled=no' : 'disabled=yes'
-        }`,
-        `/interface bridge vlan`,
-        `add bridge=br1 vlan-ids=${v} untagged="${port.name}"`,
-        ...tagged.map((t) => `add bridge=br1 vlan-ids=${t} tagged="${port.name}"`),
-      ].join('\n');
+        `interface ${port.name}`,
+        `   description ${desc}`,
+        `   ${port.admin_up ? 'no shutdown' : 'shutdown'}`,
+        `   switchport mode ${tagged.length ? 'trunk' : 'access'}`,
+        tagged.length
+          ? `   switchport trunk native vlan ${v}`
+          : `   switchport access vlan ${v}`,
+        tagged.length ? `   switchport trunk allowed vlan ${[v, ...tagged].join(',')}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    case 'mock':
+      return [`# mock driver`, `interface ${port.name}`, `   vlan ${v}`].join('\n');
     case 'arista':
       return [
         `interface ${port.name}`,
@@ -88,58 +93,21 @@ export function renderConfigSnippet(device: Device, port: Port): string {
 
 export function renderFullConfig(device: Device, ports: Port[]): string[] {
   switch (device.platform) {
-    case 'mikrotik':
-      return renderMikrotik(device, ports);
+    case 'cisco':
+      return renderIos(device, ports, 'IOS-XE / NX-OS');
     case 'arista':
-      return renderArista(device, ports);
+      return renderIos(device, ports, 'EOS');
     case 'pica8':
       return renderPica8(device, ports);
     case 'freebsd':
       return renderFreeBSD(device, ports);
+    case 'mock':
+      return [`# mock driver · ${device.model}`, `hostname ${device.name}`];
   }
 }
 
-function renderMikrotik(device: Device, ports: Port[]): string[] {
-  const lines: string[] = [
-    `# RouterOS 7.x · ${device.model}`,
-    `# system identity = "${device.name}"`,
-    ``,
-    `/interface bridge`,
-    `add name=br1 vlan-filtering=yes`,
-    ``,
-    `/interface ethernet`,
-  ];
-  for (const p of ports) {
-    lines.push(
-      `set [find name="${p.name}"] comment="${p.description}" ${
-        p.admin_up ? 'disabled=no' : 'disabled=yes'
-      }`,
-    );
-  }
-  lines.push(``, `/interface bridge vlan`);
-  const byVlan = new Map<number, { u: string[]; t: string[] }>();
-  for (const p of ports) {
-    if (!byVlan.has(p.untagged_vlan)) byVlan.set(p.untagged_vlan, { u: [], t: [] });
-    byVlan.get(p.untagged_vlan)!.u.push(p.name);
-    for (const t of p.tagged_vlans) {
-      if (!byVlan.has(t)) byVlan.set(t, { u: [], t: [] });
-      byVlan.get(t)!.t.push(p.name);
-    }
-  }
-  for (const v of [...byVlan.keys()].sort((a, b) => a - b)) {
-    const grp = byVlan.get(v)!;
-    lines.push(
-      `add bridge=br1 vlan-ids=${v} untagged="${grp.u.join(',')}"${
-        grp.t.length ? ` tagged="${grp.t.join(',')}"` : ''
-      }`,
-    );
-  }
-  lines.push(``, `/ip service`, `set telnet disabled=yes`, `set api disabled=yes`, `set winbox disabled=no`);
-  return lines;
-}
-
-function renderArista(device: Device, ports: Port[]): string[] {
-  const lines: string[] = [`! EOS · ${device.model}`, `hostname ${device.name}`, `!`];
+function renderIos(device: Device, ports: Port[], os: string): string[] {
+  const lines: string[] = [`! ${os} · ${device.model}`, `hostname ${device.name}`, `!`];
   const vlans = new Set<number>();
   for (const p of ports) {
     vlans.add(p.untagged_vlan);

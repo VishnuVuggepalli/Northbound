@@ -27,9 +27,15 @@ import type {
   Port,
   PortListSnapshot,
   PortMap,
-  RequestedChanges,
   User,
 } from '@/types';
+import type {
+  ConfirmOnboardResult,
+  CreateRequestInput,
+  DiscoverResult,
+  LoginResult,
+  TestConnectionResult,
+} from './client.types';
 import {
   AUDIT,
   CHANGE_REQUESTS,
@@ -39,6 +45,14 @@ import {
   USERS,
 } from '@/mocks/fixtures';
 import { PLATFORM_REGISTRY, findPlatform } from '@/mocks/registry';
+
+export type {
+  ConfirmOnboardResult,
+  CreateRequestInput,
+  DiscoverResult,
+  LoginResult,
+  TestConnectionResult,
+};
 
 const NETWORK_DELAY_MS = 280;
 
@@ -76,23 +90,20 @@ export function __resetMockState(): void {
  * Auth
  * ------------------------------------------------------------------------- */
 
-export interface LoginResult {
-  user: User;
-  access_token: string;
-}
-
 export async function login(username: string, _password: string): Promise<LoginResult> {
   await delay(220);
-  const user = USERS.find((u) => u.username === username);
-  if (!user) throw new Error(`Unknown user: ${username}`);
+  const user = USERS.find((u) => u.username === username) ?? USERS[0]!;
   return { user, access_token: `mock-jwt-${user.username}` };
 }
 
-export async function getCurrentUser(username: string): Promise<User> {
+export async function getCurrentUser(username?: string): Promise<User> {
   await delay(80);
-  const user = USERS.find((u) => u.username === username);
-  if (!user) throw new Error(`Unknown user: ${username}`);
+  const user = USERS.find((u) => u.username === username) ?? USERS[0]!;
   return user;
+}
+
+export async function logout(): Promise<void> {
+  await delay(40);
 }
 
 export async function listUsers(): Promise<User[]> {
@@ -196,14 +207,6 @@ export async function listRequests(filter?: {
   if (filter?.mine) list = list.filter((r) => r.requested_by === filter.mine);
   if (filter?.status) list = list.filter((r) => r.status === filter.status);
   return list;
-}
-
-export interface CreateRequestInput {
-  device_id: string;
-  port_name: string;
-  requested_by: string;
-  requested_changes: RequestedChanges;
-  reason: string;
 }
 
 export async function createRequest(input: CreateRequestInput): Promise<ChangeRequest> {
@@ -319,6 +322,18 @@ export async function applyRequest(id: string, reviewer: string): Promise<Change
   return applied;
 }
 
+/**
+ * Confirm flow — mocked. Real backend resolves the commit-confirm timer to
+ * make an applied change permanent. The mock already flips to 'applied' inside
+ * {@link applyRequest}, so this is a no-op that just echoes current state.
+ */
+export async function confirmRequest(id: string): Promise<ChangeRequest> {
+  await delay(120);
+  const req = state.requests.find((r) => r.id === id);
+  if (!req) throw new Error(`Request ${id} not found`);
+  return req;
+}
+
 /* -------------------------------------------------------------------------
  * Audit
  * ------------------------------------------------------------------------- */
@@ -338,12 +353,6 @@ export async function listAudit(filter: {
  * Onboarding wizard
  * ------------------------------------------------------------------------- */
 
-export interface TestConnectionResult {
-  ok: boolean;
-  latency_ms: number;
-  message: string;
-}
-
 export async function testConnection(_draft: OnboardingDraft): Promise<TestConnectionResult> {
   await delay(900);
   return {
@@ -353,32 +362,26 @@ export async function testConnection(_draft: OnboardingDraft): Promise<TestConne
   };
 }
 
-export interface DiscoverResult {
-  port_count: number;
-  sample_ports: string[];
-  config_excerpt: string;
-}
-
 export async function discoverDevice(draft: OnboardingDraft): Promise<DiscoverResult> {
   await delay(1100);
-  const platform: Platform = draft.platform ?? 'mikrotik';
-  const sample = ['ether1', 'ether2', 'ether3', 'sfp-sfpplus1'];
+  const platform: Platform = draft.platform ?? 'cisco';
+  const sample =
+    platform === 'pica8'
+      ? ['te-1/1/1', 'te-1/1/2', 'te-1/1/3', 'te-1/1/4']
+      : platform === 'freebsd'
+        ? ['igb0', 'igb1', 'ix0', 'ix1']
+        : ['Ethernet1', 'Ethernet2', 'Ethernet3', 'Ethernet4'];
   const portCount =
     platform === 'arista' ? 32 : platform === 'pica8' ? 48 : platform === 'freebsd' ? 4 : 24;
   const config_excerpt =
-    platform === 'mikrotik'
-      ? `/interface ethernet\nset [find name="ether1"] comment="VLAN-100 | Dell R740 | 10.0.0.55"`
+    platform === 'cisco'
+      ? `interface Ethernet1\n  description VLAN-100\n  switchport access vlan 100`
       : platform === 'arista'
         ? `interface Ethernet1/1\n  description VLAN-100\n  switchport access vlan 100`
         : platform === 'pica8'
           ? `set interface te-1/1/1 description "VLAN-100"\nset vlans v100 interface te-1/1/1 untagged`
           : `# /etc/rc.conf\nifconfig_igb0="up"\nifconfig_igb0_100="inet 10.0.100.1/24"`;
   return { port_count: portCount, sample_ports: sample, config_excerpt };
-}
-
-export interface ConfirmOnboardResult {
-  device: Device;
-  ports_seeded: number;
 }
 
 export async function confirmOnboard(draft: OnboardingDraft): Promise<ConfirmOnboardResult> {
@@ -421,7 +424,8 @@ function portKindForPlatform(platform: Platform): Device['portKind'] {
       return 'sfp-48';
     case 'freebsd':
       return 'rj45-4';
-    case 'mikrotik':
+    case 'cisco':
+    case 'mock':
     default:
       return 'rj45-24-2sfp';
   }
@@ -440,8 +444,8 @@ function seedPortsFor(device: Device): Port[] {
             : device.platform === 'freebsd'
               ? ['igb0', 'igb1', 'ix0', 'ix1'][i] ?? `igb${i}`
               : i < 24
-                ? `ether${i + 1}`
-                : `sfp-sfpplus${i - 23}`,
+                ? `Ethernet${i + 1}`
+                : `Ethernet${i + 1}`,
       index: i,
       state: 'down',
       admin_up: true,

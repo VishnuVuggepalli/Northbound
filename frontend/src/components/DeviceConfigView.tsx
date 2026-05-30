@@ -107,10 +107,11 @@ export function DeviceConfigView({ device, ports, user }: DeviceConfigViewProps)
 }
 
 const KEYWORDS: Record<Device['platform'], string[]> = {
-  mikrotik: ['add', 'set', 'find', 'name', 'comment', 'disabled', 'bridge', 'vlan-ids', 'untagged', 'tagged', 'interface'],
+  cisco: ['interface', 'description', 'no', 'shutdown', 'switchport', 'mode', 'access', 'trunk', 'native', 'vlan', 'allowed', 'router', 'bgp', 'neighbor', 'hostname'],
   arista: ['interface', 'description', 'no', 'shutdown', 'switchport', 'mode', 'access', 'trunk', 'native', 'vlan', 'allowed', 'router', 'bgp', 'neighbor', 'hostname'],
   pica8: ['set', 'interface', 'description', 'enable', 'disable', 'vlans', 'tagged', 'untagged', 'protocols', 'system'],
   freebsd: ['ifconfig_', 'inet', 'up', 'down', 'mtu', 'pf', 'rc.conf', 'frr', 'router', 'bgp', 'hostname', 'gateway_enable'],
+  mock: ['interface', 'vlan', 'hostname'],
 };
 
 function SyntaxLine({ line, platform }: { line: string; platform: Device['platform'] }) {

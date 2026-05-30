@@ -17,6 +17,7 @@ import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
 import { useRequests } from '@/api/queries';
+import { apiClient } from '@/api';
 import { initials } from '@/lib/format';
 import { PALETTES } from '@/lib/palette';
 import { cn } from '@/lib/cn';
@@ -211,6 +212,7 @@ export function TopBar() {
                   icon={<LogOut size={14} />}
                   label="Sign out"
                   onClick={() => {
+                    void apiClient.logout();
                     logout();
                     navigate('/login');
                   }}

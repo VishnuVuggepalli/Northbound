@@ -52,13 +52,11 @@ function pick<T>(arr: readonly T[], rng: () => number): T {
 }
 
 export const DEVICES: readonly Device[] = [
-  { id: 'd-lab-leaf-1', name: 'lab-leaf-1', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.11', model: 'CRS326-24G-2S+', portCount: 24, portKind: 'rj45-24-2sfp', reachable: true },
-  { id: 'd-lab-leaf-2', name: 'lab-leaf-2', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.12', model: 'CRS326-24G-2S+', portCount: 24, portKind: 'rj45-24-2sfp', reachable: true },
-  { id: 'd-lab-leaf-3', name: 'lab-leaf-3', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.13', model: 'CRS326-24G-2S+', portCount: 24, portKind: 'rj45-24-2sfp', reachable: false },
-  // SwOS device — same broad platform as RouterOS leaves; the model string
-  // disambiguates via findPlatformForDevice (model =~ /swos/i).
-  { id: 'd-lab-swos-1', name: 'lab-swos-1', env: 'lab', platform: 'mikrotik', role: 'leaf', mgmt_ip: '10.10.0.15', model: 'CRS112-8G-4S (SwOS)', portCount: 5, portKind: 'sfp-5', reachable: true },
-  { id: 'd-lab-spine-1', name: 'lab-spine-1', env: 'lab', platform: 'mikrotik', role: 'spine', mgmt_ip: '10.10.0.10', model: 'CRS305', portCount: 5, portKind: 'sfp-5', reachable: true },
+  { id: 'd-lab-leaf-1', name: 'lab-leaf-1', env: 'lab', platform: 'cisco', role: 'leaf', mgmt_ip: '10.10.0.11', model: 'Catalyst 9300-24T', portCount: 24, portKind: 'rj45-24-2sfp', reachable: true },
+  { id: 'd-lab-leaf-2', name: 'lab-leaf-2', env: 'lab', platform: 'cisco', role: 'leaf', mgmt_ip: '10.10.0.12', model: 'Catalyst 9300-24T', portCount: 24, portKind: 'rj45-24-2sfp', reachable: true },
+  { id: 'd-lab-leaf-3', name: 'lab-leaf-3', env: 'lab', platform: 'cisco', role: 'leaf', mgmt_ip: '10.10.0.13', model: 'Catalyst 9300-24T', portCount: 24, portKind: 'rj45-24-2sfp', reachable: false },
+  { id: 'd-lab-leaf-4', name: 'lab-leaf-4', env: 'lab', platform: 'cisco', role: 'leaf', mgmt_ip: '10.10.0.15', model: 'Nexus 9300-FX', portCount: 24, portKind: 'rj45-24-2sfp', reachable: true },
+  { id: 'd-lab-spine-1', name: 'lab-spine-1', env: 'lab', platform: 'cisco', role: 'spine', mgmt_ip: '10.10.0.10', model: 'Nexus 9300-EX', portCount: 24, portKind: 'rj45-24-2sfp', reachable: true },
   { id: 'd-lab-rtr-1', name: 'lab-rtr-1', env: 'lab', platform: 'freebsd', role: 'router', mgmt_ip: '10.10.0.1', model: 'FreeBSD 14.0', portCount: 4, portKind: 'rj45-4', reachable: true, ssh_user: 'root' },
   { id: 'd-dc-arista-1', name: 'dc-arista-1', env: 'dc', platform: 'arista', role: 'leaf', mgmt_ip: '10.20.0.11', model: '7050X3-32S 100G', portCount: 32, portKind: 'qsfp-32', reachable: true },
   { id: 'd-dc-pica-10g', name: 'dc-pica-10g', env: 'dc', platform: 'pica8', role: 'leaf', mgmt_ip: '10.20.0.12', model: 'PicOS 48×10G', portCount: 48, portKind: 'sfp-48', reachable: true },
@@ -77,15 +75,15 @@ export const DEVICES: readonly Device[] = [
  */
 const NEIGHBORS_BY_DEVICE: Record<string, Record<string, Neighbor[]>> = {
   'd-lab-leaf-1': {
-    ether1: [
+    Ethernet1: [
       {
         chassis_id: '64:d1:54:a3:00:01',
-        port_id: 'sfp-sfpplus1',
+        port_id: 'Ethernet1',
         system_name: 'lab-spine-1',
-        system_description: 'MikroTik CRS305 RouterOS 7.14',
+        system_description: 'Cisco Nexus 9300-EX NX-OS 10.3',
       },
     ],
-    ether14: [
+    Ethernet14: [
       {
         chassis_id: 'aa:bb:cc:00:14:01',
         port_id: 'eno1',
@@ -95,30 +93,30 @@ const NEIGHBORS_BY_DEVICE: Record<string, Record<string, Neighbor[]>> = {
     ],
   },
   'd-lab-spine-1': {
-    'sfp-sfpplus1': [
+    Ethernet1: [
       {
         chassis_id: '64:d1:54:a1:11:01',
-        port_id: 'ether1',
+        port_id: 'Ethernet1',
         system_name: 'lab-leaf-1',
-        system_description: 'MikroTik CRS326 RouterOS 7.14',
+        system_description: 'Cisco Catalyst 9300 IOS-XE 17.9',
       },
     ],
-    'sfp-sfpplus2': [
+    Ethernet2: [
       {
         chassis_id: '64:d1:54:a1:11:02',
-        port_id: 'ether1',
+        port_id: 'Ethernet1',
         system_name: 'lab-leaf-2',
-        system_description: 'MikroTik CRS326 RouterOS 7.14',
+        system_description: 'Cisco Catalyst 9300 IOS-XE 17.9',
       },
     ],
   },
-  'd-lab-swos-1': {
-    'sfp-sfpplus1': [
+  'd-lab-leaf-4': {
+    Ethernet1: [
       {
         chassis_id: '64:d1:54:a3:00:01',
-        port_id: 'sfp-sfpplus3',
+        port_id: 'Ethernet3',
         system_name: 'lab-spine-1',
-        system_description: 'MikroTik CRS305 RouterOS 7.14',
+        system_description: 'Cisco Nexus 9300-EX NX-OS 10.3',
       },
     ],
   },
@@ -158,10 +156,8 @@ function neighborsFor(deviceId: string, portName: string): Neighbor[] | undefine
 
 export function portNameFor(device: Device, idx: number): string {
   switch (device.platform) {
-    case 'mikrotik':
-      if (device.role === 'spine') return `sfp-sfpplus${idx + 1}`;
-      if (idx < 24) return `ether${idx + 1}`;
-      return `sfp-sfpplus${idx - 23}`;
+    case 'cisco':
+      return `Ethernet${idx + 1}`;
     case 'arista':
       return `Ethernet${idx + 1}/1`;
     case 'pica8':
@@ -171,7 +167,7 @@ export function portNameFor(device: Device, idx: number): string {
       return names[idx] ?? `igb${idx}`;
     }
     default:
-      return `port${idx + 1}`;
+      return `Ethernet${idx + 1}`;
   }
 }
 
@@ -269,7 +265,7 @@ export const CHANGE_REQUESTS: readonly ChangeRequest[] = [
   {
     id: 'r-001',
     device_id: 'd-lab-leaf-1',
-    port_name: 'ether14',
+    port_name: 'Ethernet14',
     requested_by: 'alice',
     requested_changes: {
       untagged_vlan: 200,
@@ -329,7 +325,7 @@ export const CHANGE_REQUESTS: readonly ChangeRequest[] = [
   {
     id: 'r-004',
     device_id: 'd-lab-leaf-2',
-    port_name: 'ether3',
+    port_name: 'Ethernet3',
     requested_by: 'alice',
     requested_changes: {
       untagged_vlan: 20,

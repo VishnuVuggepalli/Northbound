@@ -1,10 +1,45 @@
 # Northbound — frontend
 
-Production frontend for Northbound, the switch-management portal. Mock-only
-right now — there is no backend wired in. The mock client lives in
-`src/api/client.ts` and matches the v1 REST contract from
-`supporting material/principal-engineering.md` so swapping to real fetch is
-mechanical.
+Production frontend for Northbound, the switch-management portal. It talks to a
+real FastAPI backend, with a fully offline mock client kept behind a flag so dev
+and Playwright E2E run without a server.
+
+- `src/api/client.ts` — in-memory **mock** client (fixtures + synthetic delays).
+- `src/api/realClient.ts` — **real** `fetch` client against the backend.
+- `src/api/index.ts` — the **selector**: exports `apiClient`, picking mock vs
+  real from `VITE_USE_MOCKS` (default mocks ON). Components and `queries.ts`
+  import from here and never branch on which client is live.
+- `src/api/schema.gen.ts` — TS types generated from the backend OpenAPI by
+  `openapi-typescript` (regenerate with `npm run gen:api`, backend must be up).
+- `src/api/mappers.ts` — wire (snake_case) → UI shape translation.
+
+## API client mode + environment variables
+
+| Var | Default | Meaning |
+|---|---|---|
+| `VITE_USE_MOCKS` | unset → mocks ON | `"false"` switches to the real client. Anything else keeps mocks (offline). |
+| `VITE_API_BASE` | `""` (same-origin) | Base URL for the real backend. Leave empty in dev and use the Vite proxy. |
+
+```bash
+# Offline (default) — mock client, no backend needed:
+npm run dev
+
+# Real backend (same-origin via the dev proxy → http://localhost:8090):
+VITE_USE_MOCKS=false npm run dev
+# point the proxy elsewhere:
+NB_DEV_API_TARGET=http://host:port VITE_USE_MOCKS=false npm run dev
+```
+
+The dev server proxies `/api/*` to the backend (`vite.config.ts → server.proxy`,
+target `NB_DEV_API_TARGET`, default `http://localhost:8090`) so same-origin
+requests avoid CORS.
+
+### Regenerating API types
+
+```bash
+# Backend must be running on :8090 (see repo root for launch command):
+npm run gen:api   # openapi-typescript http://localhost:8090/openapi.json -o src/api/schema.gen.ts
+```
 
 ## Stack
 
@@ -114,8 +149,10 @@ with `seed=7`) so reloads produce the same data.
 
 Coverage:
 
-- 10 devices: 3 MikroTik 24-port leaves, 1 MikroTik 5-port spine, 1 Arista
+- 10 devices: 4 Cisco 24-port leaves, 1 Cisco spine, 1 Arista
   32×100G, 2 Pica8 (48×10G + 32×100G), 2 FreeBSD routers, 1 VPN node.
+  (Platform set matches the backend `/api/platforms`: arista, cisco, pica8,
+  freebsd, plus a `mock` testing driver.)
 - ~280 ports with mixed `up` / `down` / `disabled` state.
 - 5 change requests across all statuses.
 - 60-entry audit trail.
@@ -125,21 +162,17 @@ The platform registry is in
 [`src/mocks/registry.ts`](src/mocks/registry.ts) and matches the
 `DriverCapabilities` shape from `principal-engineering.md` D5.
 
-## Swapping the mock client for a real client
+## Auth flow
 
-The plan from D8 (principal-engineering.md) is "OpenAPI types only, hand-rolled
-fetch wrapper":
+- `LoginPage` → `apiClient.login()` → `POST /api/auth/login` → persists
+  `{ access_token, username, role }` to `useAuthStore` (localStorage).
+- On every protected mount, `useValidateSession` calls `GET /api/users/me`; a
+  401 clears the session and the route guard bounces to `/login`.
+- The real client attaches `Authorization: Bearer <token>` from the store on
+  every request and, on any 401, clears the session + redirects to `/login`.
+- Sign out → best-effort `POST /api/auth/logout` + local clear + `/login`.
 
-1. Run `openapi-typescript https://nb-api/openapi.json -o src/api/types.gen.ts`
-   when the backend stabilizes.
-2. Replace each function body in `src/api/client.ts` with a `fetch` call
-   (the auth bearer header lives in `src/store/auth.ts`).
-3. Drop the `__resetMockState` and the in-memory `state` object.
-4. The React Query keys in `src/api/queries.ts` already point at the
-   contract endpoints — no callsite changes needed.
-
-The file is structured as one function per endpoint with the function
-signature already matching the request/response shapes.
+Under mocks all of the above resolves locally so E2E never needs a server.
 
 ## Keyboard shortcuts
 
