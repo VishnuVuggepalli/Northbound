@@ -16,6 +16,7 @@ import northbound.drivers.mock
 import northbound.drivers.pica8  # noqa: F401  (registers)
 from northbound.api import audit, auth, devices, platforms, ports, requests, users
 from northbound.api.limiter import limiter
+from northbound.api.static_spa import mount_spa
 from northbound.config import get_settings
 from northbound.services.scheduler import build_scheduler
 
@@ -80,3 +81,8 @@ app.include_router(audit.router)
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+# Static SPA last: it registers a catch-all that must not shadow the API.
+# No-ops (with a warning) when the frontend has not been built.
+mount_spa(app)

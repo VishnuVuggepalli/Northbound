@@ -1,0 +1,42 @@
+# Northbound — single-process FastAPI (API + static SPA), one worker.
+# principal-engineering D9: one process, one VM, one SQLite, behind Tailscale/nginx.
+#
+# Install:
+#   sudo cp deploy/northbound.service /etc/systemd/system/northbound.service
+#   sudo mkdir -p /etc/northbound /var/lib/northbound/backups
+#   sudo cp deploy/northbound.env.example /etc/northbound/env   # then edit secrets
+#   sudo chmod 600 /etc/northbound/env
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now northbound
+#
+# Adjust User, WorkingDirectory, and the venv path to your install location.
+
+[Unit]
+Description=Northbound switch port management portal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=northbound
+Group=northbound
+WorkingDirectory=/opt/northbound
+
+# Secrets and config live in an EnvironmentFile, NOT inline here (so they stay
+# out of `systemctl show` output and version control). See deploy/northbound.env.example.
+EnvironmentFile=/etc/northbound/env
+
+# Single worker — single-process architecture. Do not add --workers.
+ExecStart=/opt/northbound/.venv/bin/uvicorn northbound.main:app --host 0.0.0.0 --port 8080
+
+Restart=always
+RestartSec=3
+
+# Hardening (relax if your install paths differ).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/northbound
+
+[Install]
+WantedBy=multi-user.target

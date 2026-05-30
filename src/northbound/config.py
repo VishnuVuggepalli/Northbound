@@ -84,6 +84,12 @@ class Settings(BaseSettings):
     # the suite never spawns real timers (no hangs). See ``main.lifespan``.
     enable_scheduler: bool = Field(default=True)
 
+    # --- Static frontend (principal-engineering D9: StaticFiles mount on /) ---
+    # Directory of the built Vite SPA (``frontend/dist``). Resolved relative to
+    # the repo root when not absolute. If the directory is missing the mount is
+    # skipped with a warning — the API still serves. Override via NB_FRONTEND_DIST.
+    frontend_dist: str = Field(default="frontend/dist")
+
 
 @lru_cache
 def get_settings() -> Settings:

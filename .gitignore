@@ -39,6 +39,7 @@ dist/
 /var/
 /data/
 config.toml
+northbound.toml
 .env
 .env.*
 .envrc

@@ -1,0 +1,14 @@
+# Northbound backup cron (principal-engineering D9 backup story).
+# Install: sudo cp deploy/backup.cron /etc/cron.d/northbound-backup
+# A consistent SQLite snapshot + rsync of the data dir to a backup target.
+#
+# `sqlite3 .backup` takes a consistent copy even while the app holds the WAL.
+# Adjust BACKUP_TARGET to a host/path your environment can reach (e.g. Tailscale).
+
+BACKUP_TARGET=backup-host:/srv/backups/northbound
+
+# 02:30 daily: consistent DB snapshot into the backups dir.
+30 2 * * * northbound sqlite3 /var/lib/northbound/northbound.db ".backup '/var/lib/northbound/backups/northbound-$(date +\%Y\%m\%d).db'"
+
+# 02:45 daily: rsync the whole data dir (DB snapshots + config_backups) offsite.
+45 2 * * * northbound rsync -az --delete /var/lib/northbound/ "$BACKUP_TARGET/"

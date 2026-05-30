@@ -1,0 +1,70 @@
+# Northbound example configuration.
+#
+# Copy to `northbound.toml` (gitignored) and edit, OR set the matching `NB_*`
+# environment variables. Precedence (highest first):
+#   environment variables (NB_<UPPER_SNAKE>)  >  northbound.toml  >  defaults
+#
+# Pydantic-settings flattens keys: a setting named `secret_key` is read from
+# either the `NB_SECRET_KEY` env var or a top-level `secret_key`. The [section]
+# headers below are documentation grouping; keep the keys top-level if you copy
+# this file, OR rely on the env vars (recommended for secrets).
+#
+# REQUIRED outside development:
+#   NB_SECRET_KEY  — JWT signing secret (any long random string)
+#   NB_MASTER_KEY  — Fernet key for credential encryption at rest:
+#                    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# In `environment = "development"` both are auto-minted (ephemeral) with a loud
+# warning; encrypted data will NOT survive a restart, so set them for any real use.
+
+[app]
+# "development" relaxes the secret/master-key requirement (ephemeral keys minted
+# with a warning). Use "production" on a deployed host.
+environment = "development"            # env: NB_ENVIRONMENT
+
+# JWT signing secret. REQUIRED outside development. Prefer the env var.
+# secret_key = "change-me-to-a-long-random-string"   # env: NB_SECRET_KEY
+jwt_algorithm = "HS256"                # env: NB_JWT_ALGORITHM
+jwt_expiry_minutes = 480               # env: NB_JWT_EXPIRY_MINUTES (8h default)
+
+# Fernet master key for credential-vault encryption. REQUIRED outside dev.
+# master_key = "..."                   # env: NB_MASTER_KEY
+
+# In-process scheduler (reachability poll, nightly backup, audit verify,
+# reconciler). Set 0/false to disable all background jobs (e.g. for one-off CLI).
+enable_scheduler = true                # env: NB_ENABLE_SCHEDULER
+
+[db]
+# Async SQLAlchemy URL. Default = single-file SQLite (WAL) via aiosqlite.
+# Production single-VM path lives under /var/lib/northbound (see deploy/).
+url = "sqlite+aiosqlite:///./northbound.db"   # env: NB_DB_URL
+
+[frontend]
+# Built Vite SPA directory. Relative paths resolve against the repo root.
+# Missing dir => static mount skipped (API still served).
+dist = "frontend/dist"                 # env: NB_FRONTEND_DIST
+
+[device_defaults]
+# Commit-confirm window (s) for platforms with native commit-confirm.
+commit_confirm_seconds = 60            # env: NB_COMMIT_CONFIRM_SECONDS
+# Live port-state cache TTL (s) and capacity (distinct devices).
+port_state_ttl_seconds = 30.0          # env: NB_PORT_STATE_TTL_SECONDS
+port_state_cache_capacity = 512        # env: NB_PORT_STATE_CACHE_CAPACITY
+# Reachability poll cadence (s) and per-device probe timeout (s).
+poll_interval_seconds = 60             # env: NB_POLL_INTERVAL_SECONDS
+reachability_timeout_seconds = 5.0     # env: NB_REACHABILITY_TIMEOUT_SECONDS
+# Nightly cron jobs (5-field crontab) and reconciler cadence (s).
+nightly_backup_cron = "0 3 * * *"      # env: NB_NIGHTLY_BACKUP_CRON
+audit_verify_cron = "30 3 * * *"       # env: NB_AUDIT_VERIFY_CRON
+reconciler_interval_seconds = 10       # env: NB_RECONCILER_INTERVAL_SECONDS
+reconciler_apply_stale_seconds = 300   # env: NB_RECONCILER_APPLY_STALE_SECONDS
+
+[logging]
+# Standard Python logging level for the app loggers (handled by uvicorn/CLI).
+# level = "INFO"
+
+[seed]
+# Consumed by seed.py via the environment (NOT read from this file). Listed here
+# for discoverability. Unset => seed.py generates a random password and prints
+# it once. Passwords are stored only as bcrypt hashes.
+#   NB_SEED_ADMIN_PASSWORD = "..."
+#   NB_SEED_ALICE_PASSWORD = "..."
