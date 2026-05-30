@@ -364,3 +364,50 @@ D1 also tightened the write-lock guard: routers/VPN devices no longer
 expose `Approve & apply` or `Apply now` in `RequestRow` — the
 `Read-only` badge on `DeviceDetailPage` now matches the queue's behavior.
 Approve-only stays available so the queue can still be triaged.
+
+## Aesthetic elevation pass (2026-05-30)
+
+A craft pass — same components / routes / IA, new skin + type + restrained
+motion. Direction: **refined "instrument panel" dark NOC aesthetic** —
+distinctive through precision, not maximalism.
+
+- **Typography.** Replaced Inter Tight / JetBrains Mono with **Sora** (geometric
+  display, headings + wordmark + UI body) and **IBM Plex Mono** (the instrument
+  typeface for port names, VLAN ids, IPs, config). Self-hosted via `@fontsource`
+  (latin subsets only), imported in `main.tsx` — no Google Fonts CDN, so E2E and
+  offline dev have no font-load race. Tighter heading tracking (`-0.02/-0.03em`)
+  + mono tracking (`+0.01em`) establish the precision-instrument rhythm.
+- **Atmosphere / depth (`globals.css`).** Deepened the dark elevation ramp
+  (base `0.155`, added `--nb-bg-sunken` `0.115` for inset surfaces / the 3D
+  stage). Added opt-in `.nb-atmos` (accent-tinted radial gradient mesh),
+  `.nb-grid` (hairline survey grid, radial-masked) and `.nb-grain` (SVG fractal
+  noise to kill banding) — applied only to the two marquee surfaces (login,
+  env-picker), kept off the data-dense operational screens to protect density.
+  `--nb-link` stays reserved for link-up green. Contrast unchanged on text
+  tokens (axe still 0).
+- **Motion (purposeful, reduced-motion-safe).** One staggered page-load reveal
+  (`.nb-reveal`, `--nb-reveal-i` index, ~440ms cubic-bezier) on login /
+  env-picker / device-detail. The signature **compass-needle "lock to north"**
+  entrance on the wordmark glyph (login). All new animation is neutralized under
+  `prefers-reduced-motion` (the media block force-sets `animation:none;
+  opacity:1; transform:none` on `.nb-reveal` / `.nb-compass-lock`). Existing
+  LED pulse + port-select transition kept; no animation > ~200ms on
+  micro-interactions; no motion library added.
+- **Signature element.** The Northbound **compass** — wordmark glyph rebuilt as
+  a compass rose (bezel + cardinal ticks + accent north-needle + hub) that
+  swings to true north on the boot/login moment.
+- **3D hero framing.** `Switch3D` now sits in a recessed near-black instrument
+  bay (`bg-sunken`, border, inset shadow, deeper canvas/fog `#08090c`), with an
+  added cool rim light so the chassis reads as a real material.
+
+### Guardrails held (re-verified after the pass)
+
+- **axe-core: 0 violations** across all 33 route × viewport audits (log empty).
+- **58 / 58 Playwright** pass; **35 / 35 vitest**; typecheck + lint + build clean.
+- Screenshots under `playwright/screenshots/` are saved as artifacts via
+  `page.screenshot()` — there are **no `toHaveScreenshot()` pixel assertions**,
+  so the visual churn from this pass does not (and cannot) fail a test. No
+  baseline images needed deletion/regeneration.
+- `prefers-reduced-motion` respected everywhere motion was added.
+- New deps: `@fontsource/sora`, `@fontsource/ibm-plex-mono` only (fonts;
+  justified + self-hosted). No new icon lib, no state store, no motion lib.

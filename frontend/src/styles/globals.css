@@ -20,9 +20,16 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --nb-bg: oklch(0.18 var(--nb-bg-chroma) var(--nb-bg-hue));
-  --nb-bg-elev-1: oklch(0.22 var(--nb-bg-chroma) var(--nb-bg-hue));
-  --nb-bg-elev-2: oklch(0.26 var(--nb-bg-chroma) var(--nb-bg-hue));
+  /*
+   * Deepened elevation ramp. The base is darker (0.155) so the instrument
+   * sits in a near-black control-room void; the elevation steps are spaced
+   * a touch wider so layered surfaces read as genuine depth, not flat fills.
+   */
+  --nb-bg: oklch(0.155 var(--nb-bg-chroma) var(--nb-bg-hue));
+  --nb-bg-elev-1: oklch(0.205 var(--nb-bg-chroma) var(--nb-bg-hue));
+  --nb-bg-elev-2: oklch(0.255 var(--nb-bg-chroma) var(--nb-bg-hue));
+  /* A still-deeper well for inset surfaces (3D stage, code blocks). */
+  --nb-bg-sunken: oklch(0.115 var(--nb-bg-chroma) var(--nb-bg-hue));
   --nb-border: oklch(0.32 var(--nb-bg-chroma) var(--nb-bg-hue) / 0.7);
   --nb-border-strong: oklch(0.42 var(--nb-bg-chroma) var(--nb-bg-hue) / 0.9);
   --nb-fg: oklch(0.96 0.01 var(--nb-bg-hue));
@@ -53,6 +60,7 @@
   --nb-bg: oklch(0.98 var(--nb-bg-chroma) var(--nb-bg-hue));
   --nb-bg-elev-1: oklch(0.96 var(--nb-bg-chroma) var(--nb-bg-hue));
   --nb-bg-elev-2: oklch(0.94 var(--nb-bg-chroma) var(--nb-bg-hue));
+  --nb-bg-sunken: oklch(0.91 var(--nb-bg-chroma) var(--nb-bg-hue));
   --nb-border: oklch(0.86 var(--nb-bg-chroma) var(--nb-bg-hue));
   --nb-border-strong: oklch(0.78 var(--nb-bg-chroma) var(--nb-bg-hue));
   --nb-fg: oklch(0.18 0.01 var(--nb-bg-hue));
@@ -80,10 +88,25 @@ body,
 }
 
 body {
-  font-family: 'Inter Tight', Inter, system-ui, sans-serif;
-  font-feature-settings: 'cv11', 'ss01';
+  font-family: 'Sora', system-ui, sans-serif;
   background: var(--nb-bg);
   color: var(--nb-fg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/*
+ * Instrument type scale + rhythm. Sora runs a hair loose by default; headings
+ * are pulled tight for a precise, engineered feel. Mono data surfaces get a
+ * touch of positive tracking so port names / IPs / VLAN ids read like a panel.
+ */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+}
+h1 {
+  letter-spacing: -0.03em;
 }
 
 * {
@@ -95,16 +118,22 @@ body {
  * ------------------------------------------------------------------------- */
 @layer components {
   .nb-mono {
-    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
     font-variant-ligatures: none;
+    /* Instrument tracking — port names, IPs and VLAN ids read like a panel. */
+    letter-spacing: 0.01em;
   }
 
   .nb-card {
-    @apply rounded-xl border bg-bg-elev-1 shadow-[0_1px_0_0_rgba(255,255,255,0.02)_inset];
+    @apply rounded-xl border bg-bg-elev-1;
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+      0 1px 2px 0 rgba(0, 0, 0, 0.3),
+      0 8px 24px -12px rgba(0, 0, 0, 0.45);
   }
 
   .nb-kbd {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
     @apply inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-border-strong bg-bg-elev-2 px-1.5 text-[10px] uppercase tracking-wider text-fg-muted shadow-[0_1px_0_0_rgba(0,0,0,0.4)];
   }
 
@@ -147,6 +176,74 @@ body {
   .text-balance {
     text-wrap: balance;
   }
+
+  /* -----------------------------------------------------------------------
+   * Atmosphere — depth without decoration. A control-room void: a faint
+   * accent-tinted radial glow rising from below, a hairline survey grid, and
+   * a film grain to kill banding. Restrained on purpose; these are backdrops
+   * for instruments, not landing-page hero art.
+   * --------------------------------------------------------------------- */
+  .nb-atmos {
+    position: relative;
+    isolation: isolate;
+    background-color: var(--nb-bg);
+    background-image:
+      radial-gradient(
+        120% 80% at 50% 110%,
+        var(--nb-accent-soft) 0%,
+        transparent 55%
+      ),
+      radial-gradient(
+        90% 60% at 85% -10%,
+        oklch(0.5 0.05 var(--nb-bg-hue) / 0.18) 0%,
+        transparent 60%
+      );
+  }
+  /* Hairline survey grid — engineering-paper texture, barely there. */
+  .nb-grid::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, var(--nb-border) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--nb-border) 1px, transparent 1px);
+    background-size: 44px 44px;
+    -webkit-mask-image: radial-gradient(120% 90% at 50% 30%, black 0%, transparent 75%);
+    mask-image: radial-gradient(120% 90% at 50% 30%, black 0%, transparent 75%);
+    opacity: 0.35;
+  }
+  /* Film grain — SVG fractal noise, kills gradient banding on deep darks. */
+  .nb-grain::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* -----------------------------------------------------------------------
+   * Page-load reveal. Stagger children with --nb-reveal-i (0,1,2,…). The
+   * staggered rise is the signature entry moment on env-picker / login /
+   * device-detail. Fully neutralized under prefers-reduced-motion below.
+   * --------------------------------------------------------------------- */
+  .nb-reveal {
+    animation: reveal-up 440ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--nb-reveal-i, 0) * 70ms);
+  }
+
+  /* The compass needle locking to true north — the brand signature. */
+  .nb-compass-lock {
+    animation: compass-lock 900ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    transform-origin: 50% 50%;
+  }
+
+  .tick-flash {
+    animation: tick-flash 360ms ease-out;
+  }
 }
 
 /* Reduce motion for users who request it */
@@ -158,5 +255,12 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  /* Neutralize any residual transform/opacity so reveals land in final state. */
+  .nb-reveal,
+  .nb-compass-lock {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
 }

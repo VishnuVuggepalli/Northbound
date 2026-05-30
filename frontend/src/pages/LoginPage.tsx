@@ -37,19 +37,20 @@ export function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg p-6">
+    <div className="nb-atmos nb-grid nb-grain flex min-h-screen items-center justify-center p-6">
       <form
         onSubmit={submit}
-        className="nb-card w-full max-w-md space-y-5 border-border-strong p-6 shadow-2xl animate-fade-in"
+        className="nb-card nb-reveal w-full max-w-md space-y-5 border-border-strong p-7"
+        style={{ '--nb-reveal-i': 1 } as React.CSSProperties}
       >
-        <div className="flex flex-col items-center gap-1.5">
-          <Wordmark size={22} />
-          <div className="text-xs uppercase tracking-wider text-fg-subtle">
+        <div className="nb-reveal flex flex-col items-center gap-2" style={{ '--nb-reveal-i': 2 } as React.CSSProperties}>
+          <Wordmark size={26} animate />
+          <div className="nb-mono text-[10px] uppercase tracking-[0.22em] text-fg-subtle">
             SDN management plane
           </div>
         </div>
 
-        <div className="space-y-3">
+        <div className="nb-reveal space-y-3" style={{ '--nb-reveal-i': 3 } as React.CSSProperties}>
           <label className="block">
             <span className="mb-1 block text-[11px] uppercase tracking-wider text-fg-subtle">
               Username
@@ -76,7 +77,14 @@ export function LoginPage() {
           </label>
         </div>
 
-        <Button kind="primary" size="lg" type="submit" disabled={submitting} className="w-full">
+        <Button
+          kind="primary"
+          size="lg"
+          type="submit"
+          disabled={submitting}
+          className="nb-reveal w-full"
+          style={{ '--nb-reveal-i': 4 } as React.CSSProperties}
+        >
           {submitting ? 'Signing in…' : 'Sign in'}
         </Button>
 

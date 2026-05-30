@@ -56,18 +56,27 @@ export function EnvPickerPage() {
   };
 
   return (
-    <div className="flex min-h-[calc(100vh-3.5rem)] flex-col">
-      <div className="border-b border-border bg-bg-elev-1/40 px-6 py-8">
+    <div className="nb-atmos nb-grid flex min-h-[calc(100vh-3.5rem)] flex-col">
+      <div className="border-b border-border bg-bg-elev-1/40 px-6 py-9">
         <div className="mx-auto max-w-5xl">
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-fg-subtle">
-            <Wordmark size={14} glyph={false} />
+          <div
+            className="nb-reveal nb-mono flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-fg-subtle"
+            style={{ '--nb-reveal-i': 0 } as React.CSSProperties}
+          >
+            <Wordmark size={14} glyph />
             <span>·</span>
             <span>v0.1 · internal</span>
           </div>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-fg text-balance">
+          <h1
+            className="nb-reveal mt-3 text-4xl font-semibold tracking-tightest text-fg text-balance"
+            style={{ '--nb-reveal-i': 1 } as React.CSSProperties}
+          >
             Pick an environment
           </h1>
-          <p className="mt-1 max-w-xl text-sm text-fg-muted">
+          <p
+            className="nb-reveal mt-1.5 max-w-xl text-sm text-fg-muted"
+            style={{ '--nb-reveal-i': 2 } as React.CSSProperties}
+          >
             Live state, structured requests, no more port-by-DM.
           </p>
         </div>
@@ -75,7 +84,7 @@ export function EnvPickerPage() {
 
       <div className="flex-1 px-6 py-8">
         <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-2">
-          {envs.map((env) => {
+          {envs.map((env, i) => {
             const ds = devices.filter((d) => d.env === env);
             const envLinks = links.filter(
               ([a]) => devices.find((d) => d.id === a)?.env === env,
@@ -86,9 +95,10 @@ export function EnvPickerPage() {
                 key={env}
                 type="button"
                 onClick={() => handlePick(env)}
-                className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-bg-elev-1 text-left transition-all hover:-translate-y-0.5 hover:border-accent/60 hover:shadow-[0_8px_40px_-8px_var(--nb-accent-soft)]"
+                style={{ '--nb-reveal-i': 3 + i } as React.CSSProperties}
+                className="nb-reveal group flex flex-col overflow-hidden rounded-2xl border border-border bg-bg-elev-1 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/60 hover:shadow-[0_12px_48px_-12px_var(--nb-accent-soft)]"
               >
-                <div className="aspect-[4/2.4] w-full">
+                <div className="aspect-[4/2.4] w-full bg-bg-sunken">
                   <Topology3D devices={ds} links={envLinks} theme={theme} ambient />
                 </div>
                 <div className="border-t border-border p-5">
@@ -154,8 +164,8 @@ function Stat({
   // order.
   return (
     <div className="flex flex-col-reverse">
-      <dt className="text-[10px] uppercase tracking-wider text-fg-subtle">{label}</dt>
-      <dd className={`mb-0.5 text-2xl font-semibold ${tone ? TONE[tone] : TONE.default}`}>
+      <dt className="nb-mono text-[10px] uppercase tracking-[0.12em] text-fg-subtle">{label}</dt>
+      <dd className={`nb-mono mb-0.5 text-2xl font-semibold tabular-nums ${tone ? TONE[tone] : TONE.default}`}>
         {value}
       </dd>
     </div>

@@ -71,7 +71,10 @@ export function DeviceDetailPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between gap-4 border-b border-border bg-bg-elev-1/40 px-5 py-3">
+      <header
+        className="nb-reveal flex items-center justify-between gap-4 border-b border-border bg-bg-elev-1/40 px-5 py-3"
+        style={{ '--nb-reveal-i': 0 } as React.CSSProperties}
+      >
         <div className="flex items-center gap-3">
           <PlatformIcon platform={device.platform} role={device.role} size={16} />
           <div>
@@ -131,7 +134,10 @@ export function DeviceDetailPage() {
 
       {tab === 'ports' ? (
         <div className="grid h-[calc(100%-3.5rem)] grid-rows-[1.6fr_1fr]">
-          <div className="overflow-hidden p-4">
+          <div
+            className="nb-reveal overflow-hidden p-4"
+            style={{ '--nb-reveal-i': 1 } as React.CSSProperties}
+          >
             <Switch3D
               device={device}
               ports={ports}

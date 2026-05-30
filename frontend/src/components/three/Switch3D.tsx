@@ -270,9 +270,12 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
 
   return (
     <>
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[4, 6, 5]} intensity={0.7} />
-      <directionalLight position={[-5, 2, -3]} intensity={0.35} color={0x88aaff} />
+      {/* Instrument lighting: soft fill + a warm key + a cool accent rim so
+          the chassis reads as a real material under control-room light. */}
+      <ambientLight intensity={0.55} />
+      <directionalLight position={[4, 6, 5]} intensity={0.78} />
+      <directionalLight position={[-5, 2, -3]} intensity={0.4} color={0x7fa8ff} />
+      <directionalLight position={[0, -3, 6]} intensity={0.18} color={0x9fd0ff} />
 
       {/* Chassis body */}
       <mesh>
@@ -368,14 +371,14 @@ export function Switch3D({ device, ports, selectedPort, onPick, theme }: Switch3
   }, [layout, ports.length, isFreebsd]);
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-lg bg-[oklch(0.10_0.01_240)]">
+    <div className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-bg-sunken shadow-[0_2px_24px_-8px_rgba(0,0,0,0.6)_inset]">
       <Canvas
         dpr={[1, 2]}
         camera={{ position: [0, 4, 9], fov: 35, near: 0.1, far: 200 }}
         gl={{ antialias: true, alpha: true }}
       >
-        <color attach="background" args={[theme === 'dark' ? '#0c0f12' : '#eef0f3']} />
-        <fog attach="fog" args={[theme === 'dark' ? '#0c0f12' : '#eef0f3', 14, 30]} />
+        <color attach="background" args={[theme === 'dark' ? '#08090c' : '#eef0f3']} />
+        <fog attach="fog" args={[theme === 'dark' ? '#08090c' : '#eef0f3', 14, 30]} />
         <Suspense fallback={null}>
           <Scene
             device={device}

@@ -45,6 +45,10 @@ npm run gen:api   # openapi-typescript http://localhost:8090/openapi.json -o src
 
 - Vite + React 18 + TypeScript strict
 - Tailwind CSS (v3) — design tokens are CSS variables in `src/styles/globals.css`
+- Typography (self-hosted via `@fontsource`, imported in `src/main.tsx` — no
+  CDN, offline-safe): **Sora** for display / wordmark / UI body, **IBM Plex
+  Mono** for the data surfaces (port names, VLAN ids, IPs, config). The mono is
+  the instrument typeface — monospace is the aesthetic for a network tool.
 - `@react-three/fiber` + `@react-three/drei` for 3D
 - TanStack Query for server cache, Zustand for UI state
 - React Router v6
