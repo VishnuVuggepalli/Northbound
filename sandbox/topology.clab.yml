@@ -1,0 +1,75 @@
+# Northbound driver-validation sandbox — containerlab topology.
+#
+# Goal: stand up REAL network-OS instances so Northbound drivers are
+# exercised against live eAPI / SSH / NETCONF, not hand-authored fixtures.
+#
+# Image refs are parameterized via environment variables so the operator can
+# swap in licensed/auth-gated images (cEOS) without editing this file:
+#
+#   CEOS_IMAGE   default ceos:4.32.0F   (you must `docker import` this — see README)
+#   FRR_IMAGE    default quay.io/frrouting/frr:9.1.0   (freely pullable)
+#   HOST_IMAGE   default alpine:latest                 (freely pullable)
+#
+# Deploy:   sandbox/bring-up.sh
+# Destroy:  sandbox/tear-down.sh
+#
+# Reality note (2026-05): in the build sandbox, cEOS could NOT be obtained
+# (requires arista.com login). The `ceos1` node below is therefore declared
+# but will fail to start until the operator imports a cEOS image. The `frr1`
+# node and Linux hosts come up on freely-pullable images and are what the
+# transport layer was live-validated against. See validation-status.md.
+
+name: nb-sandbox
+
+topology:
+  kinds:
+    ceos:
+      image: ${CEOS_IMAGE:=ceos:4.32.0F}
+    linux:
+      image: ${HOST_IMAGE:=alpine:latest}
+
+  nodes:
+    # --- Arista cEOS — real eAPI target (operator supplies image) ---
+    ceos1:
+      kind: ceos
+      # eAPI (command-api) listens on 443 inside the node; mgmt IP is printed
+      # by bring-up.sh. Startup config enables the management-api http-commands
+      # server so Northbound's AristaDriver can reach /command-api.
+      startup-config: |
+        hostname arista-leaf-01
+        !
+        username admin privilege 15 role network-admin secret nbsandbox
+        !
+        management api http-commands
+           protocol http
+           no shutdown
+        !
+        interface Ethernet1
+           description to-host1
+        interface Ethernet2
+           description to-host2
+
+    # --- FRR — real routing-OS CLI over SSH (freely pullable) ---
+    # Stands in for the FreeBSD-with-FRR read path: `vtysh -c "show ..."`.
+    # FRR ships no sshd, so we layer one via a bind-mounted entrypoint that
+    # installs openssh + starts frr daemons. See files/frr/.
+    frr1:
+      kind: linux
+      image: ${FRR_IMAGE:=quay.io/frrouting/frr:9.1.0}
+      binds:
+        - files/frr/daemons:/etc/frr/daemons:ro
+        - files/frr/frr.conf:/etc/frr/frr.conf:ro
+        - files/frr/entrypoint.sh:/nb-entrypoint.sh:ro
+      cmd: /bin/sh /nb-entrypoint.sh
+
+    # --- Linux hosts wired to switch ports (LLDP-capable, ping targets) ---
+    host1:
+      kind: linux
+      cmd: ip addr add 10.10.10.1/24 dev eth1 && sleep infinity
+    host2:
+      kind: linux
+      cmd: ip addr add 10.10.10.2/24 dev eth1 && sleep infinity
+
+  links:
+    - endpoints: ["ceos1:eth1", "host1:eth1"]
+    - endpoints: ["ceos1:eth2", "host2:eth1"]

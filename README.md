@@ -129,11 +129,18 @@ cd frontend && npm test     # vitest unit/component
 | Platform | `platform_id` | Writable | Validation |
 |---|---|---|---|
 | Mock (testing) | `mock` | ✓ | reference impl — full contract suite |
-| Arista EOS (eAPI) | `arista` | ✓ | fixture-backed (recorded), no live hardware here |
-| Cisco | `cisco` | ✓ | fixture-backed (recorded) |
-| Pica8 PicOS (NETCONF) | `pica8` | ✓ | fixture-backed (recorded) |
+| Arista EOS (eAPI) | `arista` | ✓ | code-complete; fixtures **hand-authored** from vendor docs; live: **blocked** (cEOS needs arista.com auth) |
+| Cisco NX-OS (NX-API) | `cisco` | ✓ | code-complete; fixtures **hand-authored**; live: **blocked** (NX-OSv licensed + KVM nesting) |
+| Pica8 PicOS (NETCONF) | `pica8` | ✓ | code-complete; fixtures **hand-authored**; live: **blocked** (no public image) |
 | MikroTik RouterOS / SwOS, FreeBSD | — | planned | not yet implemented |
 
-No driver has been live-validated against physical hardware in this build; the
-non-mock drivers run against recorded fixtures (`tests/fixtures/<platform>/`,
-re-recordable via `NB_RECORD=1`).
+**Honest validation stance.** The non-mock driver fixtures are **hand-authored
+from vendor docs**, not captured from real hardware — so the parser and its
+fixture can share the same wrong guess and still pass green (the "circular
+fixture" problem). The one piece live-validated in this build is the **SSH
+transport** (`asyncssh_client`), exercised against a real **FRR 9.1** node over
+SSH (`sandbox/validate_ssh.py`) — the transport the FreeBSD/FRR read path uses.
+Arista/Cisco/Pica8 remain behaviorally unverified until run against real
+devices. The `sandbox/` rig (containerlab topology + `record_fixtures.py`
+capture harness) closes this gap the moment an operator supplies a cEOS image.
+Per-driver truth table: [`supporting material/vendor-docs/validation-status.md`](supporting%20material/vendor-docs/validation-status.md).
