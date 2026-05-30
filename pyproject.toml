@@ -27,6 +27,10 @@ dependencies = [
  # introspection breaks) and bcrypt 5.0 hard-raises on >72-byte secrets.
  "bcrypt>=4.0,<4.1",
  "slowapi>=0.1.9",
+ # In-process job scheduler (reachability poll, nightly backup, audit-chain
+ # verify, reconciler tick). AsyncIOScheduler runs on the app event loop — no
+ # Redis/Celery broker, per the single-process architecture (principal-eng D9).
+ "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]

@@ -64,6 +64,26 @@ class Settings(BaseSettings):
     # Max distinct devices held in the in-mem port-state cache.
     port_state_cache_capacity: int = Field(default=512, ge=1)
 
+    # --- Background jobs (APScheduler) — principal-engineering "polling jobs" ---
+    # Reachability poll cadence (seconds). D2 reachability TTL = 60s.
+    poll_interval_seconds: int = Field(default=60, ge=1)
+    # Per-device reachability probe timeout (seconds); a slow/unreachable device
+    # must not stall the whole poll batch.
+    reachability_timeout_seconds: float = Field(default=5.0, gt=0)
+    # Nightly config backup — cron (5-field: m h dom mon dow). 03:00 daily.
+    nightly_backup_cron: str = Field(default="0 3 * * *")
+    # Nightly audit-chain verify — cron. 03:30 daily (after the backup run).
+    audit_verify_cron: str = Field(default="30 3 * * *")
+    # Reconciler tick cadence (seconds). D4: every 10s.
+    reconciler_interval_seconds: int = Field(default=10, ge=1)
+    # An ``applying`` request whose latest event is older than this is treated as
+    # crash-interrupted mid-apply (process died between APPLYING and the next
+    # transition) and is failed for human review — never auto-retried.
+    reconciler_apply_stale_seconds: int = Field(default=300, ge=1)
+    # Master switch for the in-process scheduler. Forced False under tests so
+    # the suite never spawns real timers (no hangs). See ``main.lifespan``.
+    enable_scheduler: bool = Field(default=True)
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -44,6 +44,7 @@ from northbound.schemas.driver import (
     DiscoveryResult,
     PortState,
 )
+from northbound.services import reachability
 from northbound.services.credvault import FernetCredVault, serialize_credentials
 from northbound.services.device_policy import is_writable
 from northbound.services.onboarding import onboard_device
@@ -252,7 +253,8 @@ async def list_devices(
     if environment is not None:
         stmt = stmt.where(Device.environment == environment)
     rows = await session.scalars(stmt)
-    return [_device_out(d) for d in rows.all()]
+    # Reachability is served from the in-mem poll map (None = not yet polled).
+    return [_device_out(d, reachable=reachability.is_reachable(d.id)) for d in rows.all()]
 
 
 @router.get("/{device_id}", response_model=DeviceOut)
@@ -263,7 +265,7 @@ async def get_device(
 ) -> DeviceOut:
     """Device detail. Never returns creds."""
     device = await _load_device(session, device_id)
-    return _device_out(device)
+    return _device_out(device, reachable=reachability.is_reachable(device.id))
 
 
 # --------------------------------------------------------------------------- #

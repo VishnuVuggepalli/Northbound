@@ -1,3 +1,8 @@
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
 from slowapi import _rate_limit_exceeded_handler
@@ -11,6 +16,10 @@ import northbound.drivers.mock
 import northbound.drivers.pica8  # noqa: F401  (registers)
 from northbound.api import audit, auth, devices, platforms, ports, requests, users
 from northbound.api.limiter import limiter
+from northbound.config import get_settings
+from northbound.services.scheduler import build_scheduler
+
+logger = logging.getLogger("northbound.main")
 
 
 class HealthResponse(BaseModel):
@@ -28,7 +37,32 @@ def _rate_limit_handler(request: Request, exc: Exception) -> Response:
     return _rate_limit_exceeded_handler(request, exc)
 
 
-app = FastAPI(title="Northbound", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Start the in-process scheduler on startup; stop it on shutdown.
+
+    Gated on ``settings.enable_scheduler`` (forced ``False`` under tests) so the
+    test suite never spawns real APScheduler timers — which would otherwise keep
+    the event loop alive and hang collection. In production the four background
+    jobs (reachability poll, nightly backup, audit verify, reconciler) run here.
+    """
+    settings = get_settings()
+    scheduler: AsyncIOScheduler | None = None
+    if settings.enable_scheduler:
+        scheduler = build_scheduler(settings)
+        scheduler.start()
+        logger.info("scheduler started with %d job(s)", len(scheduler.get_jobs()))
+    else:
+        logger.info("scheduler disabled (enable_scheduler=False); no background jobs")
+    try:
+        yield
+    finally:
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
+            logger.info("scheduler shut down")
+
+
+app = FastAPI(title="Northbound", version="0.1.0", lifespan=lifespan)
 
 # Wire the slowapi limiter: state + the 429 exception handler.
 app.state.limiter = limiter
