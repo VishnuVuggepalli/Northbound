@@ -106,8 +106,8 @@ export function AboutPage() {
 
       <section className="text-xs text-fg-subtle">
         <p>
-          When a change falls outside this scope &mdash; complex BGP, vendor-specific knobs, SwOS
-          writes &mdash; Northbound surfaces an <strong>&ldquo;Open in vendor UI&rdquo;</strong>{' '}
+          When a change falls outside this scope &mdash; complex BGP, route-maps, vendor-specific
+          knobs &mdash; Northbound surfaces an <strong>&ldquo;Open in vendor UI&rdquo;</strong>{' '}
           button so you escape cleanly to the device&rsquo;s native interface. No dead ends.
         </p>
       </section>
