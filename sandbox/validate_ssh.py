@@ -35,7 +35,7 @@ async def _run(args: argparse.Namespace) -> int:
             port=args.port,
             username=args.username,
             password=args.password,
-            known_hosts_mode="accept-new",
+            known_hosts_mode="insecure",  # lab-only; see asyncssh_client honest modes
             timeout_seconds=15.0,
         )
     )
