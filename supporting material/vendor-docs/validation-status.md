@@ -12,7 +12,7 @@ behaviorally unverified.
 | Driver | `platform_id` | Code-complete | Fixtures | Live-validated | NOS version tested | Why blocked |
 |---|---|---|---|---|---|---|
 | Mock | `mock` | ✓ | n/a (in-proc) | ✓ (deterministic) | n/a | — |
-| Arista EOS | `arista` | ✓ | **authored** + live | ✓ **LIVE** | **vEOS-lab 4.27.0F** (qemu/KVM) | Full driver validated over eAPI: test_credentials / get_ports / get_running_config + the commit-confirm WRITE path (`configure session` + `commit timer`, confirm, **and** apply→revert). **Found + fixed 3 real bugs** (see below). |
+| Arista EOS | `arista` | ✓ | **authored** + live | ✓ **LIVE (deep)** | **vEOS-lab 4.27.0F** (1- and 2-node) | Full driver over eAPI: reads + commit-confirm WRITE (`configure session`/`commit timer`, confirm, apply→revert) for BOTH **access AND trunk/tagged-VLAN** (native+allowed list, parsed back), plus **LLDP `get_neighbors`** against a real 2-node adjacency incl. exact port-filter. **Found + fixed 4 real bugs** (3 below + LLDP port_id literal-quote strip). |
 | Cisco IOS/NX-OS | `cisco` | ✓ | **authored** + live | **SSH read ✓ + NX-API read+write ✓** | **IOSv 15.8 / IOSvL2 15.2 (SSH), NX-OSv 7.3 (NX-API)** | SSH read path vs IOSv/IOSvL2 (incl. get_ports). **NX-API path fully live-validated vs NX-OSv 7.3 Titanium**: test_credentials, get_ports (145 ifaces), get_running_config + the commit-confirm WRITE path (checkpoint+config, confirm, apply→revert). **Found + fixed 4 real bugs total** (SSH VLAN-column; NX-API Content-Type; NX-API command-array; bare `switchport`). SSH parser now uses ntc-templates. |
 | Pica8 PicOS | `pica8` | ✓ | **authored** (XML) | **transport ✓ / data-models ✗ (1 suspected bug flagged)** | Netopeer2 (transport) | NETCONF transport + confirmed-commit live-validated vs Netopeer2 (2 bugs found+fixed). Data models still **device-blocked**: PicOS-V is free but **registration-gated at pica8.com** with NO anonymous mirror (unlike vEOS) — searched Drive/Mega/GitHub, none exist; needs operator to supply the qcow2 or Pica8 portal creds. Pre-live code-review finding (NOT yet device-confirmed): edit-config sends `<config><interfaces>` namespace-less, but the device config tree is rooted at `<configuration xmlns="http://xml.juniper.net/xnm/1.1/xnm">` — a real PicOS may reject the payload for the missing xnm `<configuration>` wrapper. NOT blind-fixed (guessing repeats the circular-fixture trap); resolve against a live PicOS-V. |
 
@@ -100,6 +100,16 @@ to the host) — read paths AND the commit-confirm write path:
 Arista driver live validation: PASS
 ```
 
+Depth note (added after the initial happy-path pass): a **2-node vEOS topology**
+(overlay disks sharing the configured base, linked by a qemu socket) was stood up
+so real LLDP adjacency exists. `get_neighbors` parsed the real neighbor (chassis,
+remote port, the `[local-port]` prefix) and the exact port-filter matched —
+exposing a 4th bug: the remote `interfaceId` is wrapped in literal quotes on vEOS
+(`"Ethernet1"`); now stripped (prefer `interfaceId_v2`, route through
+`normalize_port_id`). The **trunk/tagged-VLAN** write path (native vlan + allowed
+list) was also applied and parsed back correctly — previously only access VLAN
+was exercised.
+
 **Three real production bugs found ONLY against the real device** (mock unit
 tests had returned canned data regardless of enable mode / session state):
 
@@ -167,6 +177,12 @@ routed-by-default NX-OS port rejects `switchport mode access` until a bare
 proven end to end on real NX-OS. Reproduce: boot Titanium + `feature nxapi` per
 the header of `sandbox/validate_cisco_nxapi.py` (HTTP — Titanium's NX-API HTTPS
 TLS doesn't serve).
+
+Cisco depth still UNvalidated (honest): NX-API **trunk** write (only access VLAN
+tested live; trunk uses the same array+`switchport` mechanism) and NX-API/IOS
+**LLDP `get_neighbors`** (single-node labs → no adjacency). These need a 2-node
+Cisco topology; the parse logic is unit-tested but not device-confirmed (the
+class of gap that the Arista 2-node run turned into a real bug).
 
 > ONLY remaining gap: **Pica8 PicOS data models** — no public PicOS image exists
 > anywhere. The NETCONF transport + confirmed-commit it relies on are

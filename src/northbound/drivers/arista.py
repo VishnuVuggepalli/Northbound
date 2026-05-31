@@ -539,9 +539,15 @@ def _parse_lldp(payload: object) -> list[Neighbor]:
             port_id_raw = entry.get("neighborInterfaceInfo", {})
             port_id = ""
             if isinstance(port_id_raw, dict):
-                pid = port_id_raw.get("interfaceId") or port_id_raw.get("interfaceIdName")
+                # Prefer interfaceId_v2 (clean); interfaceId is wrapped in literal
+                # quotes on vEOS (verified live). normalize_port_id strips them.
+                pid = (
+                    port_id_raw.get("interfaceId_v2")
+                    or port_id_raw.get("interfaceId")
+                    or port_id_raw.get("interfaceIdName")
+                )
                 if isinstance(pid, str):
-                    port_id = pid.strip()
+                    port_id = lldp.normalize_port_id(pid)
             sys_name = entry.get("systemName")
             sys_desc = entry.get("systemDescription")
             desc_prefix = lldp.encode_local_port_prefix(local_port)

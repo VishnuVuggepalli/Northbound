@@ -38,6 +38,14 @@ def test_port_id_interface_name_returns_text() -> None:
     assert normalize_port_id(b"Ethernet1", subtype=5) == "Ethernet1"
 
 
+def test_port_id_strips_literal_surrounding_quotes() -> None:
+    # Arista eAPI returns interfaceId wrapped in literal quotes (live on vEOS).
+    assert normalize_port_id('"Ethernet1"') == "Ethernet1"
+    assert normalize_port_id("'Ethernet1'") == "Ethernet1"
+    # Don't strip non-matching / interior quotes.
+    assert normalize_port_id('Eth"1') == 'Eth"1'
+
+
 def test_parse_snmp_lldp_table_builds_neighbors() -> None:
     rows = [
         {

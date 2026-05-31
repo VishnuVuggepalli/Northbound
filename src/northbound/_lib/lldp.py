@@ -62,7 +62,19 @@ def normalize_port_id(raw: bytes | str, subtype: int | None = None) -> str:
     if subtype in (2,) and isinstance(raw, bytes):
         # portComponent often comes back as an ASCII decimal
         return _as_text(raw).strip()
-    return _as_text(raw).strip()
+    return _strip_quotes(_as_text(raw).strip())
+
+
+def _strip_quotes(value: str) -> str:
+    """Strip matching surrounding single/double quotes.
+
+    Arista eAPI returns the LLDP ``interfaceId`` wrapped in literal double
+    quotes (``"Ethernet1"`` — verified live on vEOS), which would otherwise
+    leak into the canonical port id. Only strips when both ends match.
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
 
 
 def encode_local_port_prefix(local_port: str) -> str:
