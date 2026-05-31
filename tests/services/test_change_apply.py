@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from northbound.drivers import registry
 from northbound.drivers.base import Driver, DriverError
 from northbound.models.audit_log import AuditLog
+from northbound.models.change_request import ChangeRequest
 from northbound.models.change_request_event import ChangeRequestEvent
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
@@ -29,7 +31,7 @@ from northbound.schemas.driver import (
     PortState,
     TestResult,
 )
-from northbound.services import change_apply, requests
+from northbound.services import audit, change_apply, requests
 from northbound.services.change_apply import ApplyFailed, StateDrift
 from northbound.services.credvault import FernetCredVault, serialize_credentials
 
@@ -271,6 +273,10 @@ async def test_apply_driver_failure_marks_failed(
 
     with pytest.raises(ApplyFailed):
         await change_apply.apply_request(db_session, req, device, admin)
+    # apply_request now commits the FAILED transition + failure audit before
+    # raising (AUD-2). expire_on_commit=False keeps these readable on the same
+    # session; the authoritative durability check is the through-get_session
+    # test below, which reads from a FRESH session.
     assert req.status == S.FAILED
     failed_audit = await db_session.scalar(
         select(AuditLog).where(AuditLog.action == "request.apply_failed")
@@ -283,3 +289,107 @@ async def test_apply_driver_failure_marks_failed(
         )
     ).all()
     assert S.FAILED.value in {e.to_status for e in events}
+
+
+# --------------------------------------------------------------------------- #
+# AUD-2: apply failure must survive the HTTP error path (through get_session).
+# The route raises HTTPException(502) → get_session rolls back; without the
+# service-owned commit the FAILED status + failure audit would be discarded and
+# the request orphaned in `applying`. This drives the failure through the real
+# get_session wrapper + an httpx.AsyncClient and verifies in a FRESH session.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_apply_failure_persists_through_get_session(
+    db_engine: AsyncEngine,
+) -> None:
+    from northbound.auth.jwt import create_access_token
+    from northbound.auth.password import hash_password
+    from northbound.config import get_settings
+    from northbound.db import get_session
+    from northbound.main import app
+    from northbound.models.enums import UserRole
+
+    factory = async_sessionmaker(bind=db_engine, expire_on_commit=False, autoflush=False)
+
+    async def _real_like_get_session() -> AsyncIterator[AsyncSession]:
+        """Mirror production get_session: commit on success, rollback on error."""
+        session = factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+    # ---- seed in its own committed session (so HTTP requests see it) --------
+    async with factory() as seed:
+        admin = User(username="adm-h", password_hash=hash_password("a"), role=UserRole.ADMIN)
+        alice = User(username="al-h", password_hash=hash_password("b"), role=UserRole.REQUESTER)
+        seed.add_all([admin, alice])
+        await seed.flush()
+        device = Device(
+            name="dev-applyfail-http",
+            environment=Environment.LAB,
+            platform="applyfail",
+            role=DeviceRole.LEAF,
+            mgmt_ip="10.0.0.77",
+            prefer_native_api=True,
+            encrypted_credentials=serialize_credentials(
+                Credentials(username="u"), FernetCredVault.from_settings()
+            ),
+        )
+        seed.add(device)
+        await seed.flush()
+        req = await requests.create_request(
+            seed,
+            device=device,
+            port_name="Eth1",
+            requested_changes=PortChange(untagged_vlan=200),
+            reason="r",
+            user=alice,
+        )
+        await requests.approve_request(seed, req, admin)
+        await seed.commit()
+        request_id = req.id
+        admin_id = admin.id
+        admin_role = admin.role
+
+    token = create_access_token(sub=admin_id, role=admin_role, settings=get_settings())
+
+    app.dependency_overrides[get_session] = _real_like_get_session
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/requests/{request_id}/apply",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+    # The driver rejected → 502.
+    assert resp.status_code == 502
+
+    # ---- verify in a FRESH session: the failure record durably persisted ----
+    async with factory() as check:
+        reloaded = await check.scalar(select(ChangeRequest).where(ChangeRequest.id == request_id))
+        assert reloaded is not None
+        assert reloaded.status == S.FAILED, "FAILED status was rolled back by get_session"
+
+        failed_event = await check.scalar(
+            select(ChangeRequestEvent).where(
+                ChangeRequestEvent.request_id == request_id,
+                ChangeRequestEvent.to_status == S.FAILED.value,
+            )
+        )
+        assert failed_event is not None, "failure event was rolled back"
+
+        failed_audit = await check.scalar(
+            select(AuditLog).where(AuditLog.action == "request.apply_failed")
+        )
+        assert failed_audit is not None, "apply_failed audit row was rolled back"
+        # The persisted audit chain must still verify.
+        ok, index = await audit.verify_chain(check)
+        assert ok is True, f"audit chain broke at index {index}"

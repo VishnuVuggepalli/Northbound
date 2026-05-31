@@ -14,6 +14,7 @@ Hard rules:
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import json
@@ -25,6 +26,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from northbound.models.audit_log import AuditLog
 
 GENESIS = "GENESIS"
+
+# Serializes the read-tip → build-row → flush critical section in
+# :func:`append_audit`. Without it, two concurrent appends can both read the
+# same chain tip, claim the same ``prev_hash``, and fork the chain — which
+# :func:`verify_chain` would then (correctly) report as broken.
+#
+# This is correct for the single-worker deployment (principal-engineering D9:
+# one uvicorn worker, one process). A multi-worker / multi-process deployment
+# would need a DB-level guarantee instead (e.g. a unique constraint on
+# ``prev_hash`` plus insert-retry, or SELECT ... FOR UPDATE on the tip), since
+# an in-process lock does not span processes.
+_APPEND_LOCK = asyncio.Lock()
 
 # Defense-in-depth: keys whose values must never land in audit JSON. Callers
 # are expected to redact upstream; this is a backstop, not the primary guard.
@@ -45,18 +58,33 @@ _SECRET_KEYS: frozenset[str] = frozenset(
 _REDACTED = "[REDACTED]"
 
 
+def _redact_value(val: object) -> object:
+    """Recurse through dicts, lists, and tuples; pass scalars unchanged.
+
+    A secret nested inside a list (e.g. ``{"items": [{"password": "p"}]}``)
+    must be redacted, not just top-level dict keys.
+    """
+    if isinstance(val, dict):
+        return _redact(val)  # type: ignore[arg-type]  # nested mapping
+    if isinstance(val, (list, tuple)):
+        return [_redact_value(item) for item in val]
+    return val
+
+
 def _redact(value: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Recursively replace secret-keyed values with a redaction marker."""
+    """Recursively replace secret-keyed values with a redaction marker.
+
+    Recurses into nested dicts and into list/tuple elements so a secret-keyed
+    value can never reach the audit JSON in plaintext regardless of nesting.
+    """
     if value is None:
         return None
     out: dict[str, Any] = {}
     for key, val in value.items():
         if key.lower() in _SECRET_KEYS:
             out[key] = _REDACTED
-        elif isinstance(val, dict):
-            out[key] = _redact(val)  # type: ignore[arg-type]  # nested mapping
         else:
-            out[key] = val
+            out[key] = _redact_value(val)
     return out
 
 
@@ -137,41 +165,49 @@ async def append_audit(
     """
     safe_before = _redact(before)
     safe_after = _redact(after)
-    prev_hash = await _latest_hash(session)
 
-    # Stamp created_at explicitly with microsecond precision (UTC), overriding
-    # the second-resolution server default. This gives a near-unique, monotonic
-    # ordering key so the chain's tip query and verify walk agree even on rows
-    # inserted within the same wall-clock second.
-    created = dt.datetime.now(tz=dt.UTC)
+    # Hold the append lock across read-tip → build-row → flush so the chain tip
+    # cannot move under us between reading it and persisting this row. Two
+    # concurrent appends would otherwise read the same tip and fork the chain
+    # (see _APPEND_LOCK). Single-worker correct; multi-worker caveat documented
+    # on _APPEND_LOCK.
+    async with _APPEND_LOCK:
+        prev_hash = await _latest_hash(session)
 
-    row = AuditLog(
-        user_id=user_id,
-        action=action,
-        target_device_id=target_device_id,
-        target_port=target_port,
-        before=safe_before,
-        after=safe_after,
-        result=result,
-        row_hash="",  # filled after we know created_at
-        prev_hash=prev_hash,
-        created_at=created,
-    )
-    session.add(row)
-    await session.flush()
+        # Stamp created_at explicitly with microsecond precision (UTC),
+        # overriding the second-resolution server default. This gives a
+        # near-unique, monotonic ordering key so the chain's tip query and
+        # verify walk agree even on rows inserted within the same wall-clock
+        # second.
+        created = dt.datetime.now(tz=dt.UTC)
 
-    row.row_hash = compute_row_hash(
-        prev_hash=prev_hash,
-        user_id=user_id,
-        action=action,
-        target_device_id=target_device_id,
-        target_port=target_port,
-        before=safe_before,
-        after=safe_after,
-        result=result,
-        created_at=row.created_at,
-    )
-    await session.flush()
+        row = AuditLog(
+            user_id=user_id,
+            action=action,
+            target_device_id=target_device_id,
+            target_port=target_port,
+            before=safe_before,
+            after=safe_after,
+            result=result,
+            row_hash="",  # filled after we know created_at
+            prev_hash=prev_hash,
+            created_at=created,
+        )
+        session.add(row)
+        await session.flush()
+
+        row.row_hash = compute_row_hash(
+            prev_hash=prev_hash,
+            user_id=user_id,
+            action=action,
+            target_device_id=target_device_id,
+            target_port=target_port,
+            before=safe_before,
+            after=safe_after,
+            result=result,
+            created_at=row.created_at,
+        )
+        await session.flush()
     return row
 
 

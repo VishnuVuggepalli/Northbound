@@ -104,7 +104,12 @@ async def apply_request(
             after={"fingerprint": live_fingerprint},
             result="blocked",
         )
-        await session.flush()
+        # Commit the drift record before raising: the route turns StateDrift
+        # into a 409 which propagates through get_session → rollback(). Without
+        # an explicit commit here, the drift audit row would be discarded and
+        # the block would leave no trace. The success path stays managed by
+        # get_session; only terminal-error paths own their commit boundary.
+        await session.commit()
         raise StateDrift(request.device_state_fingerprint, live_fingerprint)
 
     # 5. status -> applying (+ event).
@@ -152,7 +157,12 @@ async def apply_request(
             after={"error": str(exc)},
             result="error",
         )
-        await session.flush()
+        # Commit the FAILED transition + failure audit (+ the backup taken
+        # above, which is evidence) before raising. The route maps ApplyFailed
+        # to a 502 which propagates through get_session → rollback(); without
+        # this commit the failure record, status, and backup are all discarded
+        # and the request is orphaned in `applying` with no record of why.
+        await session.commit()
         raise ApplyFailed(str(exc)) from exc
 
     if not result.success:
@@ -172,7 +182,10 @@ async def apply_request(
             after={"error": result.error},
             result="error",
         )
-        await session.flush()
+        # Same commit-boundary rationale as the DriverError branch above: persist
+        # the FAILED transition + failure audit + backup before raising so they
+        # survive the route's 502 → get_session rollback.
+        await session.commit()
         raise ApplyFailed(result.error or "apply reported failure")
 
     # 9. Audit the apply (before/after = rendered diff summary, NEVER creds).
@@ -244,7 +257,9 @@ async def confirm_request(
             after={"error": str(exc)},
             result="error",
         )
-        await session.flush()
+        # Commit the confirm-failure audit before raising; the route maps this
+        # to a 502 → get_session rollback that would otherwise discard it.
+        await session.commit()
         raise ApplyFailed(str(exc)) from exc
 
     request.applied_at = dt.datetime.now(tz=dt.UTC)

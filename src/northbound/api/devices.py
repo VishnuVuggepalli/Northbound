@@ -24,7 +24,6 @@ from northbound.db import get_session
 from northbound.drivers.base import AuthError, DriverError, ReachabilityError
 from northbound.drivers.factory import driver_for, driver_from_params
 from northbound.drivers.registry import get_driver_class
-from northbound.models.audit_log import AuditLog
 from northbound.models.device import Device
 from northbound.models.enums import Environment
 from northbound.models.user import User
@@ -44,7 +43,7 @@ from northbound.schemas.driver import (
     DiscoveryResult,
     PortState,
 )
-from northbound.services import reachability
+from northbound.services import audit, reachability
 from northbound.services.credvault import FernetCredVault, serialize_credentials
 from northbound.services.device_policy import is_writable
 from northbound.services.onboarding import onboard_device
@@ -322,15 +321,16 @@ async def delete_device(
     mgmt_ip = device.mgmt_ip
     await session.delete(device)
 
-    session.add(
-        AuditLog(
-            user_id=admin.id,
-            action="device.offboarded",
-            target_device_id=None,  # device row is being deleted
-            before={"name": name, "platform": platform, "mgmt_ip": mgmt_ip},
-            after=None,
-            result="ok",
-            row_hash="",
-            prev_hash=None,
-        )
+    # Chain the offboard audit row through append_audit so it gets a real
+    # row_hash and links to the current tip (was previously written with an
+    # empty row_hash, which broke verify_chain and re-rooted the next append).
+    # target_device_id stays None because the device row is being deleted.
+    await audit.append_audit(
+        session,
+        user_id=admin.id,
+        action="device.offboarded",
+        target_device_id=None,
+        before={"name": name, "platform": platform, "mgmt_ip": mgmt_ip},
+        after=None,
+        result="ok",
     )

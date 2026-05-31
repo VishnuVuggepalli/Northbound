@@ -20,12 +20,12 @@ import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from northbound.models.audit_log import AuditLog
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
 from northbound.models.enums import DeviceRole, Environment
 from northbound.models.port_metadata import PortMetadata
 from northbound.schemas.driver import Credentials, DiscoveryResult
+from northbound.services import audit
 from northbound.services.credvault import CredVault, serialize_credentials
 
 # Legacy port-description convention (see plan.md):
@@ -68,7 +68,6 @@ async def onboard_device(
     discovery: DiscoveryResult,
     vault: CredVault,
     actor_user_id: str | None,
-    prev_audit_hash: str | None = None,
 ) -> Device:
     """Persist a device + ports + baseline backup + audit entry in one unit.
 
@@ -114,17 +113,18 @@ async def onboard_device(
         )
     )
 
-    session.add(
-        AuditLog(
-            user_id=actor_user_id,
-            action="device.onboarded",
-            target_device_id=device.id,
-            before=None,
-            after={"name": name, "platform": platform_id, "mgmt_ip": mgmt_ip},
-            result="ok",
-            row_hash="",  # hash-chain logic lands in the services wave (D6)
-            prev_hash=prev_audit_hash,
-        )
+    # Chain the audit row through append_audit so it gets a real row_hash and
+    # links to the current chain tip. This runs inside the caller's
+    # savepoint/transaction (create_device wraps it in begin_nested), so the
+    # device + ports + backup + audit row commit or roll back atomically.
+    await audit.append_audit(
+        session,
+        user_id=actor_user_id,
+        action="device.onboarded",
+        target_device_id=device.id,
+        before=None,
+        after={"name": name, "platform": platform_id, "mgmt_ip": mgmt_ip},
+        result="ok",
     )
     await session.flush()
     return device
