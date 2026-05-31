@@ -115,13 +115,40 @@ def _aware(value: dt.datetime) -> dt.datetime:
 async def _fail_confirm_expired(
     session: AsyncSession,
     request: ChangeRequest,
-) -> None:
+) -> bool:
     """awaiting_confirm past deadline → failed. Device self-reverts; we record.
 
-    Defensively calls ``driver.revert(token)`` for platforms that need an
-    explicit abort. Any driver error there is logged, not propagated.
+    CON-2 race guard: the awaiting_confirm → failed move is an atomic conditional
+    UPDATE. If an operator's confirm won the race at the same tick (the row is no
+    longer ``awaiting_confirm``), the claim matches 0 rows → we skip entirely
+    (no defensive revert, no double driver drive). Returns ``True`` iff this call
+    transitioned the row to ``failed``.
+
+    On a successful claim, defensively calls ``driver.revert(token)`` for
+    platforms that need an explicit abort. Any driver error there is logged, not
+    propagated. The revert runs only AFTER we own the transition, so it can never
+    race a concurrent confirm onto the same device.
     """
     token = request.confirm_token
+    # CLAIM FIRST: own the transition out of awaiting_confirm before any device
+    # I/O. Loser (operator confirm raced in) → skip.
+    try:
+        await requests.claim_transition(
+            session,
+            request,
+            expected=(S.AWAITING_CONFIRM,),
+            to_status=S.FAILED,
+            actor=SYSTEM_ACTOR,
+            payload={"reason": _CONFIRM_EXPIRED_REASON},
+        )
+    except requests.AlreadyClaimed:
+        logger.info(
+            "reconciler: request %s already transitioned out of awaiting_confirm "
+            "(operator confirm won the race); skipping deadline-revert",
+            request.id,
+        )
+        return False
+
     device = await session.get(Device, request.device_id)
     if device is not None and token:
         try:
@@ -138,13 +165,6 @@ async def _fail_confirm_expired(
     request.confirm_token = None
     request.confirm_deadline_at = None
     session.add(request)
-    await requests.record_transition(
-        session,
-        request,
-        to_status=S.FAILED,
-        actor=SYSTEM_ACTOR,
-        payload={"reason": _CONFIRM_EXPIRED_REASON},
-    )
     await audit.append_audit(
         session,
         user_id=None,
@@ -159,20 +179,37 @@ async def _fail_confirm_expired(
         request.id,
         _CONFIRM_EXPIRED_REASON,
     )
+    return True
 
 
 async def _fail_interrupted(
     session: AsyncSession,
     request: ChangeRequest,
-) -> None:
-    """applying + stale → failed for human review. Never auto-retried."""
-    await requests.record_transition(
-        session,
-        request,
-        to_status=S.FAILED,
-        actor=SYSTEM_ACTOR,
-        payload={"reason": _INTERRUPTED_REASON},
-    )
+) -> bool:
+    """applying + stale → failed for human review. Never auto-retried.
+
+    CON-3 race guard: the applying → failed move is an atomic conditional UPDATE.
+    If the live apply coroutine just advanced the row (to awaiting_confirm /
+    applied / its own failed), the claim matches 0 rows → we skip rather than
+    clobber a row the apply just moved. Returns ``True`` iff we failed the row.
+    """
+    try:
+        await requests.claim_transition(
+            session,
+            request,
+            expected=(S.APPLYING,),
+            to_status=S.FAILED,
+            actor=SYSTEM_ACTOR,
+            payload={"reason": _INTERRUPTED_REASON},
+        )
+    except requests.AlreadyClaimed:
+        logger.info(
+            "reconciler: request %s left applying before the stale-cutoff fired "
+            "(apply coroutine advanced it); skipping interrupt",
+            request.id,
+        )
+        return False
+
     await audit.append_audit(
         session,
         user_id=None,
@@ -187,6 +224,7 @@ async def _fail_interrupted(
         request.id,
         _INTERRUPTED_REASON,
     )
+    return True
 
 
 async def reconcile_once(
@@ -222,14 +260,27 @@ async def reconcile_once(
     for request in rows:
         if request.status == S.AWAITING_CONFIRM:
             deadline = request.confirm_deadline_at
-            if deadline is not None and deadline <= now_epoch:
-                await _fail_confirm_expired(session, request)
+            if (
+                deadline is not None
+                and deadline <= now_epoch
+                and await _fail_confirm_expired(session, request)
+            ):
                 failed += 1
-            # else: still inside the window — leave untouched.
+            # else: still inside the window (or operator confirmed) — leave untouched.
         elif request.status == S.APPLYING:
+            # Liveness = the most recent of the last transition event and the
+            # mid-apply heartbeat. change_apply bumps ``updated_at`` right before
+            # the long device call (CON-3); the raw conditional UPDATE in
+            # claim_transition does not touch onupdate, so without folding in
+            # ``updated_at`` here the heartbeat would be invisible and a slow-
+            # but-live apply could be wrongly reaped.
             last_event = await _latest_event_at(session, request.id)
-            if last_event is None or _aware(last_event) <= stale_cutoff:
-                await _fail_interrupted(session, request)
+            liveness_candidates = [
+                _aware(t) for t in (last_event, request.updated_at) if t is not None
+            ]
+            liveness = max(liveness_candidates) if liveness_candidates else None
+            stale = liveness is None or liveness <= stale_cutoff
+            if stale and await _fail_interrupted(session, request):
                 failed += 1
             # else: an apply is genuinely in progress — leave untouched.
 

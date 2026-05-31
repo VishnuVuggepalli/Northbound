@@ -23,7 +23,7 @@ from northbound.models.user import User
 from northbound.schemas.request import RequestCreateIn, RequestOut, RequestRejectIn
 from northbound.services import change_apply, requests
 from northbound.services.change_apply import ApplyError, ApplyFailed, StateDrift
-from northbound.services.requests import IllegalTransition, RequestError
+from northbound.services.requests import AlreadyClaimed, IllegalTransition, RequestError
 
 router = APIRouter(prefix="/api/requests", tags=["requests"])
 
@@ -164,6 +164,12 @@ async def apply_request(
         ) from exc
     except ApplyFailed as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except AlreadyClaimed as exc:
+        # A concurrent apply already claimed this request → 409, no device push.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "ALREADY_CLAIMED", "message": str(exc)},
+        ) from exc
     except IllegalTransition as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ApplyError as exc:

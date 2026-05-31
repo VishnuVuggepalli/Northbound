@@ -35,8 +35,15 @@ async def _make_request(
     status: S,
     confirm_deadline_at: float | None = None,
     confirm_token: str | None = None,
+    updated_at: dt.datetime | None = None,
 ) -> ChangeRequest:
-    """Insert a request directly in the target status (bypassing the flow)."""
+    """Insert a request directly in the target status (bypassing the flow).
+
+    ``updated_at`` is the CON-3 liveness heartbeat the reconciler folds into
+    its staleness decision for APPLYING rows; pass it explicitly so tests don't
+    depend on the real wall clock (which the server_default would otherwise
+    stamp, and which is unrelated to the injected ``now``).
+    """
     request = ChangeRequest(
         device_id=device.id,
         port_name="Eth1",
@@ -49,6 +56,10 @@ async def _make_request(
     )
     session.add(request)
     await session.flush()
+    if updated_at is not None:
+        request.updated_at = updated_at
+        session.add(request)
+        await session.flush()
     return request
 
 
@@ -154,9 +165,10 @@ async def test_applying_stale_fails_interrupted(
     db_session: AsyncSession,
     device: Device,
 ) -> None:
-    """An applying request whose latest event is old → failed 'interrupted'."""
-    request = await _make_request(db_session, device, status=S.APPLYING)
+    """An applying request whose latest event AND heartbeat are old → failed
+    'interrupted'."""
     stale = _NOW - dt.timedelta(seconds=600)
+    request = await _make_request(db_session, device, status=S.APPLYING, updated_at=stale)
     await _add_event(db_session, request, to_status=S.APPLYING, created_at=stale)
 
     count = await reconciler.reconcile_once(db_session, now=_NOW, apply_stale_seconds=300)
@@ -177,9 +189,29 @@ async def test_applying_fresh_event_untouched(
     device: Device,
 ) -> None:
     """An applying request with a recent event → genuinely in progress, left be."""
-    request = await _make_request(db_session, device, status=S.APPLYING)
     fresh = _NOW - dt.timedelta(seconds=2)
+    request = await _make_request(db_session, device, status=S.APPLYING, updated_at=fresh)
     await _add_event(db_session, request, to_status=S.APPLYING, created_at=fresh)
+
+    count = await reconciler.reconcile_once(db_session, now=_NOW, apply_stale_seconds=300)
+    await db_session.refresh(request)
+
+    assert count == 0
+    assert request.status == S.APPLYING
+
+
+async def test_applying_fresh_heartbeat_old_event_untouched(
+    db_session: AsyncSession,
+    device: Device,
+) -> None:
+    """CON-3 regression: the only transition event is the OLD claim event, but
+    the mid-apply heartbeat (updated_at) is fresh → a slow-but-live apply must
+    NOT be reaped. Guards against the heartbeat being written to a column the
+    reconciler never reads."""
+    old_event = _NOW - dt.timedelta(seconds=600)
+    fresh_heartbeat = _NOW - dt.timedelta(seconds=2)
+    request = await _make_request(db_session, device, status=S.APPLYING, updated_at=fresh_heartbeat)
+    await _add_event(db_session, request, to_status=S.APPLYING, created_at=old_event)
 
     count = await reconciler.reconcile_once(db_session, now=_NOW, apply_stale_seconds=300)
     await db_session.refresh(request)

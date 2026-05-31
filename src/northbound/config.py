@@ -7,15 +7,26 @@ read once and cached as a process-wide singleton via :func:`get_settings`.
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _CONFIG_FILE = Path("northbound.toml")
+
+logger = logging.getLogger("northbound.config")
+
+# CON-3 invariant: the reconciler's stale-apply cutoff must comfortably exceed
+# the worst realistic apply wall time, or a genuinely-slow live apply (no
+# intervening transition event during backup/render/apply_change) is wrongly
+# killed as "interrupted", and the live coroutine then hits an illegal
+# applying→awaiting_confirm transition on a now-FAILED row. The longest leg is
+# the commit-confirm window; require the cutoff to be at least this many times it.
+_APPLY_STALE_MIN_MULTIPLE = 3
 
 
 def _load_toml() -> dict[str, Any]:
@@ -97,6 +108,29 @@ class Settings(BaseSettings):
     # the repo root when not absolute. If the directory is missing the mount is
     # skipped with a warning — the API still serves. Override via NB_FRONTEND_DIST.
     frontend_dist: str = Field(default="frontend/dist")
+
+    @model_validator(mode="after")
+    def _clamp_apply_stale_seconds(self) -> Settings:
+        """Enforce the CON-3 invariant: stale cutoff >> max apply wall time.
+
+        Clamps ``reconciler_apply_stale_seconds`` up to
+        ``_APPLY_STALE_MIN_MULTIPLE x commit_confirm_seconds`` when a config sets
+        it too low, logging a warning. A slow-but-live apply within the window is
+        therefore never mistaken for a crash. Returns ``self`` (validated copy).
+        """
+        floor = self.commit_confirm_seconds * _APPLY_STALE_MIN_MULTIPLE
+        if self.reconciler_apply_stale_seconds < floor:
+            logger.warning(
+                "reconciler_apply_stale_seconds=%d is below the safe floor %d "
+                "(%dx commit_confirm_seconds=%d); clamping up to protect slow "
+                "live applies from being failed as interrupted (CON-3)",
+                self.reconciler_apply_stale_seconds,
+                floor,
+                _APPLY_STALE_MIN_MULTIPLE,
+                self.commit_confirm_seconds,
+            )
+            self.reconciler_apply_stale_seconds = floor
+        return self
 
 
 @lru_cache

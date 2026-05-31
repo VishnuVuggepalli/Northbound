@@ -21,6 +21,7 @@ re-confirm against the new reality.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +37,8 @@ from northbound.schemas.driver import Credentials, PortChange
 from northbound.services import audit, port_state, requests
 from northbound.services.credvault import FernetCredVault, deserialize_credentials
 from northbound.services.device_policy import assert_writable
+
+logger = logging.getLogger("northbound.services.change_apply")
 
 
 class ApplyError(Exception):
@@ -112,8 +115,24 @@ async def apply_request(
         await session.commit()
         raise StateDrift(request.device_state_fingerprint, live_fingerprint)
 
-    # 5. status -> applying (+ event).
-    await requests.record_transition(session, request, to_status=S.APPLYING, actor=user.id)
+    # 5. CLAIM the request: atomic conditional UPDATE approved/pending -> applying.
+    #    This is the authoritative serialization point (CON-1). Only ONE caller
+    #    can flip the row to ``applying``; a concurrent apply finds rowcount 0 and
+    #    raises AlreadyClaimed BEFORE any device write. The drift check above is a
+    #    read-only pre-flight; the device WRITE path (backup/render/apply) starts
+    #    only after this claim succeeds, so a second caller is rejected before it
+    #    can push config. ``version_id`` is bumped here and is the StaleData
+    #    backstop on the success-path flush below.
+    await requests.claim_transition(
+        session,
+        request,
+        expected=(S.APPROVED, S.PENDING),
+        to_status=S.APPLYING,
+        actor=user.id,
+    )
+    # Flush the claim so it is durable (committed at request end / on failure) and
+    # a racing transaction observes ``applying`` rather than ``approved``.
+    await session.flush()
 
     change = PortChange(**request.requested_changes)
 
@@ -130,9 +149,13 @@ async def apply_request(
         )
         await session.flush()
 
-        # 7. Render the change, persist the diff text.
+        # 7. Render the change, persist the diff text. This flush mutates the row
+        #    and so bumps ``updated_at`` (onupdate=now) immediately before the long
+        #    ``apply_change`` call — the reconciler's CON-3 liveness heartbeat, so a
+        #    genuinely-slow apply is not mistaken for a crash-interrupted one.
         diff = await driver.render_change(request.port_name, change)
         request.diff_text = diff.raw_after
+        request.updated_at = dt.datetime.now(tz=dt.UTC)
         session.add(request)
         await session.flush()
 
@@ -258,15 +281,43 @@ async def confirm_request(
             result="error",
         )
         # Commit the confirm-failure audit before raising; the route maps this
-        # to a 502 → get_session rollback that would otherwise discard it.
+        # to a 502 → get_session rollback that would otherwise discard it. We did
+        # NOT claim the row, so it stays ``awaiting_confirm`` and the reconciler
+        # may still revert it past the deadline — the safe outcome.
         await session.commit()
         raise ApplyFailed(str(exc)) from exc
+
+    # CON-2: atomically claim awaiting_confirm -> applied. Only one of {this
+    # confirm, the reconciler's deadline-revert} can win this conditional UPDATE.
+    # If the reconciler already moved the row out of awaiting_confirm at the same
+    # tick, rowcount is 0 → we no-op (the device self-reverts at its commit timer
+    # and the reconciler's defensive revert covers the rest). version_id +
+    # StaleDataError is the backstop on the flush below.
+    try:
+        await requests.claim_transition(
+            session,
+            request,
+            expected=(S.AWAITING_CONFIRM,),
+            to_status=S.APPLIED,
+            actor=user.id,
+        )
+    except requests.AlreadyClaimed:
+        logger.info(
+            "confirm_request: request %s already transitioned out of awaiting_confirm "
+            "(reconciler won the race); confirm is a no-op",
+            request.id,
+        )
+        await session.commit()
+        # The in-memory object still reads AWAITING_CONFIRM; the row was moved
+        # (e.g. to FAILED by the reconciler). Refresh so the response body
+        # reflects the real persisted state instead of a stale status.
+        await session.refresh(request)
+        return request
 
     request.applied_at = dt.datetime.now(tz=dt.UTC)
     request.confirm_token = None
     request.confirm_deadline_at = None
     session.add(request)
-    await requests.record_transition(session, request, to_status=S.APPLIED, actor=user.id)
     await audit.append_audit(
         session,
         user_id=user.id,
