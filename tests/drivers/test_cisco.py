@@ -18,13 +18,14 @@ from northbound._lib.transport.httpx_client import HttpxClient, HttpxParams
 from northbound.drivers.cisco import (
     CiscoDriver,
     _build_change_commands,
-    _join_config,
+    _config_lines,
     _merge_port_state,
     _parse_interfaces,
     _parse_lldp,
     _parse_speed,
     _parse_switchport,
     _parse_trunk_allowed,
+    _raise_for_config_errors,
 )
 from northbound.schemas.driver import (
     ConnectionParams,
@@ -109,6 +110,32 @@ def test_parse_lldp_handles_missing_table() -> None:
     assert _parse_lldp({"TABLE_nbor_detail": "garbage"}) == []
 
 
+@pytest.mark.asyncio
+async def test_get_neighbors_port_filter_is_exact_not_substring() -> None:
+    """Port 'Eth1' must NOT match neighbors on 'Eth1/1' or 'Eth10' — the old
+    substring filter (port in system_description) did. Exact bracket match."""
+    table = {
+        "TABLE_nbor_detail": {
+            "ROW_nbor_detail": [
+                {"chassis_id": "aa:aa:aa:aa:aa:01", "l_port_id": "Eth1", "sys_desc": "host-a"},
+                {"chassis_id": "aa:aa:aa:aa:aa:02", "l_port_id": "Eth1/1", "sys_desc": "host-b"},
+                {"chassis_id": "aa:aa:aa:aa:aa:03", "l_port_id": "Eth10", "sys_desc": "host-c"},
+            ]
+        }
+    }
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"body": table}})
+
+    drv = _make_driver(handler=handler)
+    eth1 = await drv.get_neighbors("Eth1")
+    assert [n.chassis_id for n in eth1] == ["aa:aa:aa:aa:aa:01"]
+    eth1_1 = await drv.get_neighbors("Eth1/1")
+    assert [n.chassis_id for n in eth1_1] == ["aa:aa:aa:aa:aa:02"]
+    eth10 = await drv.get_neighbors("Eth10")
+    assert [n.chassis_id for n in eth10] == ["aa:aa:aa:aa:aa:03"]
+
+
 def test_rows_collapses_single_row_object() -> None:
     # NX-OS collapses a single-row table to a bare object; parser must cope.
     single = {"TABLE_interface": {"ROW_interface": {"interface": "Ethernet1/9", "state": "up"}}}
@@ -149,14 +176,15 @@ def test_render_change_trunk_with_tagged_and_native() -> None:
     )
     assert "  switchport mode trunk" in cmds
     assert "  switchport trunk native vlan 100" in cmds
-    assert "  switchport trunk allowed vlan add 100,200,300" in cmds
+    # Declarative replace — NOT 'add' (which would only accumulate).
+    assert "  switchport trunk allowed vlan 100,200,300" in cmds
+    assert not any("allowed vlan add" in c for c in cmds)
 
 
-def test_join_config_wraps_configure_terminal() -> None:
-    payload = _join_config(("interface Ethernet1/1", "  switchport access vlan 10"))
-    assert payload.startswith("configure terminal ; ")
-    assert "interface Ethernet1/1" in payload
-    assert "switchport access vlan 10" in payload
+def test_config_lines_strips_and_drops_blanks() -> None:
+    lines = _config_lines(("interface Ethernet1/1", "  switchport access vlan 10", "  "))
+    # configure terminal is prepended by _nxapi_cli_config, not here.
+    assert lines == ["interface Ethernet1/1", "switchport access vlan 10"]
 
 
 @pytest.mark.asyncio
@@ -183,7 +211,10 @@ def _make_driver(*, handler, prefer_native_api: bool = True) -> CiscoDriver:  # 
 
 
 @pytest.mark.asyncio
-async def test_apply_change_creates_checkpoint_and_arms_rollback() -> None:
+async def test_apply_change_creates_checkpoint_no_device_timer() -> None:
+    """NX-OS has no device-armed rollback timer — apply must create the
+    checkpoint and apply config atomically, and emit NO ``delay`` keyword.
+    The confirm window is app-enforced (confirm_deadline_at)."""
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -197,14 +228,18 @@ async def test_apply_change_creates_checkpoint_and_arms_rollback() -> None:
     result = await drv.apply_change(diff, confirm_seconds=30)
     assert result.success is True
     assert result.confirm_token == checkpoint
-    assert result.confirm_deadline_at is not None
+    assert result.confirm_deadline_at is not None  # app-enforced window
     assert any(c == f"checkpoint {checkpoint}" for c in seen)
-    assert any("configure terminal" in c for c in seen)
-    assert any(c == f"rollback running-config checkpoint {checkpoint} delay 30" for c in seen)
+    # Config applied as ONE atomic request prefixed with configure terminal.
+    assert any(c.startswith("configure terminal ; ") for c in seen)
+    # The fabricated device-armed rollback must be gone entirely.
+    assert not any("delay" in c for c in seen)
+    assert not any("rollback" in c for c in seen)
 
 
 @pytest.mark.asyncio
-async def test_confirm_cancels_rollback_and_drops_checkpoint() -> None:
+async def test_confirm_drops_checkpoint_only() -> None:
+    """confirm = ``no checkpoint <name>`` ONLY. No ``rollback ... delay``."""
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -214,12 +249,13 @@ async def test_confirm_cancels_rollback_and_drops_checkpoint() -> None:
 
     drv = _make_driver(handler=handler)
     await drv.confirm("nb-deadbeef")
-    assert "no rollback running-config checkpoint nb-deadbeef delay" in seen
-    assert "no checkpoint nb-deadbeef" in seen
+    assert seen == ["no checkpoint nb-deadbeef"]
+    assert not any("delay" in c for c in seen)
+    assert not any("rollback" in c for c in seen)
 
 
 @pytest.mark.asyncio
-async def test_revert_rolls_back_to_checkpoint() -> None:
+async def test_revert_rolls_back_to_checkpoint_then_cleans_up() -> None:
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -229,7 +265,75 @@ async def test_revert_rolls_back_to_checkpoint() -> None:
 
     drv = _make_driver(handler=handler)
     await drv.revert("nb-deadbeef")
-    assert "rollback running-config checkpoint nb-deadbeef" in seen
+    assert seen == [
+        "rollback running-config checkpoint nb-deadbeef",
+        "no checkpoint nb-deadbeef",
+    ]
+    assert not any("delay" in c for c in seen)
+
+
+@pytest.mark.asyncio
+async def test_apply_change_config_is_single_atomic_request() -> None:
+    """The change body (all interface lines) goes out in ONE NX-API cli
+    request, not one request per line — so a mid-list failure can't leave a
+    half-applied interface."""
+    config_reqs: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        cmd = str(body["params"]["cmd"])
+        if "configure terminal" in cmd:
+            config_reqs.append(cmd)
+        return httpx.Response(200, json={"jsonrpc": "2.0", "result": None, "id": 1})
+
+    drv = _make_driver(handler=handler)
+    diff = await drv.render_change(
+        "Ethernet1/9", PortChange(untagged_vlan=100, tagged_vlans=[100, 200, 300])
+    )
+    result = await drv.apply_change(diff, confirm_seconds=30)
+    assert result.success is True
+    assert len(config_reqs) == 1
+    one = config_reqs[0]
+    assert "switchport mode trunk" in one
+    assert "switchport trunk allowed vlan 100,200,300" in one
+
+
+@pytest.mark.asyncio
+async def test_apply_change_surfaces_per_command_error() -> None:
+    """A per-command error in the NX-API result list must fail the apply,
+    not be silently swallowed."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        cmd = str(body["params"]["cmd"])
+        if "configure terminal" in cmd:
+            # NX-OS partial-failure shape: result is a per-command list.
+            return httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": [{}, {"error": {"message": "Invalid VLAN"}}],
+                },
+            )
+        return httpx.Response(200, json={"jsonrpc": "2.0", "result": None, "id": 1})
+
+    drv = _make_driver(handler=handler)
+    diff = await drv.render_change("Ethernet1/1", PortChange(untagged_vlan=10))
+    result = await drv.apply_change(diff)
+    assert result.success is False
+    assert result.error and "Invalid VLAN" in result.error
+
+
+def test_raise_for_config_errors_detects_top_level_and_per_command() -> None:
+    # Top-level error object.
+    with pytest.raises(Exception, match="config error"):
+        _raise_for_config_errors({"error": {"code": -1, "message": "boom"}})
+    # Per-command error inside a result list.
+    with pytest.raises(Exception, match="Invalid VLAN"):
+        _raise_for_config_errors({"result": [{}, {"error": {"message": "Invalid VLAN"}}]})
+    # Clean response → no raise.
+    _raise_for_config_errors({"result": None})
 
 
 @pytest.mark.asyncio
@@ -294,3 +398,33 @@ async def test_ssh_path_get_neighbors_returns_empty() -> None:
         Credentials(username="admin", password="pw"),
     )
     assert await drv.get_neighbors() == []
+
+
+@pytest.mark.asyncio
+async def test_aclose_closes_http_and_is_idempotent() -> None:
+    """aclose() closes the injected http transport exactly once and never
+    raises on a second call (callers invoke it from finally blocks)."""
+    closed: list[int] = []
+
+    class _FakeHttp:
+        async def aclose(self) -> None:
+            closed.append(1)
+
+    drv = CiscoDriver(
+        ConnectionParams(host="127.0.0.1", prefer_native_api=True),
+        Credentials(username="admin", password="pw"),
+        http=_FakeHttp(),  # type: ignore[arg-type]
+    )
+    await drv.aclose()
+    await drv.aclose()
+    assert closed == [1]
+
+
+@pytest.mark.asyncio
+async def test_aclose_noop_on_ssh_path() -> None:
+    """SSH-only driver holds no http transport — aclose() is a safe no-op."""
+    drv = CiscoDriver(
+        ConnectionParams(host="127.0.0.1", prefer_native_api=False),
+        Credentials(username="admin", password="pw"),
+    )
+    await drv.aclose()  # must not raise

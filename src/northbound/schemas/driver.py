@@ -115,6 +115,9 @@ class Credentials:
     password: str | None = None
     ssh_private_key: str | None = None
     api_token: str | None = None
+    # Privileged-exec ("enable") secret. When set, eAPI/CLI ``enable`` is sent
+    # in object form ``{"cmd": "enable", "input": <secret>}``. Never logged.
+    enable_secret: str | None = None
     snmp_community: str | None = None
     # v3 fields stubbed for forward-compat
     snmp_v3_user: str | None = None

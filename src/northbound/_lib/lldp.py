@@ -65,6 +65,30 @@ def normalize_port_id(raw: bytes | str, subtype: int | None = None) -> str:
     return _as_text(raw).strip()
 
 
+def encode_local_port_prefix(local_port: str) -> str:
+    """Encode a local-port name as a bracketed prefix for system_description.
+
+    Drivers that lack a dedicated local-port field on :class:`Neighbor` stash
+    the local port in the ``system_description`` as ``"[<local_port>] ..."``
+    so ``get_neighbors(port=...)`` can filter. Returns ``""`` for an empty
+    port (no prefix). Shared by the Cisco and Arista drivers so the encode /
+    match pair is identical.
+    """
+    return f"[{local_port}] " if local_port else ""
+
+
+def local_port_matches(system_description: str | None, port: str) -> bool:
+    """Exact-match a local port against a ``[<local_port>] ...`` prefix.
+
+    Matches the bracketed token EXACTLY — so port ``"Eth1"`` does NOT match a
+    description prefixed ``"[Eth1/1] "`` or ``"[Eth10] "``. A plain substring
+    test would wrongly match all three.
+    """
+    if not system_description:
+        return False
+    return system_description.startswith(f"[{port}] ")
+
+
 def parse_snmp_lldp_table(rows: list[dict[str, Any]]) -> list[Neighbor]:
     """Build Neighbors from rows of ``lldpRemoteSystemsData`` walk output.
 

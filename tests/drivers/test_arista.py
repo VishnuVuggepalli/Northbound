@@ -200,6 +200,93 @@ async def test_revert_calls_abort() -> None:
     assert "abort" in seen["cmds"]
 
 
+def _make_driver_with_creds(*, handler, creds: Credentials) -> AristaDriver:  # type: ignore[no-untyped-def]
+    http = HttpxClient(HttpxParams(base_url="https://arista.test", verify_tls=False))
+    http._client._transport = httpx.MockTransport(handler)  # type: ignore[attr-defined]
+    return AristaDriver(ConnectionParams(host="127.0.0.1"), creds, http=http)
+
+
+@pytest.mark.asyncio
+async def test_enable_bare_when_no_secret() -> None:
+    """No enable secret → bare string 'enable' as the first cmd."""
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        seen["cmds"] = body["params"]["cmds"]
+        return httpx.Response(200, json={"result": [{}] * len(body["params"]["cmds"])})
+
+    drv = _make_driver_with_creds(
+        handler=handler, creds=Credentials(username="admin", password="pw")
+    )
+    await drv.confirm("nb-deadbeef")
+    assert seen["cmds"][0] == "enable"
+
+
+@pytest.mark.asyncio
+async def test_enable_object_form_when_secret_present() -> None:
+    """Enable secret → object form {'cmd': 'enable', 'input': <secret>}."""
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        seen["cmds"] = body["params"]["cmds"]
+        return httpx.Response(200, json={"result": [{}] * len(body["params"]["cmds"])})
+
+    drv = _make_driver_with_creds(
+        handler=handler,
+        creds=Credentials(username="admin", password="pw", enable_secret="s3cr3t"),
+    )
+    await drv.confirm("nb-deadbeef")
+    assert seen["cmds"][0] == {"cmd": "enable", "input": "s3cr3t"}
+
+
+@pytest.mark.asyncio
+async def test_get_neighbors_port_filter_is_exact_not_substring() -> None:
+    """Local-port filter must be exact: 'Ethernet1' must not match
+    'Ethernet1/1' (mirrors the Cisco disambiguation fix)."""
+    payload = {
+        "lldpNeighbors": {
+            "Ethernet1": {
+                "lldpNeighborInfo": [
+                    {"chassisId": "aa:aa:aa:aa:aa:01", "systemDescription": "host-a"}
+                ]
+            },
+            "Ethernet1/1": {
+                "lldpNeighborInfo": [
+                    {"chassisId": "aa:aa:aa:aa:aa:02", "systemDescription": "host-b"}
+                ]
+            },
+        }
+    }
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"result": [payload]})
+
+    drv = _make_driver(handler=handler)
+    eth1 = await drv.get_neighbors("Ethernet1")
+    assert [n.chassis_id for n in eth1] == ["aa:aa:aa:aa:aa:01"]
+
+
+@pytest.mark.asyncio
+async def test_aclose_is_idempotent_and_closes_http() -> None:
+    """Driver.aclose() closes the http transport and is safe to call twice."""
+    closed: list[int] = []
+
+    class _FakeHttp:
+        async def aclose(self) -> None:
+            closed.append(1)
+
+    drv = AristaDriver(
+        ConnectionParams(host="127.0.0.1"),
+        Credentials(username="admin", password="pw"),
+        http=_FakeHttp(),  # type: ignore[arg-type]
+    )
+    await drv.aclose()
+    await drv.aclose()  # idempotent: must not raise, must not double-close
+    assert closed == [1]
+
+
 @pytest.mark.asyncio
 async def test_apply_change_missing_session_returns_failure() -> None:
     from northbound.schemas.driver import ConfigDiff

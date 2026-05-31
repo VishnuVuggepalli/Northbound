@@ -73,6 +73,10 @@ class Pica8Driver(Driver):
         # Token currently 'live' on the device — set by apply_change.
         self._pending_token: str | None = None
 
+    async def aclose(self) -> None:
+        """Close the NETCONF session. Idempotent (NetconfClient.close is)."""
+        await self._netconf.close()
+
     def _build_netconf(self) -> NetconfClient:
         return NetconfClient(
             NetconfParams(

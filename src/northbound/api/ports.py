@@ -195,6 +195,8 @@ async def get_config(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Config fetch failed: {exc}"
         ) from exc
+    finally:
+        await driver.aclose()
     _config_cache[device_id] = text
     return ConfigOut(config_text=text, cached=False)
 
@@ -219,6 +221,8 @@ async def backup_now(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Backup failed: {exc}"
         ) from exc
+    finally:
+        await driver.aclose()
     now = dt.datetime.now(tz=dt.UTC)
     backup = ConfigBackup(
         device_id=device_id, config_text=text, fetched_at=now, fetched_by=admin.id
@@ -289,6 +293,8 @@ async def backup_diff(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Config fetch failed: {exc}"
         ) from exc
+    finally:
+        await driver.aclose()
 
     diff = "\n".join(
         difflib.unified_diff(

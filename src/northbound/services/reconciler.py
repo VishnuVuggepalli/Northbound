@@ -153,7 +153,10 @@ async def _fail_confirm_expired(
     if device is not None and token:
         try:
             driver = driver_for(device, _credentials_for(device))
-            await driver.revert(token)
+            try:
+                await driver.revert(token)
+            finally:
+                await driver.aclose()
         except Exception as exc:
             logger.warning(
                 "reconciler: defensive revert failed for request %s (token=%s): %s",

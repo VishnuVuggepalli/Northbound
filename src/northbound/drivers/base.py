@@ -55,6 +55,24 @@ class Driver(ABC):
         self._conn = conn
         self._creds = creds
 
+    # ---------- lifecycle ----------
+
+    async def aclose(self) -> None:
+        """Release any transport the driver holds (http sockets, etc.).
+
+        Default is a no-op for drivers with no persistent transport (e.g.
+        mock, or the connection-per-run SSH path). Drivers that hold an
+        ``HttpxClient`` override this. MUST be idempotent and MUST NOT raise —
+        callers invoke it from ``finally`` blocks.
+        """
+        return None
+
+    async def __aenter__(self) -> Driver:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.aclose()
+
     # ---------- onboarding ----------
 
     @abstractmethod

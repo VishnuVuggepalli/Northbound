@@ -139,6 +139,8 @@ async def test_connection(
         result = await driver.test_credentials()
     except (AuthError, ReachabilityError) as exc:
         return TestConnectionOut(ok=False, latency_ms=0.0, platform_version=None, error=str(exc))
+    finally:
+        await driver.aclose()
     return TestConnectionOut(
         ok=result.ok,
         latency_ms=result.latency_ms,
@@ -166,6 +168,8 @@ async def discover(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Discovery failed: {exc}",
         ) from exc
+    finally:
+        await driver.aclose()
     return DiscoverOut(
         hostname=result.hostname,
         ports=[_port_out(p) for p in result.ports],
@@ -205,6 +209,8 @@ async def create_device(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Discovery failed; device not onboarded: {exc}",
         ) from exc
+    finally:
+        await driver.aclose()
 
     vault = FernetCredVault.from_settings()
 
@@ -292,6 +298,8 @@ async def rotate_credentials(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"New credentials rejected; not rotated: {exc}",
         ) from exc
+    finally:
+        await driver.aclose()
     if not result.ok:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

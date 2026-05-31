@@ -72,7 +72,10 @@ async def _fetch_live(device: Device) -> tuple[PortState, ...]:
     """Pull live port state from the device driver."""
     creds = _credentials_for(device)
     driver = driver_for(device, creds)
-    ports = await driver.get_ports()
+    try:
+        ports = await driver.get_ports()
+    finally:
+        await driver.aclose()
     return tuple(ports)
 
 

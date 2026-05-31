@@ -19,12 +19,20 @@ One driver, two backends, selected by ``ConnectionParams.prefer_native_api``:
   structured reads that depend on NX-API JSON (``get_neighbors``) and the
   commit-confirm write path are NX-API-only and documented as such.
 
-Write path (NX-API): NX-OS commit-confirm is implemented with a *checkpoint*
-plus a scheduled ``rollback running-config checkpoint``. ``render_change``
-mints a checkpoint name into ``ConfigDiff.metadata['checkpoint_name']`` (same
-shape as Arista's session name). ``apply_change`` creates the checkpoint,
-applies the config, and arms a delayed rollback; ``confirm`` deletes the
-checkpoint (making the change permanent); ``revert`` rolls back immediately.
+Write path (NX-API): NX-OS has **no device-armed timed rollback** — there is
+no ``rollback ... delay`` command. The commit-confirm *window* is enforced at
+the application layer by Northbound's reconciler (``ChangeRequest`` carries a
+``confirm_deadline_at``; ``services/reconciler._fail_confirm_expired`` calls
+``driver.revert`` when the window lapses). The device side only provides a
+named *checkpoint* as the rollback target. ``render_change`` mints a checkpoint
+name into ``ConfigDiff.metadata['checkpoint_name']`` (same shape as Arista's
+session name). ``apply_change`` creates the checkpoint (``checkpoint <name>``)
+then applies the config; ``confirm`` deletes the checkpoint (``no checkpoint
+<name>`` → change permanent); ``revert`` rolls back to the checkpoint
+immediately (``rollback running-config checkpoint <name>``) then drops it.
+``capabilities.supports_commit_confirm`` is True because Northbound provides
+confirm semantics via checkpoint + reconciler — but the timer is app-enforced,
+not device-armed.
 
 Only the JSON / CLI contract lives here — every byte of HTTP goes through
 ``HttpxClient`` and every SSH command through ``SshClient``. This driver
@@ -113,6 +121,13 @@ class CiscoDriver(Driver):
             http if http is not None else (self._build_http() if self._use_native else None)
         )
         self._ssh = ssh if ssh is not None else (None if self._use_native else self._build_ssh())
+
+    async def aclose(self) -> None:
+        """Close the NX-API http transport if one is held. Idempotent."""
+        http = self._http
+        if http is not None:
+            self._http = None
+            await http.aclose()
 
     # ---------- transport plumbing ----------
 
@@ -208,6 +223,50 @@ class CiscoDriver(Driver):
             return msg if isinstance(msg, str) else ""
         body_obj = result.get("body")
         return body_obj if body_obj is not None else {}
+
+    async def _nxapi_cli_config(self, lines: list[str]) -> None:
+        """Apply a list of config commands in ONE NX-API request.
+
+        Honesty note on atomicity: NX-API's ``cli`` method runs a `` ; ``-joined
+        ``cmd`` string *sequentially*, NOT as an all-or-nothing transaction — a
+        mid-list failure can leave a partially-applied interface. The real
+        rollback safety net is the ``checkpoint`` taken in ``apply_change``
+        immediately before this call: on any failure (or a missed commit-confirm
+        window) ``revert`` restores that checkpoint. So we bundle the lines into
+        a single request for fewer round-trips, but we do NOT rely on the device
+        for atomicity.
+
+        Error surfacing: a failure shows up either as a top-level JSON-RPC
+        ``error`` (the common case for a bad ``;``-joined cli) or, where the
+        device returns a per-command result list, as an ``error`` on an
+        individual entry. ``_raise_for_config_errors`` checks both so a failure
+        is never swallowed.
+
+        Raises:
+            AuthError / ReachabilityError / DriverError on failure.
+        """
+        cmd = " ; ".join(["configure terminal", *lines])
+        http = self._require_http()
+        body = {
+            "jsonrpc": "2.0",
+            "method": "cli",
+            "params": {"cmd": cmd, "version": 1},
+            "id": 1,
+        }
+        try:
+            response = await http.post("/ins", headers=self._auth_header(), json=body)
+        except Exception as exc:
+            raise ReachabilityError(f"cisco NX-API transport error: {exc}") from exc
+
+        if response.status_code == 401:
+            raise AuthError("cisco NX-API returned 401")
+        if response.status_code >= 400:
+            raise DriverError(f"cisco NX-API HTTP {response.status_code}: {response.text}")
+
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise DriverError(f"cisco NX-API: non-dict response: {payload!r}")
+        _raise_for_config_errors(payload)
 
     # ---------- onboarding ----------
 
@@ -308,7 +367,7 @@ class CiscoDriver(Driver):
         neighbors = _parse_lldp(body)
         if port is None:
             return neighbors
-        return [n for n in neighbors if n.system_description and port in n.system_description]
+        return [n for n in neighbors if lldp.local_port_matches(n.system_description, port)]
 
     async def _ssh_run(self, command: str) -> str:
         ssh = self._require_ssh()
@@ -351,17 +410,14 @@ class CiscoDriver(Driver):
                 confirm_deadline_at=None,
                 error="ConfigDiff.metadata missing 'checkpoint_name'",
             )
-        # Snapshot the running-config into a named checkpoint, apply the change
-        # body, then arm a delayed rollback. If confirm() runs first it deletes
-        # the checkpoint and cancels the rollback; otherwise the device rolls
-        # back to the checkpoint after the delay.
+        # Snapshot the running-config into a named checkpoint, then apply the
+        # change body as a single atomic NX-API request. There is NO device-side
+        # timed rollback on NX-OS; the confirm window is enforced by Northbound's
+        # reconciler (confirm_deadline_at below). confirm() deletes the
+        # checkpoint (permanent); revert() rolls back to it.
         try:
             await self._nxapi_cli(f"checkpoint {checkpoint}")
-            await self._nxapi_cli(_join_config(diff.commands))
-            await self._nxapi_cli(
-                f"rollback running-config checkpoint {checkpoint} "
-                f"delay {max(1, int(confirm_seconds))}"
-            )
+            await self._nxapi_cli_config(_config_lines(diff.commands))
         except (AuthError, ReachabilityError, DriverError) as exc:
             return ApplyResult(
                 success=False,
@@ -379,14 +435,16 @@ class CiscoDriver(Driver):
     async def confirm(self, apply_token: str) -> None:
         if not self._use_native:
             raise NotSupported("cisco: confirm requires NX-API (prefer_native_api=True)")
-        # Cancel the armed rollback and drop the checkpoint → change is permanent.
-        await self._nxapi_cli(f"no rollback running-config checkpoint {apply_token} delay")
+        # Drop the checkpoint → the applied change becomes permanent. NX-OS has
+        # no armed timer to cancel; the confirm window was reconciler-enforced.
         await self._nxapi_cli(f"no checkpoint {apply_token}")
 
     async def revert(self, apply_token: str) -> None:
         if not self._use_native:
             raise NotSupported("cisco: revert requires NX-API (prefer_native_api=True)")
+        # Immediate rollback to the checkpoint, then clean up the checkpoint.
         await self._nxapi_cli(f"rollback running-config checkpoint {apply_token}")
+        await self._nxapi_cli(f"no checkpoint {apply_token}")
 
 
 # ---------------------------------------------------------------------------
@@ -615,7 +673,7 @@ def _parse_lldp(body: object) -> list[Neighbor]:
         local_port = local_port_raw if isinstance(local_port_raw, str) else ""
         sys_name = raw.get("sys_name")
         sys_desc = raw.get("sys_desc")
-        desc_prefix = f"[{local_port}] " if local_port else ""
+        desc_prefix = lldp.encode_local_port_prefix(local_port)
         desc_body = sys_desc if isinstance(sys_desc, str) else ""
         out.append(
             Neighbor(
@@ -634,8 +692,10 @@ def _build_change_commands(port: str, change: PortChange) -> list[str]:
     Description first (cosmetic), then mode (access vs trunk), then the VLAN
     body. A PortChange carrying ``tagged_vlans`` means trunk mode with native
     = untagged_vlan and allowed = tagged_vlans; otherwise access mode with
-    access vlan = untagged_vlan. Trunk allowed uses ``add`` so we extend
-    rather than clobber the existing allowed set.
+    access vlan = untagged_vlan. ``tagged_vlans`` is declarative — the desired
+    full allowed set — so we emit ``switchport trunk allowed vlan {allowed}``
+    (replace), NOT ``add`` (which would only accumulate and never remove).
+    Matches the Arista driver's semantics.
     """
     cmds: list[str] = [f"interface {port}"]
     if change.description is not None:
@@ -646,7 +706,7 @@ def _build_change_commands(port: str, change: PortChange) -> list[str]:
             cmds.append(f"  switchport trunk native vlan {change.untagged_vlan}")
         if change.tagged_vlans:
             allowed = ",".join(str(v) for v in change.tagged_vlans)
-            cmds.append(f"  switchport trunk allowed vlan add {allowed}")
+            cmds.append(f"  switchport trunk allowed vlan {allowed}")
         else:
             cmds.append("  switchport trunk allowed vlan none")
     elif change.untagged_vlan is not None:
@@ -655,15 +715,38 @@ def _build_change_commands(port: str, change: PortChange) -> list[str]:
     return cmds
 
 
-def _join_config(commands: tuple[str, ...]) -> str:
-    """Join a rendered command list into a single NX-API ``cli`` payload.
+def _config_lines(commands: tuple[str, ...]) -> list[str]:
+    """Strip + drop blanks from a rendered command tuple for atomic apply.
 
-    NX-API ``cli`` accepts multiple commands separated by `` ; ``. We wrap
-    the change body in ``configure terminal`` so the interface/switchport
-    lines apply in config mode.
+    ``configure terminal`` is prepended by ``_nxapi_cli_config`` itself, so
+    this returns only the interface/switchport body lines.
     """
-    body = [c.strip() for c in commands if c.strip()]
-    return " ; ".join(["configure terminal", *body])
+    return [c.strip() for c in commands if c.strip()]
+
+
+def _raise_for_config_errors(payload: dict[str, object]) -> None:
+    """Surface any NX-API error from a multi-command ``cli`` config response.
+
+    NX-OS reports failure in two shapes:
+      * a top-level ``error`` object (whole-request failure), or
+      * a ``result`` *list* of per-command objects, each of which may carry
+        its own ``error`` (partial / mid-list failure).
+    Either way we raise rather than silently swallow a half-applied change.
+    """
+    if "error" in payload:
+        err = payload["error"]
+        code = err.get("code") if isinstance(err, dict) else None
+        msg = err.get("message") if isinstance(err, dict) else str(err)
+        if code in _AUTH_ERROR_CODES:
+            raise AuthError(f"cisco NX-API auth error: {msg}")
+        raise DriverError(f"cisco NX-API config error (code={code}): {msg}")
+    result = payload.get("result")
+    if isinstance(result, list):
+        for entry in result:
+            if isinstance(entry, dict) and "error" in entry:
+                inner = entry["error"]
+                msg = inner.get("message") if isinstance(inner, dict) else str(inner)
+                raise DriverError(f"cisco NX-API config error: {msg}")
 
 
 def _coerce_int(value: object) -> int | None:

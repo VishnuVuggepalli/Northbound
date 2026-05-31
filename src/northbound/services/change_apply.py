@@ -89,163 +89,166 @@ async def apply_request(
     # 3. Load creds + driver.
     creds = _credentials_for(device)
     driver = driver_for(device, creds)
-
-    # 4. Stale-state guard: recompute the live fingerprint and compare.
-    live_fingerprint = await port_state.current_fingerprint(device, refresh=True)
-    if (
-        request.device_state_fingerprint is not None
-        and live_fingerprint != request.device_state_fingerprint
-    ):
-        # Block: status stays as-is, no event/audit beyond the drift record.
-        await audit.append_audit(
-            session,
-            user_id=user.id,
-            action="request.apply_blocked_drift",
-            target_device_id=device.id,
-            target_port=request.port_name,
-            before={"fingerprint": request.device_state_fingerprint},
-            after={"fingerprint": live_fingerprint},
-            result="blocked",
-        )
-        # Commit the drift record before raising: the route turns StateDrift
-        # into a 409 which propagates through get_session → rollback(). Without
-        # an explicit commit here, the drift audit row would be discarded and
-        # the block would leave no trace. The success path stays managed by
-        # get_session; only terminal-error paths own their commit boundary.
-        await session.commit()
-        raise StateDrift(request.device_state_fingerprint, live_fingerprint)
-
-    # 5. CLAIM the request: atomic conditional UPDATE approved/pending -> applying.
-    #    This is the authoritative serialization point (CON-1). Only ONE caller
-    #    can flip the row to ``applying``; a concurrent apply finds rowcount 0 and
-    #    raises AlreadyClaimed BEFORE any device write. The drift check above is a
-    #    read-only pre-flight; the device WRITE path (backup/render/apply) starts
-    #    only after this claim succeeds, so a second caller is rejected before it
-    #    can push config. ``version_id`` is bumped here and is the StaleData
-    #    backstop on the success-path flush below.
-    await requests.claim_transition(
-        session,
-        request,
-        expected=(S.APPROVED, S.PENDING),
-        to_status=S.APPLYING,
-        actor=user.id,
-    )
-    # Flush the claim so it is durable (committed at request end / on failure) and
-    # a racing transaction observes ``applying`` rather than ``approved``.
-    await session.flush()
-
-    change = PortChange(**request.requested_changes)
-
     try:
-        # 6. Backup current config.
-        backup_text = await driver.backup_config()
-        session.add(
-            ConfigBackup(
-                device_id=device.id,
-                config_text=backup_text,
-                fetched_at=dt.datetime.now(tz=dt.UTC),
-                fetched_by=user.id,
+
+        # 4. Stale-state guard: recompute the live fingerprint and compare.
+        live_fingerprint = await port_state.current_fingerprint(device, refresh=True)
+        if (
+            request.device_state_fingerprint is not None
+            and live_fingerprint != request.device_state_fingerprint
+        ):
+            # Block: status stays as-is, no event/audit beyond the drift record.
+            await audit.append_audit(
+                session,
+                user_id=user.id,
+                action="request.apply_blocked_drift",
+                target_device_id=device.id,
+                target_port=request.port_name,
+                before={"fingerprint": request.device_state_fingerprint},
+                after={"fingerprint": live_fingerprint},
+                result="blocked",
             )
-        )
-        await session.flush()
+            # Commit the drift record before raising: the route turns StateDrift
+            # into a 409 which propagates through get_session → rollback(). Without
+            # an explicit commit here, the drift audit row would be discarded and
+            # the block would leave no trace. The success path stays managed by
+            # get_session; only terminal-error paths own their commit boundary.
+            await session.commit()
+            raise StateDrift(request.device_state_fingerprint, live_fingerprint)
 
-        # 7. Render the change, persist the diff text. This flush mutates the row
-        #    and so bumps ``updated_at`` (onupdate=now) immediately before the long
-        #    ``apply_change`` call — the reconciler's CON-3 liveness heartbeat, so a
-        #    genuinely-slow apply is not mistaken for a crash-interrupted one.
-        diff = await driver.render_change(request.port_name, change)
-        request.diff_text = diff.raw_after
-        request.updated_at = dt.datetime.now(tz=dt.UTC)
-        session.add(request)
-        await session.flush()
-
-        # 8. Apply with commit-confirm window.
-        confirm_seconds = get_settings().commit_confirm_seconds
-        result = await driver.apply_change(diff, confirm_seconds=confirm_seconds)
-    except DriverError as exc:
-        # 12. Driver error → failed (+ event + audit), re-raise for a 502.
-        await requests.record_transition(
+        # 5. CLAIM the request: atomic conditional UPDATE approved/pending -> applying.
+        #    This is the authoritative serialization point (CON-1). Only ONE caller
+        #    can flip the row to ``applying``; a concurrent apply finds rowcount 0 and
+        #    raises AlreadyClaimed BEFORE any device write. The drift check above is a
+        #    read-only pre-flight; the device WRITE path (backup/render/apply) starts
+        #    only after this claim succeeds, so a second caller is rejected before it
+        #    can push config. ``version_id`` is bumped here and is the StaleData
+        #    backstop on the success-path flush below.
+        await requests.claim_transition(
             session,
             request,
-            to_status=S.FAILED,
+            expected=(S.APPROVED, S.PENDING),
+            to_status=S.APPLYING,
             actor=user.id,
-            payload={"error": str(exc)},
         )
+        # Flush the claim so it is durable (committed at request end / on failure) and
+        # a racing transaction observes ``applying`` rather than ``approved``.
+        await session.flush()
+
+        change = PortChange(**request.requested_changes)
+
+        try:
+            # 6. Backup current config.
+            backup_text = await driver.backup_config()
+            session.add(
+                ConfigBackup(
+                    device_id=device.id,
+                    config_text=backup_text,
+                    fetched_at=dt.datetime.now(tz=dt.UTC),
+                    fetched_by=user.id,
+                )
+            )
+            await session.flush()
+
+            # 7. Render the change, persist the diff text. This flush mutates the row
+            #    and so bumps ``updated_at`` (onupdate=now) immediately before the long
+            #    ``apply_change`` call — the reconciler's CON-3 liveness heartbeat, so a
+            #    genuinely-slow apply is not mistaken for a crash-interrupted one.
+            diff = await driver.render_change(request.port_name, change)
+            request.diff_text = diff.raw_after
+            request.updated_at = dt.datetime.now(tz=dt.UTC)
+            session.add(request)
+            await session.flush()
+
+            # 8. Apply with commit-confirm window.
+            confirm_seconds = get_settings().commit_confirm_seconds
+            result = await driver.apply_change(diff, confirm_seconds=confirm_seconds)
+        except DriverError as exc:
+            # 12. Driver error → failed (+ event + audit), re-raise for a 502.
+            await requests.record_transition(
+                session,
+                request,
+                to_status=S.FAILED,
+                actor=user.id,
+                payload={"error": str(exc)},
+            )
+            await audit.append_audit(
+                session,
+                user_id=user.id,
+                action="request.apply_failed",
+                target_device_id=device.id,
+                target_port=request.port_name,
+                after={"error": str(exc)},
+                result="error",
+            )
+            # Commit the FAILED transition + failure audit (+ the backup taken
+            # above, which is evidence) before raising. The route maps ApplyFailed
+            # to a 502 which propagates through get_session → rollback(); without
+            # this commit the failure record, status, and backup are all discarded
+            # and the request is orphaned in `applying` with no record of why.
+            await session.commit()
+            raise ApplyFailed(str(exc)) from exc
+
+        if not result.success:
+            await requests.record_transition(
+                session,
+                request,
+                to_status=S.FAILED,
+                actor=user.id,
+                payload={"error": result.error},
+            )
+            await audit.append_audit(
+                session,
+                user_id=user.id,
+                action="request.apply_failed",
+                target_device_id=device.id,
+                target_port=request.port_name,
+                after={"error": result.error},
+                result="error",
+            )
+            # Same commit-boundary rationale as the DriverError branch above: persist
+            # the FAILED transition + failure audit + backup before raising so they
+            # survive the route's 502 → get_session rollback.
+            await session.commit()
+            raise ApplyFailed(result.error or "apply reported failure")
+
+        # 9. Audit the apply (before/after = rendered diff summary, NEVER creds).
         await audit.append_audit(
             session,
             user_id=user.id,
-            action="request.apply_failed",
+            action="request.applied",
             target_device_id=device.id,
             target_port=request.port_name,
-            after={"error": str(exc)},
-            result="error",
+            before={"summary": diff.summary},
+            after={"commands": list(diff.commands)},
+            result="ok",
         )
-        # Commit the FAILED transition + failure audit (+ the backup taken
-        # above, which is evidence) before raising. The route maps ApplyFailed
-        # to a 502 which propagates through get_session → rollback(); without
-        # this commit the failure record, status, and backup are all discarded
-        # and the request is orphaned in `applying` with no record of why.
-        await session.commit()
-        raise ApplyFailed(str(exc)) from exc
 
-    if not result.success:
-        await requests.record_transition(
-            session,
-            request,
-            to_status=S.FAILED,
-            actor=user.id,
-            payload={"error": result.error},
-        )
-        await audit.append_audit(
-            session,
-            user_id=user.id,
-            action="request.apply_failed",
-            target_device_id=device.id,
-            target_port=request.port_name,
-            after={"error": result.error},
-            result="error",
-        )
-        # Same commit-boundary rationale as the DriverError branch above: persist
-        # the FAILED transition + failure audit + backup before raising so they
-        # survive the route's 502 → get_session rollback.
-        await session.commit()
-        raise ApplyFailed(result.error or "apply reported failure")
+        # Live state changed on the device — drop the cache so the next read refetches.
+        port_state.invalidate(device.id)
 
-    # 9. Audit the apply (before/after = rendered diff summary, NEVER creds).
-    await audit.append_audit(
-        session,
-        user_id=user.id,
-        action="request.applied",
-        target_device_id=device.id,
-        target_port=request.port_name,
-        before={"summary": diff.summary},
-        after={"commands": list(diff.commands)},
-        result="ok",
-    )
+        if result.confirm_token:
+            # 10. Commit-confirm platform → awaiting_confirm; persist token + deadline.
+            request.confirm_token = result.confirm_token
+            request.confirm_deadline_at = result.confirm_deadline_at
+            session.add(request)
+            await requests.record_transition(
+                session,
+                request,
+                to_status=S.AWAITING_CONFIRM,
+                actor=user.id,
+                payload={"confirm_deadline_at": result.confirm_deadline_at},
+            )
+        else:
+            # 11. No native confirm → applied directly.
+            request.applied_at = dt.datetime.now(tz=dt.UTC)
+            session.add(request)
+            await requests.record_transition(session, request, to_status=S.APPLIED, actor=user.id)
 
-    # Live state changed on the device — drop the cache so the next read refetches.
-    port_state.invalidate(device.id)
-
-    if result.confirm_token:
-        # 10. Commit-confirm platform → awaiting_confirm; persist token + deadline.
-        request.confirm_token = result.confirm_token
-        request.confirm_deadline_at = result.confirm_deadline_at
-        session.add(request)
-        await requests.record_transition(
-            session,
-            request,
-            to_status=S.AWAITING_CONFIRM,
-            actor=user.id,
-            payload={"confirm_deadline_at": result.confirm_deadline_at},
-        )
-    else:
-        # 11. No native confirm → applied directly.
-        request.applied_at = dt.datetime.now(tz=dt.UTC)
-        session.add(request)
-        await requests.record_transition(session, request, to_status=S.APPLIED, actor=user.id)
-
-    await session.flush()
-    return request
+        await session.flush()
+        return request
+    finally:
+        await driver.aclose()
 
 
 async def confirm_request(
@@ -269,62 +272,65 @@ async def confirm_request(
     creds = _credentials_for(device)
     driver = driver_for(device, creds)
     try:
-        await driver.confirm(request.confirm_token)
-    except DriverError as exc:
+        try:
+            await driver.confirm(request.confirm_token)
+        except DriverError as exc:
+            await audit.append_audit(
+                session,
+                user_id=user.id,
+                action="request.confirm_failed",
+                target_device_id=device.id,
+                target_port=request.port_name,
+                after={"error": str(exc)},
+                result="error",
+            )
+            # Commit the confirm-failure audit before raising; the route maps this
+            # to a 502 → get_session rollback that would otherwise discard it. We did
+            # NOT claim the row, so it stays ``awaiting_confirm`` and the reconciler
+            # may still revert it past the deadline — the safe outcome.
+            await session.commit()
+            raise ApplyFailed(str(exc)) from exc
+
+        # CON-2: atomically claim awaiting_confirm -> applied. Only one of {this
+        # confirm, the reconciler's deadline-revert} can win this conditional UPDATE.
+        # If the reconciler already moved the row out of awaiting_confirm at the same
+        # tick, rowcount is 0 → we no-op (the device self-reverts at its commit timer
+        # and the reconciler's defensive revert covers the rest). version_id +
+        # StaleDataError is the backstop on the flush below.
+        try:
+            await requests.claim_transition(
+                session,
+                request,
+                expected=(S.AWAITING_CONFIRM,),
+                to_status=S.APPLIED,
+                actor=user.id,
+            )
+        except requests.AlreadyClaimed:
+            logger.info(
+                "confirm_request: request %s already transitioned out of awaiting_confirm "
+                "(reconciler won the race); confirm is a no-op",
+                request.id,
+            )
+            await session.commit()
+            # The in-memory object still reads AWAITING_CONFIRM; the row was moved
+            # (e.g. to FAILED by the reconciler). Refresh so the response body
+            # reflects the real persisted state instead of a stale status.
+            await session.refresh(request)
+            return request
+
+        request.applied_at = dt.datetime.now(tz=dt.UTC)
+        request.confirm_token = None
+        request.confirm_deadline_at = None
+        session.add(request)
         await audit.append_audit(
             session,
             user_id=user.id,
-            action="request.confirm_failed",
+            action="request.confirmed",
             target_device_id=device.id,
             target_port=request.port_name,
-            after={"error": str(exc)},
-            result="error",
+            result="ok",
         )
-        # Commit the confirm-failure audit before raising; the route maps this
-        # to a 502 → get_session rollback that would otherwise discard it. We did
-        # NOT claim the row, so it stays ``awaiting_confirm`` and the reconciler
-        # may still revert it past the deadline — the safe outcome.
-        await session.commit()
-        raise ApplyFailed(str(exc)) from exc
-
-    # CON-2: atomically claim awaiting_confirm -> applied. Only one of {this
-    # confirm, the reconciler's deadline-revert} can win this conditional UPDATE.
-    # If the reconciler already moved the row out of awaiting_confirm at the same
-    # tick, rowcount is 0 → we no-op (the device self-reverts at its commit timer
-    # and the reconciler's defensive revert covers the rest). version_id +
-    # StaleDataError is the backstop on the flush below.
-    try:
-        await requests.claim_transition(
-            session,
-            request,
-            expected=(S.AWAITING_CONFIRM,),
-            to_status=S.APPLIED,
-            actor=user.id,
-        )
-    except requests.AlreadyClaimed:
-        logger.info(
-            "confirm_request: request %s already transitioned out of awaiting_confirm "
-            "(reconciler won the race); confirm is a no-op",
-            request.id,
-        )
-        await session.commit()
-        # The in-memory object still reads AWAITING_CONFIRM; the row was moved
-        # (e.g. to FAILED by the reconciler). Refresh so the response body
-        # reflects the real persisted state instead of a stale status.
-        await session.refresh(request)
+        await session.flush()
         return request
-
-    request.applied_at = dt.datetime.now(tz=dt.UTC)
-    request.confirm_token = None
-    request.confirm_deadline_at = None
-    session.add(request)
-    await audit.append_audit(
-        session,
-        user_id=user.id,
-        action="request.confirmed",
-        target_device_id=device.id,
-        target_port=request.port_name,
-        result="ok",
-    )
-    await session.flush()
-    return request
+    finally:
+        await driver.aclose()

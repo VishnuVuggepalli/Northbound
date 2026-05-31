@@ -23,6 +23,7 @@ import time
 import uuid
 from typing import cast
 
+from northbound._lib import lldp
 from northbound._lib.transport.httpx_client import HttpxClient, HttpxParams
 from northbound.drivers.base import (
     AuthError,
@@ -79,7 +80,14 @@ class AristaDriver(Driver):
         http: HttpxClient | None = None,
     ) -> None:
         super().__init__(conn, creds)
-        self._http = http if http is not None else self._build_http()
+        self._http: HttpxClient | None = http if http is not None else self._build_http()
+
+    async def aclose(self) -> None:
+        """Close the eAPI http transport. Idempotent."""
+        http = self._http
+        if http is not None:
+            self._http = None
+            await http.aclose()
 
     # ---------- transport plumbing ----------
 
@@ -101,9 +109,20 @@ class AristaDriver(Driver):
         password = self._creds.password or ""
         return HttpxClient.basic_auth_header(username, password)
 
+    def _enable_cmd(self) -> object:
+        """eAPI ``enable`` command, object form if an enable secret is set.
+
+        Bare ``"enable"`` fails on a device with an enable secret; eAPI wants
+        ``{"cmd": "enable", "input": "<secret>"}``. The secret is never logged.
+        """
+        secret = self._creds.enable_secret
+        if secret:
+            return {"cmd": "enable", "input": secret}
+        return "enable"
+
     async def _run_cmds(
         self,
-        cmds: list[str],
+        cmds: list[object],
         *,
         fmt: str = "json",
         request_id: str | None = None,
@@ -115,6 +134,8 @@ class AristaDriver(Driver):
             ReachabilityError: connection refused / DNS / timeout.
             DriverError: any other eAPI failure.
         """
+        if self._http is None:
+            raise ReachabilityError("arista: eAPI transport is closed")
         rid = request_id or f"nb-{uuid.uuid4().hex[:8]}"
         body = {
             "jsonrpc": "2.0",
@@ -237,8 +258,8 @@ class AristaDriver(Driver):
         neighbors = _parse_lldp(result[0])
         if port is None:
             return neighbors
-        # Filter by local port — annotated as Neighbor.port_id when parsing.
-        return [n for n in neighbors if n.system_description and port in n.system_description]
+        # Exact-match the local port encoded in the system_description prefix.
+        return [n for n in neighbors if lldp.local_port_matches(n.system_description, port)]
 
     # ---------- write ----------
 
@@ -273,8 +294,8 @@ class AristaDriver(Driver):
         # Build the eAPI command list: enter config session, run the change,
         # then commit with a timer (auto-rollback if not confirmed).
         timer = _format_commit_timer(confirm_seconds)
-        cmds: list[str] = [
-            "enable",
+        cmds: list[object] = [
+            self._enable_cmd(),
             f"configure session {session_name}",
             *diff.commands,
             f"commit timer {timer}",
@@ -297,13 +318,13 @@ class AristaDriver(Driver):
 
     async def confirm(self, apply_token: str) -> None:
         await self._run_cmds(
-            ["enable", f"configure session {apply_token}", "commit"],
+            [self._enable_cmd(), f"configure session {apply_token}", "commit"],
             fmt="json",
         )
 
     async def revert(self, apply_token: str) -> None:
         await self._run_cmds(
-            ["enable", f"configure session {apply_token}", "abort"],
+            [self._enable_cmd(), f"configure session {apply_token}", "abort"],
             fmt="json",
         )
 
@@ -509,7 +530,7 @@ def _parse_lldp(payload: object) -> list[Neighbor]:
                     port_id = pid.strip()
             sys_name = entry.get("systemName")
             sys_desc = entry.get("systemDescription")
-            desc_prefix = f"[{local_port}] "
+            desc_prefix = lldp.encode_local_port_prefix(local_port)
             desc_body = sys_desc if isinstance(sys_desc, str) else ""
             out.append(
                 Neighbor(

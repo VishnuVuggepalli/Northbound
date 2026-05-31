@@ -22,6 +22,7 @@ class CredentialsIn(BaseModel):
     ssh_private_key: str | None = None
     api_token: str | None = None
     snmp_community: str | None = None
+    enable_secret: str | None = None
 
     def to_credentials(self) -> Credentials:
         """Build the in-process :class:`Credentials` value object."""
@@ -31,6 +32,7 @@ class CredentialsIn(BaseModel):
             ssh_private_key=self.ssh_private_key,
             api_token=self.api_token,
             snmp_community=self.snmp_community,
+            enable_secret=self.enable_secret,
         )
 
 
