@@ -178,11 +178,16 @@ proven end to end on real NX-OS. Reproduce: boot Titanium + `feature nxapi` per
 the header of `sandbox/validate_cisco_nxapi.py` (HTTP — Titanium's NX-API HTTPS
 TLS doesn't serve).
 
-Cisco depth still UNvalidated (honest): NX-API **trunk** write (only access VLAN
-tested live; trunk uses the same array+`switchport` mechanism) and NX-API/IOS
-**LLDP `get_neighbors`** (single-node labs → no adjacency). These need a 2-node
-Cisco topology; the parse logic is unit-tested but not device-confirmed (the
-class of gap that the Arista 2-node run turned into a real bug).
+Cisco NX-API **trunk** write is now live-validated too (vs NX-OSv 7.3: native
+VLAN 10 + allowed {20,30,40} applied, confirmed, parsed back OK).
+
+Cisco depth still UNvalidated (honest): **NX-API LLDP `get_neighbors`** against a
+real adjacency. This needs a 2-node NX-OS topology, which the Titanium emulator
+would not provide here — a fresh single boot works (~66s) but every REBOOT (incl.
+with a link NIC) wedges at 99% CPU with a silent console in this sandbox. The
+NX-API `_parse_lldp` (TABLE_nbor_detail/ROW_nbor_detail) is unit-tested but not
+device-confirmed; the analogous Arista LLDP parser WAS the one a 2-node run turned
+into a real bug, so this remains a genuine (smaller) gap, honestly flagged.
 
 > ONLY remaining gap: **Pica8 PicOS data models** — no public PicOS image exists
 > anywhere. The NETCONF transport + confirmed-commit it relies on are
