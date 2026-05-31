@@ -32,8 +32,12 @@ class ChangeRequest(Base):
     __mapper_args__: ClassVar[dict[str, Any]] = {"version_id_col": version_id}
 
     id: Mapped[str] = uuid_pk()
+    # RESTRICT (not CASCADE): the change-request trail is the compliance record.
+    # A device with change-request history cannot be hard-deleted — deleting it
+    # would wipe the audit/compliance trail. delete_device surfaces the resulting
+    # IntegrityError as a 409.
     device_id: Mapped[str] = mapped_column(
-        ForeignKey("devices.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("devices.id", ondelete="RESTRICT"), nullable=False
     )
     port_name: Mapped[str] = mapped_column(String(128), nullable=False)
     requested_by: Mapped[str] = mapped_column(String(128), nullable=False)

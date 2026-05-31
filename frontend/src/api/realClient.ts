@@ -51,7 +51,7 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 type LoginResponse = components['schemas']['LoginResponse'];
 type UserOut = components['schemas']['UserOut'];
 type DeviceOut = components['schemas']['DeviceOut'];
-type PortDetailOut = components['schemas']['PortDetailOut'];
+type PortStateOut = components['schemas']['PortStateOut'];
 type RequestOut = components['schemas']['RequestOut'];
 type AuditEntryOut = components['schemas']['AuditEntryOut'];
 type PlatformInfo = components['schemas']['PlatformInfo'];
@@ -202,13 +202,16 @@ export async function listPortsForDevice(
   deviceId: string,
   options: { refresh?: boolean } = {},
 ): Promise<PortListSnapshot> {
-  const ports = await request<PortDetailOut[]>(
+  // Backend GET /api/devices/{id}/ports returns a flat PortStateOut[] (see
+  // backend api/ports.py response_model=list[PortStateOut]); it is NOT the
+  // single-port PortDetailOut shape, so each element maps directly.
+  const ports = await request<PortStateOut[]>(
     `/api/devices/${encodeURIComponent(deviceId)}/ports`,
     { query: options.refresh ? { refresh: true } : undefined },
   );
   return {
     device_id: deviceId,
-    ports: ports.map((detail, i) => mapPort(detail.port, deviceId, i)),
+    ports: ports.map((p, i) => mapPort(p, deviceId, i)),
     fetched_at: Date.now(),
     cache_ttl_seconds: 30,
   };
@@ -222,7 +225,10 @@ export async function listAllPorts(): Promise<PortMap> {
       try {
         const snap = await listPortsForDevice(d.id);
         map[d.id] = snap.ports;
-      } catch {
+      } catch (err) {
+        // A single device failing to poll must not collapse the whole map, but
+        // the failure must be surfaced, not silently swallowed.
+        console.error(`listAllPorts: failed to load ports for device ${d.id}`, err);
         map[d.id] = [];
       }
     }),
@@ -408,8 +414,11 @@ export async function confirmOnboard(draft: OnboardingDraft): Promise<ConfirmOnb
   try {
     const snap = await listPortsForDevice(created.id);
     portCount = snap.ports.length;
-  } catch {
-    /* device created but ports not yet pollable — report zero */
+  } catch (err: unknown) {
+    // Expected best-effort: the device is created but ports may not be
+    // pollable on the first beat. Report zero, but log so a persistent
+    // seeding failure is diagnosable rather than silently hidden.
+    console.error(`onboardDevice: initial port poll failed for ${created.id}`, err);
   }
   return { device: mapDevice(created, portCount), ports_seeded: portCount };
 }

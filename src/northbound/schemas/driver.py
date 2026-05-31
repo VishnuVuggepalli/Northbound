@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AuthMethod(StrEnum):
@@ -136,10 +136,14 @@ class ConnectionParams:
 
 
 class PortChange(BaseModel):
-    """User-facing change request payload."""
+    """User-facing change request payload.
 
-    untagged_vlan: int | None = None
-    tagged_vlans: list[int] | None = None
+    VLAN IDs are validated against the 802.1Q valid range 1..4094; 0 and 4095
+    are reserved and rejected at this system boundary.
+    """
+
+    untagged_vlan: int | None = Field(default=None, ge=1, le=4094)
+    tagged_vlans: list[Annotated[int, Field(ge=1, le=4094)]] | None = None
     host_model: str | None = None
     bmc_ip: str | None = None
     notes: str | None = None

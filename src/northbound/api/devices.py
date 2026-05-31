@@ -314,7 +314,9 @@ async def rotate_credentials(
 
 
 # --------------------------------------------------------------------------- #
-# offboard (cascade ports + backups via FK ondelete=CASCADE)
+# offboard (port_metadata + backups cascade via FK ondelete=CASCADE; a device
+# with change-request history is blocked from hard-delete by FK RESTRICT so the
+# compliance trail is retained — surfaced as 409)
 # --------------------------------------------------------------------------- #
 @router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_device(
@@ -322,12 +324,35 @@ async def delete_device(
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """Offboard a device. port_metadata + backups cascade via FK ondelete."""
+    """Offboard a device.
+
+    port_metadata + backups cascade via FK ondelete=CASCADE (operational data).
+    Change-request history uses FK ondelete=RESTRICT, so a device that has any
+    change requests CANNOT be hard-deleted — the compliance trail must be
+    retained. That case surfaces as 409 Conflict rather than an unhandled 500.
+    """
     device = await _load_device(session, device_id)
     name = device.name
     platform = device.platform
     mgmt_ip = device.mgmt_ip
     await session.delete(device)
+    try:
+        # Force the DELETE now so the FK RESTRICT fires here (not at commit),
+        # letting us attribute the IntegrityError to the retained change trail.
+        await session.flush()
+    except IntegrityError as exc:
+        # INVARIANT: rollback() leaves the session clean; `raise` MUST follow
+        # immediately. Do not add session work between here and the raise —
+        # any add()/flush() after rollback would open a fresh implicit
+        # transaction on a session the caller expects to be aborted.
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "device has change-request history and cannot be hard-deleted; "
+                "the change trail must be retained"
+            ),
+        ) from exc
 
     # Chain the offboard audit row through append_audit so it gets a real
     # row_hash and links to the current tip (was previously written with an

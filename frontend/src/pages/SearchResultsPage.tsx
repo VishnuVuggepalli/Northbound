@@ -15,10 +15,28 @@ export function SearchResultsPage() {
   const theme = useThemeStore((s) => s.theme);
   const selectPort = useUIStore((s) => s.selectPort);
   const [results, setResults] = useState<Array<{ device: Device; port: Port }>>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!env || (env !== 'lab' && env !== 'dc')) return;
-    void apiClient.searchPorts(env, q).then(setResults).catch(() => setResults([]));
+    let cancelled = false;
+    setError(null);
+    void apiClient
+      .searchPorts(env, q)
+      .then((r) => {
+        if (!cancelled) setResults(r);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Don't swallow: log for diagnosis and tell the user the search failed
+        // rather than showing a misleading empty result set.
+        console.error(`searchPorts failed (env=${env}, q="${q}")`, err);
+        setResults([]);
+        setError(err instanceof Error ? err.message : 'Search failed');
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [env, q]);
 
   if (env !== 'lab' && env !== 'dc') return null;
@@ -32,6 +50,14 @@ export function SearchResultsPage() {
         </h1>
         <p className="mt-1 text-sm text-fg-muted">{results.length} match{results.length === 1 ? '' : 'es'}</p>
       </header>
+      {error && (
+        <div
+          role="alert"
+          className="mb-3 rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
+          Search failed: {error}
+        </div>
+      )}
       <div className="space-y-1.5">
         {results.map(({ device, port }) => (
           <button

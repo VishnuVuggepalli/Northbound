@@ -28,9 +28,10 @@ from northbound.drivers import registry
 from northbound.drivers.base import Driver, ReachabilityError
 from northbound.main import app
 from northbound.models.audit_log import AuditLog
+from northbound.models.change_request import ChangeRequest
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment, UserRole
+from northbound.models.enums import ChangeRequestStatus, DeviceRole, Environment, UserRole
 from northbound.models.port_metadata import PortMetadata
 from northbound.models.user import User
 from northbound.schemas.driver import (
@@ -508,6 +509,47 @@ async def test_delete_requires_admin(
     device_id = created.json()["id"]
     resp = await client.delete(f"/api/devices/{device_id}", headers=_bearer(alice))
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_delete_blocked_by_change_request_history_409(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    """A device with change-request history cannot be hard-deleted (FK RESTRICT).
+
+    The compliance trail must be retained, so the delete surfaces as 409 — not
+    an unhandled 500 — and the device and its change request are left intact.
+    """
+    session, admin, _ = seeded
+    created = await client.post("/api/devices", headers=_bearer(admin), json=_onboard_body())
+    device_id = created.json()["id"]
+
+    session.add(
+        ChangeRequest(
+            device_id=device_id,
+            port_name="Ethernet1",
+            requested_by=admin.username,
+            requested_changes={"untagged_vlan": 10},
+            reason="apply test",
+            status=ChangeRequestStatus.APPLIED,
+        )
+    )
+    await session.flush()
+    # The device exists right up to the delete attempt; the change request is the
+    # sole reason the FK RESTRICT trips.
+    assert await session.scalar(select(Device).where(Device.id == device_id)) is not None
+
+    resp = await client.delete(f"/api/devices/{device_id}", headers=_bearer(admin))
+    # 409 (not 500): the IntegrityError from FK RESTRICT is caught and attributed
+    # to the retained compliance trail.
+    assert resp.status_code == 409
+    assert "change trail" in resp.json()["detail"]
+    # NOTE: the endpoint calls session.rollback() on the IntegrityError. In
+    # production each request owns its own committed session, so rollback only
+    # undoes the failed DELETE and the device persists. Here the test shares one
+    # never-committed session across requests, so rollback also discards the
+    # device/CR set up above — asserting post-rollback row state would test the
+    # harness, not the code. The 409 contract is the meaningful guarantee.
 
 
 # --------------------------------------------------------------------------- #
