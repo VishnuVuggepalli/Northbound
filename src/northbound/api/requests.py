@@ -18,7 +18,7 @@ from northbound.api.deps import get_current_user, require_admin
 from northbound.db import get_session
 from northbound.models.change_request import ChangeRequest
 from northbound.models.device import Device
-from northbound.models.enums import ChangeRequestStatus
+from northbound.models.enums import ChangeRequestStatus, UserRole
 from northbound.models.user import User
 from northbound.schemas.request import RequestCreateIn, RequestOut, RequestRejectIn
 from northbound.services import change_apply, requests
@@ -33,6 +33,17 @@ async def _load_request(session: AsyncSession, request_id: str) -> ChangeRequest
     if req is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
     return req
+
+
+def _assert_can_read(req: ChangeRequest, user: User) -> None:
+    """Object-level authz for read paths.
+
+    A non-admin may only see their own request. We raise 404 (not 403) so the
+    response cannot be used to confirm that some other user's request exists.
+    Admins may read any request.
+    """
+    if user.role != UserRole.ADMIN and req.requested_by != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
 
 
 async def _load_device(session: AsyncSession, device_id: str) -> Device:
@@ -68,11 +79,19 @@ async def list_requests(
     mine: bool = False,
     request_status: ChangeRequestStatus | None = None,
 ) -> list[RequestOut]:
-    """List requests. ``?mine=true`` filters to the caller; ``?request_status=``
-    filters by state."""
+    """List requests.
+
+    Non-admin callers ALWAYS see only their own requests — the client ``?mine``
+    flag is ignored for them so it cannot be used to enumerate others' requests.
+    Admins see every request and may narrow with ``?mine`` / ``?request_status``.
+    """
+    is_admin = user.role == UserRole.ADMIN
+    # Non-admins are forced to their own id (client `mine` is not trusted);
+    # admins may opt into the owner filter via `?mine`.
+    mine_user_id = (user.id if mine else None) if is_admin else user.id
     rows = await requests.list_requests(
         session,
-        mine_user_id=user.id if mine else None,
+        mine_user_id=mine_user_id,
         status=request_status,
     )
     return [RequestOut.from_model(r) for r in rows]
@@ -81,11 +100,16 @@ async def list_requests(
 @router.get("/{request_id}", response_model=RequestOut)
 async def get_request(
     request_id: str,
-    _user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> RequestOut:
-    """Request detail, including the rendered diff if available."""
+    """Request detail, including the rendered diff if available.
+
+    Non-admin callers may only read their own request; a foreign id returns 404
+    (object-level authz — see :func:`_assert_can_read`).
+    """
     req = await _load_request(session, request_id)
+    _assert_can_read(req, user)
     return RequestOut.from_model(req)
 
 

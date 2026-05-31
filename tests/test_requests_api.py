@@ -121,7 +121,10 @@ async def test_full_lifecycle_create_approve_apply_confirm(
     assert applied.status_code == 200
     body = applied.json()
     assert body["status"] == "awaiting_confirm"
-    assert body["confirm_token"]
+    # SEC-2: the raw confirm_token must never cross the HTTP boundary; the DTO
+    # exposes only a derived boolean + the (non-secret) deadline.
+    assert "confirm_token" not in body
+    assert body["awaiting_confirm"] is True
     assert body["diff_text"]
 
     confirmed = await client.post(f"/api/requests/{req_id}/confirm", headers=_bearer(admin))
@@ -186,6 +189,96 @@ async def test_mine_and_status_filters(
 
     pending = await client.get("/api/requests?request_status=pending", headers=_bearer(admin))
     assert len(pending.json()) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_requests_non_admin_only_sees_own_regardless_of_mine_flag(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """SEC-1 IDOR: a requester sees ONLY their own requests, even with ?mine=false.
+
+    alice files two; admin files one. alice's list must contain exactly her two,
+    never admin's — whatever she passes for ``mine``.
+    """
+    _, admin, alice, leaf, _ = seeded
+    a1 = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    a2 = await client.post(
+        "/api/requests", headers=_bearer(alice), json=_create_body(leaf.id, port="Ethernet2")
+    )
+    await client.post(
+        "/api/requests", headers=_bearer(admin), json=_create_body(leaf.id, port="Ethernet3")
+    )
+    alice_ids = {a1.json()["id"], a2.json()["id"]}
+
+    for query in ("", "?mine=false", "?mine=true"):
+        resp = await client.get(f"/api/requests{query}", headers=_bearer(alice))
+        assert resp.status_code == 200
+        seen = {r["id"] for r in resp.json()}
+        # alice's own only — never admin's, even with mine=false.
+        assert seen == alice_ids
+
+
+@pytest.mark.asyncio
+async def test_list_requests_admin_sees_all(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """SEC-1: admin sees every request (alice's + admin's)."""
+    _, admin, alice, leaf, _ = seeded
+    await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    await client.post(
+        "/api/requests", headers=_bearer(admin), json=_create_body(leaf.id, port="Ethernet2")
+    )
+    resp = await client.get("/api/requests", headers=_bearer(admin))
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_request_cross_user_returns_404(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """SEC-1: alice GETting admin's request id gets 404 (not 403 — no existence leak)."""
+    _, admin, alice, leaf, _ = seeded
+    others = await client.post("/api/requests", headers=_bearer(admin), json=_create_body(leaf.id))
+    other_id = others.json()["id"]
+
+    resp = await client.get(f"/api/requests/{other_id}", headers=_bearer(alice))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_request_owner_and_admin_succeed(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """SEC-1: the owner reads her own (200); admin reads anyone's (200)."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+
+    owner = await client.get(f"/api/requests/{req_id}", headers=_bearer(alice))
+    assert owner.status_code == 200
+    as_admin = await client.get(f"/api/requests/{req_id}", headers=_bearer(admin))
+    assert as_admin.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_request_out_never_serializes_confirm_token(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """SEC-2: even for an awaiting_confirm request, the body has no confirm_token."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    await client.post(f"/api/requests/{req_id}/apply", headers=_bearer(admin))
+
+    detail = await client.get(f"/api/requests/{req_id}", headers=_bearer(admin))
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["status"] == "awaiting_confirm"
+    assert "confirm_token" not in body
+    assert body["awaiting_confirm"] is True
+    # The token must not leak anywhere in the serialized payload either.
+    assert "confirm_token" not in detail.text
 
 
 @pytest.mark.asyncio

@@ -39,7 +39,10 @@ class RequestOut(BaseModel):
     reviewer_id: str | None = None
     reviewer_comment: str | None = None
     diff_text: str | None = None
-    confirm_token: str | None = None
+    # The raw ``confirm_token`` is a server-internal secret used by
+    # ``change_apply.confirm_request``; it MUST NOT cross the HTTP boundary. We
+    # expose only a derived boolean plus the (non-secret) deadline for the UI.
+    awaiting_confirm: bool = False
     confirm_deadline_at: float | None = None
     created_at: str
     reviewed_at: str | None = None
@@ -58,7 +61,7 @@ class RequestOut(BaseModel):
             reviewer_id=request.reviewer_id,
             reviewer_comment=request.reviewer_comment,
             diff_text=request.diff_text,
-            confirm_token=request.confirm_token,
+            awaiting_confirm=request.status == ChangeRequestStatus.AWAITING_CONFIRM,
             confirm_deadline_at=request.confirm_deadline_at,
             created_at=request.created_at.isoformat() if request.created_at else "",
             reviewed_at=request.reviewed_at.isoformat() if request.reviewed_at else None,

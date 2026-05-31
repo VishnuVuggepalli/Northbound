@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 # Importing a driver module triggers @register at import time.
 # Order is alphabetical to keep /api/platforms output stable.
@@ -64,6 +65,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Northbound", version="0.1.0", lifespan=lifespan)
+
+# Reverse-proxy support: only honour X-Forwarded-* (so the rate limiter and
+# logs see the real client IP, not the proxy's) when explicitly enabled and
+# from trusted proxy hops. Default off — forwarded headers are client-spoofable
+# unless terminated by a controlled proxy. See Settings.trust_proxy_headers.
+_settings = get_settings()
+if _settings.trust_proxy_headers:
+    _trusted = [h.strip() for h in _settings.trusted_proxies.split(",") if h.strip()]
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=_trusted or "127.0.0.1")
 
 # Wire the slowapi limiter: state + the 429 exception handler.
 app.state.limiter = limiter

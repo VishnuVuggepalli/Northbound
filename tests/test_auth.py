@@ -163,6 +163,32 @@ async def test_login_unknown_user_same_message_no_enumeration(client: AsyncClien
 
 
 @pytest.mark.asyncio
+async def test_login_unknown_user_runs_dummy_hash_verify(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SEC-3: an unknown username still runs verify_password against the dummy
+    hash, so the no-user and wrong-password branches take ~the same bcrypt time
+    (timing-oracle closed). We assert the branch executes deterministically by
+    spying on verify_password rather than measuring wall-clock time."""
+    import northbound.api.auth as auth_module
+    from northbound.auth.password import DUMMY_PASSWORD_HASH
+
+    calls: list[tuple[str, str]] = []
+    real_verify = auth_module.verify_password
+
+    def _spy(plain: str, hashed: str) -> bool:
+        calls.append((plain, hashed))
+        return real_verify(plain, hashed)
+
+    monkeypatch.setattr(auth_module, "verify_password", _spy)
+
+    resp = await client.post("/api/auth/login", json={"username": "ghost", "password": "x"})
+    assert resp.status_code == 401
+    # verify_password was called exactly once, against the constant dummy hash.
+    assert calls == [("x", DUMMY_PASSWORD_HASH)]
+
+
+@pytest.mark.asyncio
 async def test_logout_returns_204(client: AsyncClient) -> None:
     resp = await client.post("/api/auth/logout")
     assert resp.status_code == 204
@@ -184,3 +210,24 @@ async def test_login_throttle_sixth_attempt_429(client: AsyncClient) -> None:
         resp = await client.post("/api/auth/login", json={"username": "admin", "password": "wrong"})
         last_status = resp.status_code
     assert last_status == 429
+
+
+@pytest.mark.asyncio
+async def test_login_throttle_keyed_per_username_same_ip(client: AsyncClient) -> None:
+    """SEC-4: the limiter is keyed on (ip, username).
+
+    Exhaust the budget for one username from this IP, then a *different*
+    username from the same IP still has its own fresh budget (not collapsed into
+    one IP-only bucket). This is what bounds password-spraying per-target while
+    avoiding a single proxy IP locking everyone out.
+    """
+    # Burn through the 5/5min budget for "admin" → 6th is 429.
+    for _ in range(6):
+        burned = await client.post(
+            "/api/auth/login", json={"username": "admin", "password": "wrong"}
+        )
+    assert burned.status_code == 429
+
+    # Same IP, different username → independent bucket, first attempt allowed.
+    other = await client.post("/api/auth/login", json={"username": "alice", "password": "wrong"})
+    assert other.status_code == 401  # bad password, NOT 429 (its own budget)

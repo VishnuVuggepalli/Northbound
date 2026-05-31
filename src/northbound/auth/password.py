@@ -14,6 +14,14 @@ from passlib.context import CryptContext
 # bcrypt is the only active scheme; ``deprecated="auto"`` future-proofs rotation.
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# Precomputed bcrypt hash of a random throwaway secret, minted once at import.
+# Login uses it to run a real verify even when the username is unknown, so the
+# unknown-user and wrong-password paths take the same bcrypt time (no timing
+# oracle for user enumeration). It can never match any real password.
+import secrets as _secrets  # noqa: E402  (local helper import, keep near use)
+
+DUMMY_PASSWORD_HASH: str = _pwd_context.hash(_secrets.token_urlsafe(32))
+
 
 def hash_password(plain: str) -> str:
     """Return a bcrypt hash of ``plain`` (salt is embedded in the output)."""

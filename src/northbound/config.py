@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     # Fernet master key (urlsafe-base64, 32 bytes). Required outside dev.
     master_key: str | None = Field(default=None)
 
+    # Reverse-proxy trust. When True, X-Forwarded-For/Proto headers are honoured
+    # so the rate limiter keys on the real client IP rather than the proxy's.
+    # Default False: never blindly trust forwarded headers (they are
+    # client-spoofable when not behind a controlled proxy). ``trusted_proxies``
+    # lists the proxy hops allowed to set them (default: loopback only).
+    trust_proxy_headers: bool = Field(default=False)
+    trusted_proxies: str = Field(default="127.0.0.1,::1")
+
     # JWT signing secret (env NB_SECRET_KEY). Required outside dev; in dev an
     # ephemeral key is minted with a warning (mirrors the master-key policy).
     secret_key: str | None = Field(default=None)

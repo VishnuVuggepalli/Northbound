@@ -14,9 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from northbound.api.limiter import LOGIN_RATE_LIMIT, limiter
+from northbound.api.limiter import LOGIN_RATE_LIMIT, limiter, login_rate_key
 from northbound.auth.jwt import create_access_token
-from northbound.auth.password import verify_password
+from northbound.auth.password import DUMMY_PASSWORD_HASH, verify_password
 from northbound.db import get_session
 from northbound.models.user import User
 from northbound.schemas.auth import LoginRequest, LoginResponse
@@ -31,7 +31,7 @@ _INVALID_CREDENTIALS = HTTPException(
 
 
 @router.post("/login", response_model=LoginResponse)
-@limiter.limit(LOGIN_RATE_LIMIT)
+@limiter.limit(LOGIN_RATE_LIMIT, key_func=login_rate_key)
 async def login(
     request: Request,
     body: LoginRequest,
@@ -40,10 +40,15 @@ async def login(
     """Verify credentials and issue a JWT. 401 (generic) on any mismatch."""
     user = await session.scalar(select(User).where(User.username == body.username))
 
-    # Verify even when the user is missing? We cannot (no hash), but we still
-    # return the identical generic error so timing/response don't reveal which
-    # branch failed.
-    if user is None or not verify_password(body.password, user.password_hash):
+    # Equalize timing: when the user is missing we have no real hash, so we run
+    # verify_password against a constant dummy bcrypt hash. This makes the
+    # unknown-user and wrong-password paths take ~the same bcrypt time, closing
+    # the timing oracle that would otherwise leak which usernames exist. The
+    # error returned is identical in both branches (no enumeration via message).
+    if user is None:
+        verify_password(body.password, DUMMY_PASSWORD_HASH)
+        raise _INVALID_CREDENTIALS
+    if not verify_password(body.password, user.password_hash):
         raise _INVALID_CREDENTIALS
 
     token = create_access_token(sub=user.id, role=user.role)
