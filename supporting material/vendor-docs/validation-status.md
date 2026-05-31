@@ -13,7 +13,7 @@ behaviorally unverified.
 |---|---|---|---|---|---|---|
 | Mock | `mock` | ✓ | n/a (in-proc) | ✓ (deterministic) | n/a | — |
 | Arista EOS | `arista` | ✓ | **authored** + live | ✓ **LIVE** | **vEOS-lab 4.27.0F** (qemu/KVM) | Full driver validated over eAPI: test_credentials / get_ports / get_running_config + the commit-confirm WRITE path (`configure session` + `commit timer`, confirm, **and** apply→revert). **Found + fixed 3 real bugs** (see below). |
-| Cisco NX-OS | `cisco` | ✓ | **authored** | ✗ **blocked** | none | NX-API write path needs a Nexus 9000v image (licensed; absent from the GNS3 image repo, which carries only IOS/IOSv/IOL/CSR/cat9k). The IOS images would exercise only the Cisco SSH read path, not NX-API. |
+| Cisco IOS/NX-OS | `cisco` | ✓ | **authored** + partial live | **SSH read ✓ / NX-API ✗ / switch-ports ✗** | **IOSv 15.8(3)M2** (SSH) | SSH read path live-validated vs real IOSv: test_credentials (version parse), reachable, get_running_config, hostname — all PASS, no bugs. STILL unvalidated: `get_ports` (`show interfaces status` is switch-only, empty on an IOSv router — needs IOSvL2/cat9kv) and the entire **NX-API write path** (needs a Nexus 9000v image, absent from the GNS3 repo). |
 | Pica8 PicOS | `pica8` | ✓ | **authored** (XML) | **transport ✓ / data-models ✗** | Netopeer2 (transport) | NETCONF transport + confirmed-commit live-validated vs Netopeer2 (2 bugs found+fixed); PicOS YANG data models still blocked — no free/public PicOS image exists anywhere. |
 
 ## Transport layer status
@@ -23,7 +23,7 @@ independently. One was exercised live in this build:
 
 | Transport | Used by | Live-validated | Against | Result |
 |---|---|---|---|---|
-| `asyncssh_client.SshClient` | FreeBSD/FRR read path, Cisco SSH fallback | ✓ **yes** | **FRR 9.1** (Alpine) container over SSH | PASS — real `vtysh -c "show running-config"` + `show ip bgp summary` returned and decoded |
+| `asyncssh_client.SshClient` | FreeBSD/FRR read path, Cisco SSH fallback | ✓ **yes** | **FRR 9.1** (SSH) + **Cisco IOSv 15.8** (SSH) | PASS — FRR `vtysh` decode, and the real CiscoDriver SSH read path vs IOSv (asyncssh negotiated IOSv's legacy sha1 KEX fine). |
 | `httpx_client.HttpxClient` | Arista eAPI, Cisco NX-API | ✓ **yes (eAPI)** | **vEOS-lab 4.27.0F** eAPI over HTTPS | PASS — live eAPI JSON-RPC end to end via the real AristaDriver. NX-API side still untested (no Nexus image). |
 | `netconf_client.NetconfClient` | Pica8 NETCONF | ✓ **yes** | **Netopeer2/sysrepo** (`:candidate` + `:confirmed-commit`) over SSH | PASS — get-config / edit-config(candidate) / confirmed-commit / confirming-commit / verify, driving the real wrapper. **Found + fixed 2 real bugs** (see below). |
 | `snmp_client.SnmpClient` | (not wired into any driver) | ✓ **yes** | **net-snmp `snmpd`** (community `public`) over UDP/161 | PASS — `get` / `walk` (37 rows) / `bulk_get` against a real daemon. **Found + fixed 1 real bug** (walk async-generator, below). |
@@ -118,6 +118,26 @@ tests had returned canned data regardless of enable mode / session state):
 
 Reproduce: boot vEOS per the header of `sandbox/validate_arista.py`, then
 `python sandbox/validate_arista.py`.
+
+### Live Cisco SSH read-path validation — evidence
+
+`CiscoDriver` (SSH mode, `prefer_native_api=False`) vs real **IOSv 15.8(3)M2**:
+
+```
+[test_credentials] ok=True ver='Cisco IOS Software, IOSv ... Version 15.8(3)M2 ...'
+[reachable]        True
+[running_config]   2936 bytes
+[hostname]         'nb-iosv'
+[get_ports]        0   # 'show interfaces status' is switch-only — empty on a router
+Cisco SSH read path live validation: PASS
+```
+
+No bugs found this run — the version/hostname/running-config parsers matched real
+IOS output. Honest gaps that remain: `get_ports` (switch `show interfaces
+status`, needs IOSvL2/cat9kv — the cat9kv qcow2 was downloaded but would not boot
+in this sandbox: it needs UEFI/OVMF and the pflash launch failed) and the entire
+**NX-API write path** (needs a Nexus 9000v image — absent from the GNS3 repo).
+Reproduce: boot IOSv per the header of `sandbox/validate_cisco_ssh.py`.
 
 ### Live SNMP transport validation — evidence
 
