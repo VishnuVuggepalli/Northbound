@@ -26,7 +26,7 @@ independently. One was exercised live in this build:
 | `asyncssh_client.SshClient` | FreeBSD/FRR read path, Cisco SSH fallback | ✓ **yes** | **FRR 9.1** (Alpine) container over SSH | PASS — real `vtysh -c "show running-config"` + `show ip bgp summary` returned and decoded |
 | `httpx_client.HttpxClient` | Arista eAPI, Cisco NX-API | partial | mock transport only | unit-tested; eAPI/NX-API wire untested against a live API |
 | `netconf_client.NetconfClient` | Pica8 NETCONF | ✓ **yes** | **Netopeer2/sysrepo** (`:candidate` + `:confirmed-commit`) over SSH | PASS — get-config / edit-config(candidate) / confirmed-commit / confirming-commit / verify, driving the real wrapper. **Found + fixed 2 real bugs** (see below). |
-| `snmp_client.SnmpClient` | optional fallbacks | ✗ | — | record-replay tested only |
+| `snmp_client.SnmpClient` | (not wired into any driver) | ✓ **yes** | **net-snmp `snmpd`** (community `public`) over UDP/161 | PASS — `get` / `walk` (37 rows) / `bulk_get` against a real daemon. **Found + fixed 1 real bug** (walk async-generator, below). |
 
 ### Live SSH transport validation — evidence
 
@@ -83,6 +83,33 @@ Reproduce: bring up Netopeer2 (host networking; disable NACM) per the header of
 `sandbox/validate_netconf.py`, then `python sandbox/validate_netconf.py`.
 The docker port-proxy mangles the SSH banner and the bridge IP is not
 host-routable in this sandbox, so `--network host` is required.
+
+### Live SNMP transport validation — evidence
+
+`SnmpClient` driven against a real net-snmp `snmpd` (`docker run -d
+--network host polinux/snmpd`):
+
+```
+[get  sysDescr.0] OK  b'Linux ... x86_64'
+[walk system    ] OK  37 rows
+[bulk_get x2    ] OK  2 values
+SNMP transport live validation: PASS — real snmpd output received.
+```
+
+**Real bug found ONLY against a real daemon** (now fixed): puresnmp's
+`PyWrapper.walk` is an **async generator** yielding `PyVarBind`, but
+`SnmpClient.walk` `await`-ed it as a list-returning coroutine →
+`TypeError: An asyncio.Future, a coroutine or an awaitable is required`. The
+unit-test fake had mirrored the wrong (list) shape. Fixed: consume with
+`async for`; Protocol + fake now mirror the real puresnmp async-generator
+contract. Reproduce: `python sandbox/validate_snmp.py`.
+
+> Note: `supports_snmp_read` was flipped **True → False** on the cisco / arista /
+> pica8 drivers. The SNMP transport works (proven above) but is **not wired into
+> any driver read path** — those drivers read via eAPI / NX-API / NETCONF / SSH.
+> Advertising an unimplemented capability to the UI was dishonest; the flag now
+> reflects reality. (`parse_snmp_lldp_table` in `_lib/lldp.py` is likewise a
+> ready-but-unwired helper.)
 
 ## What "fixtures: authored" means (the circular-fixture problem)
 

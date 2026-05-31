@@ -10,20 +10,34 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 
+class _VarBind(Protocol):
+    """A walked SNMP binding — puresnmp yields ``PyVarBind(oid, value)``."""
+
+    @property
+    def oid(self) -> str: ...
+    @property
+    def value(self) -> Any: ...
+
+
 class _SnmpTransport(Protocol):
     """Minimal async surface we need from the underlying SNMP client.
 
-    Defined as a Protocol so tests can substitute a fake without touching
-    network code paths or the puresnmp import.
+    Signatures MIRROR the real puresnmp ``PyWrapper`` (2.0.1): ``get`` and
+    ``multiget`` are coroutines, but ``walk`` is an **async generator** yielding
+    ``PyVarBind`` — NOT a coroutine returning a list. A previous version of this
+    Protocol declared ``walk`` as ``async def -> list`` and the wrapper
+    ``await``-ed it, which raised ``TypeError`` against a real device (an async
+    generator is not awaitable). The Protocol now documents the real contract.
     """
 
     async def get(self, oid: str) -> Any: ...
-    async def walk(self, oid: str) -> list[tuple[str, Any]]: ...
+    def walk(self, oid: str) -> AsyncIterator[_VarBind]: ...
     async def multiget(self, oids: list[str]) -> list[Any]: ...
 
 
@@ -107,9 +121,18 @@ class SnmpClient:
             return [(k, v) for k, v in replayed]
         async with self._sem:
             transport = self._real_transport()
-            return await asyncio.wait_for(
-                transport.walk(oid_prefix), timeout=self._params.timeout_seconds
-            )
+
+            # puresnmp's walk is an async generator yielding PyVarBind(oid,value)
+            # — it must be consumed with ``async for``, not awaited. Collect into
+            # the (oid, value) list shape callers expect, under the wrapper's
+            # timeout budget.
+            async def _collect() -> list[tuple[str, Any]]:
+                out: list[tuple[str, Any]] = []
+                async for vb in transport.walk(oid_prefix):
+                    out.append((str(vb.oid), vb.value))
+                return out
+
+            return await asyncio.wait_for(_collect(), timeout=self._params.timeout_seconds)
 
     async def bulk_get(self, oids: list[str]) -> list[Any]:
         # Try replay only if every oid has a fixture; otherwise punt to live.

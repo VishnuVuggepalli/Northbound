@@ -54,7 +54,10 @@ class Pica8Driver(Driver):
         writable=True,
         supports_commit_confirm=True,
         native_api_available=True,
-        supports_snmp_read=True,
+        # Reads go via NETCONF; no SNMP read path is wired into this driver. The
+        # SNMP transport exists and is live-validated but is unused here, so this
+        # is reported honestly as False rather than advertised to the UI.
+        supports_snmp_read=False,
         supports_lldp=True,
         max_concurrency=1,
         auth_methods=[AuthMethod.PASSWORD, AuthMethod.SSH_KEY],
