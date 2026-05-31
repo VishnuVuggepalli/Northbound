@@ -159,22 +159,30 @@ class _FakePica8Manager:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self._running = (_FIXTURE_DIR / "pica8" / "get_interfaces.xml").read_text()
 
-    def get_config(self, source: str) -> str:
+    def get_config(self, source: str, filter: Any = None, with_defaults: Any = None) -> str:
         self.calls.append(("get_config", (source,)))
         return self._running
 
     def edit_config(
         self,
-        target: str,
         config: str,
-        default_operation: str | None,
-        test_option: str | None,
-        error_option: str | None,
+        format: str = "xml",
+        target: str = "candidate",
+        default_operation: str | None = None,
+        test_option: str | None = None,
+        error_option: str | None = None,
     ) -> str:
+        # Signature mirrors REAL ncclient; record (target, config) for assertions.
         self.calls.append(("edit_config", (target, config)))
         return "<ok/>"
 
-    def commit(self, confirmed: bool, timeout: int | None) -> str:
+    def commit(
+        self,
+        confirmed: bool = False,
+        timeout: int | None = None,
+        persist: Any = None,
+        persist_id: Any = None,
+    ) -> str:
         self.calls.append(("commit", (confirmed, timeout)))
         return "<ok/>"
 

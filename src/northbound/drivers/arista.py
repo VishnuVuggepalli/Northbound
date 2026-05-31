@@ -46,10 +46,13 @@ from northbound.schemas.driver import (
     TestResult,
 )
 
-# eAPI error codes that map to AuthError. eAPI returns HTTP 401 for bad
-# basic-auth before JSON-RPC ever runs, but some configurations return
-# 200 + JSON error — handle both.
-_AUTH_ERROR_CODES = {1000, 1001, 1002}  # documented as auth / permission
+# eAPI authentication failures surface as HTTP 401 (handled in _run_cmds before
+# JSON-RPC parsing). The JSON-RPC error codes 1000-1003 are COMMAND-execution
+# errors (1000 connect, 1002 "invalid command", etc.), NOT auth — verified live
+# against vEOS, where `show running-config` without enable returns code 1002.
+# Mapping those to AuthError mis-reported a privilege/command error as bad creds,
+# so this set is empty: a JSON-RPC error is a DriverError unless HTTP said 401.
+_AUTH_ERROR_CODES: set[int] = set()
 
 # ConfigDiff metadata keys (kept here to avoid magic strings).
 _SESSION_KEY = "session_name"
@@ -140,10 +143,17 @@ class AristaDriver(Driver):
         if self._http is None:
             raise ReachabilityError("arista: eAPI transport is closed")
         rid = request_id or f"nb-{uuid.uuid4().hex[:8]}"
+        # eAPI runs every batch at privilege level 1 unless the batch ENTERs
+        # enable mode first. Privileged commands (show running-config, configure
+        # session, commit, ...) fail with code 1002 "invalid command" otherwise
+        # — verified live against vEOS. So always prepend enable and strip its
+        # (empty) result before returning, making every command run privileged.
+        # ``enable`` is harmless for level-1 commands, so this is uniform/safe.
+        sent: list[object] = [self._enable_cmd(), *cmds]
         body = {
             "jsonrpc": "2.0",
             "method": "runCmds",
-            "params": {"version": 1, "cmds": cmds, "format": fmt},
+            "params": {"version": 1, "cmds": sent, "format": fmt},
             "id": rid,
         }
         try:
@@ -173,7 +183,8 @@ class AristaDriver(Driver):
         result = payload.get("result")
         if not isinstance(result, list):
             raise DriverError(f"arista eAPI: missing 'result' list: {payload!r}")
-        return result
+        # Drop the prepended ``enable`` result so callers see only their commands.
+        return result[1:] if result else result
 
     # ---------- onboarding ----------
 
@@ -297,8 +308,8 @@ class AristaDriver(Driver):
         # Build the eAPI command list: enter config session, run the change,
         # then commit with a timer (auto-rollback if not confirmed).
         timer = _format_commit_timer(confirm_seconds)
+        # enable is prepended by _run_cmds; do not double it here.
         cmds: list[object] = [
-            self._enable_cmd(),
             f"configure session {session_name}",
             *diff.commands,
             f"commit timer {timer}",
@@ -320,16 +331,16 @@ class AristaDriver(Driver):
         )
 
     async def confirm(self, apply_token: str) -> None:
-        await self._run_cmds(
-            [self._enable_cmd(), f"configure session {apply_token}", "commit"],
-            fmt="json",
-        )
+        # A session in 'pendingCommitTimer' state CANNOT be re-entered for
+        # editing (`configure session NAME` then `commit` fails with code 1000,
+        # verified live on vEOS) — it must be confirmed with the SINGLE-LINE
+        # form `configure session NAME commit`. enable is prepended by _run_cmds.
+        await self._run_cmds([f"configure session {apply_token} commit"], fmt="json")
 
     async def revert(self, apply_token: str) -> None:
-        await self._run_cmds(
-            [self._enable_cmd(), f"configure session {apply_token}", "abort"],
-            fmt="json",
-        )
+        # Single-line form for the same reason as confirm(): a pending-timer
+        # session is aborted with `configure session NAME abort`.
+        await self._run_cmds([f"configure session {apply_token} abort"], fmt="json")
 
 
 # ---------------------------------------------------------------------------

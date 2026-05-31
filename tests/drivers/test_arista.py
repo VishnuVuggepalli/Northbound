@@ -181,8 +181,10 @@ async def test_confirm_calls_commit() -> None:
 
     drv = _make_driver(handler=handler)
     await drv.confirm("nb-deadbeef")
-    assert "configure session nb-deadbeef" in seen["cmds"]
-    assert "commit" in seen["cmds"]
+    # SINGLE-LINE form: a pendingCommitTimer session can't be re-entered, so
+    # confirm must be 'configure session NAME commit' (verified live on vEOS).
+    assert "configure session nb-deadbeef commit" in seen["cmds"]
+    assert seen["cmds"][0] == "enable"  # enable is prepended by _run_cmds
 
 
 @pytest.mark.asyncio
@@ -196,8 +198,9 @@ async def test_revert_calls_abort() -> None:
 
     drv = _make_driver(handler=handler)
     await drv.revert("nb-deadbeef")
-    assert "configure session nb-deadbeef" in seen["cmds"]
-    assert "abort" in seen["cmds"]
+    # SINGLE-LINE form: 'configure session NAME abort' (verified live on vEOS).
+    assert "configure session nb-deadbeef abort" in seen["cmds"]
+    assert seen["cmds"][0] == "enable"  # enable is prepended by _run_cmds
 
 
 def _make_driver_with_creds(*, handler, creds: Credentials) -> AristaDriver:  # type: ignore[no-untyped-def]
@@ -261,7 +264,9 @@ async def test_get_neighbors_port_filter_is_exact_not_substring() -> None:
     }
 
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"result": [payload]})
+        # Two results: the prepended enable, then the lldp payload (eAPI returns
+        # one result per command; _run_cmds strips the enable result).
+        return httpx.Response(200, json={"result": [{}, payload]})
 
     drv = _make_driver(handler=handler)
     eth1 = await drv.get_neighbors("Ethernet1")

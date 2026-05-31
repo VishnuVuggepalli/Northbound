@@ -12,8 +12,8 @@ behaviorally unverified.
 | Driver | `platform_id` | Code-complete | Fixtures | Live-validated | NOS version tested | Why blocked |
 |---|---|---|---|---|---|---|
 | Mock | `mock` | ✓ | n/a (in-proc) | ✓ (deterministic) | n/a | — |
-| Arista EOS | `arista` | ✓ | **authored** (from vendor docs) | ✗ **blocked** | none | cEOS-lab image requires arista.com login; no public mirror exists (`docker manifest inspect ceos*` → denied). |
-| Cisco NX-OS | `cisco` | ✓ | **authored** | ✗ **blocked** | none | NX-OSv needs a licensed qcow + vrnetlab + KVM nesting; no free image. |
+| Arista EOS | `arista` | ✓ | **authored** + live | ✓ **LIVE** | **vEOS-lab 4.27.0F** (qemu/KVM) | Full driver validated over eAPI: test_credentials / get_ports / get_running_config + the commit-confirm WRITE path (`configure session` + `commit timer`, confirm, **and** apply→revert). **Found + fixed 3 real bugs** (see below). |
+| Cisco NX-OS | `cisco` | ✓ | **authored** | ✗ **blocked** | none | NX-API write path needs a Nexus 9000v image (licensed; absent from the GNS3 image repo, which carries only IOS/IOSv/IOL/CSR/cat9k). The IOS images would exercise only the Cisco SSH read path, not NX-API. |
 | Pica8 PicOS | `pica8` | ✓ | **authored** (XML) | **transport ✓ / data-models ✗** | Netopeer2 (transport) | NETCONF transport + confirmed-commit live-validated vs Netopeer2 (2 bugs found+fixed); PicOS YANG data models still blocked — no free/public PicOS image exists anywhere. |
 
 ## Transport layer status
@@ -24,7 +24,7 @@ independently. One was exercised live in this build:
 | Transport | Used by | Live-validated | Against | Result |
 |---|---|---|---|---|
 | `asyncssh_client.SshClient` | FreeBSD/FRR read path, Cisco SSH fallback | ✓ **yes** | **FRR 9.1** (Alpine) container over SSH | PASS — real `vtysh -c "show running-config"` + `show ip bgp summary` returned and decoded |
-| `httpx_client.HttpxClient` | Arista eAPI, Cisco NX-API | partial | mock transport only | unit-tested; eAPI/NX-API wire untested against a live API |
+| `httpx_client.HttpxClient` | Arista eAPI, Cisco NX-API | ✓ **yes (eAPI)** | **vEOS-lab 4.27.0F** eAPI over HTTPS | PASS — live eAPI JSON-RPC end to end via the real AristaDriver. NX-API side still untested (no Nexus image). |
 | `netconf_client.NetconfClient` | Pica8 NETCONF | ✓ **yes** | **Netopeer2/sysrepo** (`:candidate` + `:confirmed-commit`) over SSH | PASS — get-config / edit-config(candidate) / confirmed-commit / confirming-commit / verify, driving the real wrapper. **Found + fixed 2 real bugs** (see below). |
 | `snmp_client.SnmpClient` | (not wired into any driver) | ✓ **yes** | **net-snmp `snmpd`** (community `public`) over UDP/161 | PASS — `get` / `walk` (37 rows) / `bulk_get` against a real daemon. **Found + fixed 1 real bug** (walk async-generator, below). |
 
@@ -84,6 +84,41 @@ Reproduce: bring up Netopeer2 (host networking; disable NACM) per the header of
 The docker port-proxy mangles the SSH banner and the bridge IP is not
 host-routable in this sandbox, so `--network host` is required.
 
+### Live Arista driver validation — evidence
+
+Full `AristaDriver` driven against **vEOS-lab 4.27.0F** (qemu/KVM, eAPI forwarded
+to the host) — read paths AND the commit-confirm write path:
+
+```
+[test_credentials] ok=True ver=vEOS-lab 4.27.0F 45ms
+[running_config]   613 bytes
+[get_ports]        3 ports: ['Ethernet2', 'Management1', 'Ethernet1']
+[apply_change]     success=True token=nb-e26b1e6a       # configure session + commit timer
+[confirm+verify]   Ethernet1 vlan=20 desc='nb-live-confirm' -> OK
+[apply_change#2]   success=True token=nb-fcb4bd6b
+[revert+verify]    Ethernet1 vlan=20 desc='nb-live-confirm' -> OK (unchanged)
+Arista driver live validation: PASS
+```
+
+**Three real production bugs found ONLY against the real device** (mock unit
+tests had returned canned data regardless of enable mode / session state):
+
+1. **No enable mode for privileged reads** — `show running-config` (and config
+   sessions) need enable; the driver sent them at privilege level 1 → eAPI code
+   1002 "invalid command". Fix: `_run_cmds` prepends `enable` to every batch and
+   strips its result.
+2. **eAPI error-code misclassification** — codes {1000,1001,1002} were mapped to
+   `AuthError`, but they are COMMAND-execution errors (auth fails at HTTP 401).
+   A privilege/command failure thus surfaced as "bad credentials". Fix:
+   `_AUTH_ERROR_CODES` emptied; JSON-RPC errors are `DriverError` unless HTTP 401.
+3. **Wrong confirm/revert syntax** — a session in `pendingCommitTimer` state
+   cannot be re-entered, so the two-command `configure session NAME` + `commit`
+   failed (code 1000). Fix: single-line `configure session NAME commit` /
+   `... abort`.
+
+Reproduce: boot vEOS per the header of `sandbox/validate_arista.py`, then
+`python sandbox/validate_arista.py`.
+
 ### Live SNMP transport validation — evidence
 
 `SnmpClient` driven against a real net-snmp `snmpd` (`docker run -d
@@ -113,14 +148,18 @@ contract. Reproduce: `python sandbox/validate_snmp.py`.
 
 ## What "fixtures: authored" means (the circular-fixture problem)
 
-The Arista/Cisco/Pica8 contract fixtures in `tests/fixtures/<platform>/` were
+The Cisco/Pica8 contract fixtures in `tests/fixtures/<platform>/` were
 hand-authored from vendor documentation by the agent that also wrote the
 parsers. The contract suite (`tests/drivers/test_contract.py`) therefore proves
 the parser is *self-consistent with the agent's guess of the wire format* — not
 that it matches what a real device emits. A shared wrong guess passes green.
 
 This is **not** the same as live-validated. It is honestly labelled
-"behaviorally unverified."
+"behaviorally unverified." **Arista is now the exception** — it was validated
+against real vEOS (above), which is exactly how the live run caught three bugs
+the self-consistent fixtures could never surface. Cisco NX-API and Pica8 data
+models remain in the circular-fixture state until a Nexus / PicOS image is
+available.
 
 ## What was obtainable in the build sandbox (2026-05)
 
@@ -129,13 +168,15 @@ This is **not** the same as live-validated. It is honestly labelled
 - Freely pullable: `quay.io/frrouting/frr:9.1.0`, `alpine:latest`,
   `sysrepo/sysrepo-netopeer2:latest` (open NETCONF server). ✓
 - containerlab: installed 0.75.0 via official script. ✓
-- cEOS / vEOS / NX-OSv (Nexus) / PicOS: **not obtainable** — cEOS/vEOS need an
-  arista.com login (no public registry; the widely-linked Google-Drive vEOS
-  mirrors are all quota-blocked), Nexus 9000v is licensed, PicOS has no public
-  image. The hegdepavankumar GNS3 repo carries IOS/IOSv/IOL/CSR/cat9k + vEOS
-  links but **no Nexus** image — so even with it, the Cisco **NX-API** write
-  path (the R4-fixed path) and Pica8 NETCONF data models stay image-blocked;
-  the IOS images would only exercise the Cisco **SSH read** path. ✗
+- **vEOS-lab 4.27.0F: OBTAINED** ✓ — the hegdepavankumar GNS3 repo's Google-Drive
+  vEOS mirror (quota-blocked on first attempts) freed up; downloaded the Aboot
+  `cdrom.iso` + `hda.qcow2`, booted in qemu/KVM, and live-validated the full
+  Arista driver. (vEOS boots without a license keygen.)
+- NX-OSv / Nexus 9000v / PicOS: **not obtainable** — Nexus 9000v is licensed and
+  **absent from the GNS3 repo** (which carries only IOS/IOSv/IOL/CSR/cat9k), so
+  the Cisco **NX-API** write path stays image-blocked; the IOS images would only
+  exercise the Cisco **SSH read** path. PicOS has no public image (NETCONF
+  transport is validated vs Netopeer2 instead). ✗
 
 ## How to close each gap (operator runbook)
 
