@@ -13,7 +13,7 @@ behaviorally unverified.
 |---|---|---|---|---|---|---|
 | Mock | `mock` | ✓ | n/a (in-proc) | ✓ (deterministic) | n/a | — |
 | Arista EOS | `arista` | ✓ | **authored** + live | ✓ **LIVE** | **vEOS-lab 4.27.0F** (qemu/KVM) | Full driver validated over eAPI: test_credentials / get_ports / get_running_config + the commit-confirm WRITE path (`configure session` + `commit timer`, confirm, **and** apply→revert). **Found + fixed 3 real bugs** (see below). |
-| Cisco IOS/NX-OS | `cisco` | ✓ | **authored** + live | **SSH read ✓ (incl ports) / NX-API ✗** | **IOSv 15.8** + **IOSvL2 15.2** (SSH) | SSH read path live-validated: test_credentials, reachable, get_running_config, hostname (vs IOSv) and **get_ports** (vs IOSvL2 switch — `show interfaces status`). **Found + fixed 1 real bug** (VLAN column dropped when the blank "Name" column shifts fields) and **switched the parser to the maintained ntc-templates TextFSM library**. STILL unvalidated: the **NX-API write path** (needs a Nexus 9000v image, absent from the GNS3 repo). |
+| Cisco IOS/NX-OS | `cisco` | ✓ | **authored** + live | **SSH read ✓ + NX-API read+write ✓** | **IOSv 15.8 / IOSvL2 15.2 (SSH), NX-OSv 7.3 (NX-API)** | SSH read path vs IOSv/IOSvL2 (incl. get_ports). **NX-API path fully live-validated vs NX-OSv 7.3 Titanium**: test_credentials, get_ports (145 ifaces), get_running_config + the commit-confirm WRITE path (checkpoint+config, confirm, apply→revert). **Found + fixed 4 real bugs total** (SSH VLAN-column; NX-API Content-Type; NX-API command-array; bare `switchport`). SSH parser now uses ntc-templates. |
 | Pica8 PicOS | `pica8` | ✓ | **authored** (XML) | **transport ✓ / data-models ✗** | Netopeer2 (transport) | NETCONF transport + confirmed-commit live-validated vs Netopeer2 (2 bugs found+fixed); PicOS YANG data models still blocked — no free/public PicOS image exists anywhere. |
 
 ## Transport layer status
@@ -24,7 +24,7 @@ independently. One was exercised live in this build:
 | Transport | Used by | Live-validated | Against | Result |
 |---|---|---|---|---|
 | `asyncssh_client.SshClient` | FreeBSD/FRR read path, Cisco SSH fallback | ✓ **yes** | **FRR 9.1** (SSH) + **Cisco IOSv 15.8** (SSH) | PASS — FRR `vtysh` decode, and the real CiscoDriver SSH read path vs IOSv (asyncssh negotiated IOSv's legacy sha1 KEX fine). |
-| `httpx_client.HttpxClient` | Arista eAPI, Cisco NX-API | ✓ **yes (eAPI)** | **vEOS-lab 4.27.0F** eAPI over HTTPS | PASS — live eAPI JSON-RPC end to end via the real AristaDriver. NX-API side still untested (no Nexus image). |
+| `httpx_client.HttpxClient` | Arista eAPI, Cisco NX-API | ✓ **yes (eAPI + NX-API)** | **vEOS 4.27** (eAPI/HTTPS) + **NX-OSv 7.3** (NX-API/HTTP) | PASS — live eAPI and NX-API JSON-RPC end to end via the real drivers. |
 | `netconf_client.NetconfClient` | Pica8 NETCONF | ✓ **yes** | **Netopeer2/sysrepo** (`:candidate` + `:confirmed-commit`) over SSH | PASS — get-config / edit-config(candidate) / confirmed-commit / confirming-commit / verify, driving the real wrapper. **Found + fixed 2 real bugs** (see below). |
 | `snmp_client.SnmpClient` | (not wired into any driver) | ✓ **yes** | **net-snmp `snmpd`** (community `public`) over UDP/161 | PASS — `get` / `walk` (37 rows) / `bulk_get` against a real daemon. **Found + fixed 1 real bug** (walk async-generator, below). |
 
@@ -140,10 +140,38 @@ now uses the **ntc-templates** TextFSM library (community-maintained, tested
 across IOS versions) instead of hand-rolled column logic. Verified live:
 Gi0/1→VLAN 20, Gi0/3 shutdown→admin_up False, Gi0/0 routed→None.
 
-Remaining gap: the **NX-API write path** (needs a Nexus 9000v image — absent from
-the GNS3 repo; the cat9kv qcow2 downloaded but would not boot here without
-UEFI/OVMF, whose pflash launch failed). Reproduce: boot IOSv/IOSvL2 per the
-header of `sandbox/validate_cisco_ssh.py`.
+Reproduce: boot IOSv/IOSvL2 per the header of `sandbox/validate_cisco_ssh.py`.
+
+### Live Cisco NX-API validation — evidence
+
+The Cisco driver's PRIMARY path (NX-API JSON-RPC) validated vs **NX-OSv 7.3
+Titanium** via the real `CiscoDriver`:
+
+```
+[test_credentials] ok=True ver='NX-OSv Chassis 7.3(0)D1(1)'
+[running_config]   9038 bytes
+[get_ports]        145 ports (NX-API show interface)
+[apply_change]     success=True   # checkpoint + config command-array
+[confirm+verify]   Ethernet2/1 vlan=30 -> OK
+[apply_change#2]   success=True
+[revert+verify]    Ethernet2/1 vlan=30 -> OK (rolled back)
+Cisco NX-API path live validation: PASS
+```
+
+**Three real NX-API bugs found ONLY against real NX-OS** (now fixed): (1) httpx's
+default `Content-Type: application/json` is rejected — NX-API needs
+`application/json-rpc`; (2) a `` ; ``-joined single `cli` string is rejected
+("invalid special characters") — NX-API needs a JSON-RPC command ARRAY; (3) a
+routed-by-default NX-OS port rejects `switchport mode access` until a bare
+`switchport` makes it L2. The checkpoint/confirm/revert write path (R4) is now
+proven end to end on real NX-OS. Reproduce: boot Titanium + `feature nxapi` per
+the header of `sandbox/validate_cisco_nxapi.py` (HTTP — Titanium's NX-API HTTPS
+TLS doesn't serve).
+
+> ONLY remaining gap: **Pica8 PicOS data models** — no public PicOS image exists
+> anywhere. The NETCONF transport + confirmed-commit it relies on are
+> live-validated vs Netopeer2 (below); only the Pica8-specific YANG payloads are
+> unverified.
 
 ### Live SNMP transport validation — evidence
 

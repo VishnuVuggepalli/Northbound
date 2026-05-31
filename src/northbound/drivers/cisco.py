@@ -164,6 +164,17 @@ class CiscoDriver(Driver):
         password = self._creds.password or ""
         return HttpxClient.basic_auth_header(username, password)
 
+    def _nxapi_headers(self) -> dict[str, str]:
+        """Basic-auth + the NX-API JSON-RPC content type.
+
+        NX-OS REQUIRES ``Content-Type: application/json-rpc`` for the JSON-RPC
+        endpoint; the httpx default of ``application/json`` is rejected with
+        HTTP 400 "Invalid request" for several methods (verified live against
+        NX-OS 7.3 Titanium — ``cli_ascii``/config calls failed under
+        application/json). Always send the explicit type.
+        """
+        return {**self._auth_header(), "Content-Type": "application/json-rpc"}
+
     def _require_http(self) -> HttpxClient:
         if self._http is None:
             raise NotSupported(
@@ -195,7 +206,7 @@ class CiscoDriver(Driver):
             "id": 1,
         }
         try:
-            response = await http.post("/ins", headers=self._auth_header(), json=body)
+            response = await http.post("/ins", headers=self._nxapi_headers(), json=body)
         except Exception as exc:  # transport-level failures
             raise ReachabilityError(f"cisco NX-API transport error: {exc}") from exc
 
@@ -228,47 +239,43 @@ class CiscoDriver(Driver):
         return body_obj if body_obj is not None else {}
 
     async def _nxapi_cli_config(self, lines: list[str]) -> None:
-        """Apply a list of config commands in ONE NX-API request.
+        """Apply config commands via the NX-API JSON-RPC command ARRAY.
 
-        Honesty note on atomicity: NX-API's ``cli`` method runs a `` ; ``-joined
-        ``cmd`` string *sequentially*, NOT as an all-or-nothing transaction — a
-        mid-list failure can leave a partially-applied interface. The real
-        rollback safety net is the ``checkpoint`` taken in ``apply_change``
-        immediately before this call: on any failure (or a missed commit-confirm
-        window) ``revert`` restores that checkpoint. So we bundle the lines into
-        a single request for fewer round-trips, but we do NOT rely on the device
-        for atomicity.
+        NX-API REJECTS a `` ; ``-joined single ``cli`` string with code -32602
+        "Request contains invalid special characters" (verified live on NX-OS
+        7.3). The correct form is an ARRAY of JSON-RPC objects — one command per
+        object, ``id`` 1..n — run sequentially under ``configure terminal``.
 
-        Error surfacing: a failure shows up either as a top-level JSON-RPC
-        ``error`` (the common case for a bad ``;``-joined cli) or, where the
-        device returns a per-command result list, as an ``error`` on an
-        individual entry. ``_raise_for_config_errors`` checks both so a failure
-        is never swallowed.
+        Atomicity is NOT device-guaranteed: a mid-list failure can leave a
+        partially-applied interface. The rollback safety net is the
+        ``checkpoint`` taken in ``apply_change`` immediately before this call;
+        ``revert`` restores it (and the reconciler does so on a missed window).
+
+        Error surfacing: NX-OS returns HTTP 500 with a per-command result array
+        on partial failure, so we parse the body regardless of status code and
+        raise on the first per-command (or top-level) error rather than swallow
+        a half-applied change.
 
         Raises:
             AuthError / ReachabilityError / DriverError on failure.
         """
-        cmd = " ; ".join(["configure terminal", *lines])
+        cmds = ["configure terminal", *lines]
+        body = [
+            {"jsonrpc": "2.0", "method": "cli", "params": {"cmd": c, "version": 1}, "id": i + 1}
+            for i, c in enumerate(cmds)
+        ]
         http = self._require_http()
-        body = {
-            "jsonrpc": "2.0",
-            "method": "cli",
-            "params": {"cmd": cmd, "version": 1},
-            "id": 1,
-        }
         try:
-            response = await http.post("/ins", headers=self._auth_header(), json=body)
+            response = await http.post("/ins", headers=self._nxapi_headers(), json=body)
         except Exception as exc:
             raise ReachabilityError(f"cisco NX-API transport error: {exc}") from exc
 
         if response.status_code == 401:
             raise AuthError("cisco NX-API returned 401")
-        if response.status_code >= 400:
-            raise DriverError(f"cisco NX-API HTTP {response.status_code}: {response.text}")
-
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise DriverError(f"cisco NX-API: non-dict response: {payload!r}")
+        try:
+            payload = response.json()
+        except Exception as exc:  # non-JSON body on a hard error
+            raise DriverError(f"cisco NX-API HTTP {response.status_code}: {response.text}") from exc
         _raise_for_config_errors(payload)
 
     # ---------- onboarding ----------
@@ -715,6 +722,12 @@ def _build_change_commands(port: str, change: PortChange) -> list[str]:
     cmds: list[str] = [f"interface {port}"]
     if change.description is not None:
         cmds.append(f"  description {change.description}")
+    if change.tagged_vlans is not None or change.untagged_vlan is not None:
+        # Bare ``switchport`` first: on NX-OS (and L3-capable IOS ports) an
+        # interface defaults to routed, and ``switchport mode ...`` is rejected
+        # with "% Invalid command" until the port is made L2 (verified live on
+        # NX-OS 7.3). Idempotent on already-L2 ports.
+        cmds.append("  switchport")
     if change.tagged_vlans is not None:
         cmds.append("  switchport mode trunk")
         if change.untagged_vlan is not None:
@@ -739,29 +752,30 @@ def _config_lines(commands: tuple[str, ...]) -> list[str]:
     return [c.strip() for c in commands if c.strip()]
 
 
-def _raise_for_config_errors(payload: dict[str, object]) -> None:
-    """Surface any NX-API error from a multi-command ``cli`` config response.
+def _raise_for_config_errors(payload: object) -> None:
+    """Surface any NX-API error from a ``cli`` command-array config response.
 
-    NX-OS reports failure in two shapes:
-      * a top-level ``error`` object (whole-request failure), or
-      * a ``result`` *list* of per-command objects, each of which may carry
-        its own ``error`` (partial / mid-list failure).
-    Either way we raise rather than silently swallow a half-applied change.
+    The array form returns a LIST of JSON-RPC response objects (one per
+    command); a single-object response is also tolerated. Any object carrying
+    an ``error`` raises — we dig ``error.data.msg`` first (the useful detail,
+    e.g. "% Invalid command") then fall back to ``error.message``. Raises rather
+    than silently swallow a half-applied change.
     """
-    if "error" in payload:
-        err = payload["error"]
+    entries = payload if isinstance(payload, list) else [payload]
+    for entry in entries:
+        if not isinstance(entry, dict) or "error" not in entry:
+            continue
+        err = entry["error"]
         code = err.get("code") if isinstance(err, dict) else None
-        msg = err.get("message") if isinstance(err, dict) else str(err)
+        data = err.get("data") if isinstance(err, dict) else None
+        msg = (
+            (data.get("msg") if isinstance(data, dict) else None)
+            or (err.get("message") if isinstance(err, dict) else None)
+            or str(err)
+        )
         if code in _AUTH_ERROR_CODES:
             raise AuthError(f"cisco NX-API auth error: {msg}")
-        raise DriverError(f"cisco NX-API config error (code={code}): {msg}")
-    result = payload.get("result")
-    if isinstance(result, list):
-        for entry in result:
-            if isinstance(entry, dict) and "error" in entry:
-                inner = entry["error"]
-                msg = inner.get("message") if isinstance(inner, dict) else str(inner)
-                raise DriverError(f"cisco NX-API config error: {msg}")
+        raise DriverError(f"cisco NX-API config error (code={code}): {str(msg).strip()}")
 
 
 def _coerce_int(value: object) -> int | None:

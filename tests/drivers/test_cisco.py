@@ -240,6 +240,30 @@ def _make_driver(*, handler, prefer_native_api: bool = True) -> CiscoDriver:  # 
     )
 
 
+def _nxapi_cmds(body: Any) -> list[str]:
+    """Extract the cmd(s) from an NX-API body — single object OR command array."""
+    objs = body if isinstance(body, list) else [body]
+    return [str(o["params"]["cmd"]) for o in objs if isinstance(o, dict) and "params" in o]
+
+
+def _nxapi_collect(seen: list[str]):  # type: ignore[no-untyped-def]
+    """MockTransport handler recording every cmd (dict or array body) and
+    returning a matching JSON-RPC response (object for one, array for many)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        cmds = _nxapi_cmds(body)
+        seen.extend(cmds)
+        if isinstance(body, list):
+            return httpx.Response(
+                200,
+                json=[{"jsonrpc": "2.0", "result": None, "id": i + 1} for i in range(len(body))],
+            )
+        return httpx.Response(200, json={"jsonrpc": "2.0", "result": None, "id": 1})
+
+    return handler
+
+
 @pytest.mark.asyncio
 async def test_apply_change_creates_checkpoint_no_device_timer() -> None:
     """NX-OS has no device-armed rollback timer — apply must create the
@@ -247,21 +271,17 @@ async def test_apply_change_creates_checkpoint_no_device_timer() -> None:
     The confirm window is app-enforced (confirm_deadline_at)."""
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content.decode())
-        seen.append(str(body["params"]["cmd"]))
-        return httpx.Response(200, json={"jsonrpc": "2.0", "result": None, "id": 1})
-
-    drv = _make_driver(handler=handler)
+    drv = _make_driver(handler=_nxapi_collect(seen))
     diff = await drv.render_change("Ethernet1/1", PortChange(untagged_vlan=10))
     checkpoint = diff.metadata["checkpoint_name"]
     result = await drv.apply_change(diff, confirm_seconds=30)
     assert result.success is True
     assert result.confirm_token == checkpoint
     assert result.confirm_deadline_at is not None  # app-enforced window
-    assert any(c == f"checkpoint {checkpoint}" for c in seen)
-    # Config applied as ONE atomic request prefixed with configure terminal.
-    assert any(c.startswith("configure terminal ; ") for c in seen)
+    assert f"checkpoint {checkpoint}" in seen
+    # Config applied via the NX-API command ARRAY led by configure terminal.
+    assert "configure terminal" in seen
+    assert "switchport access vlan 10" in seen
     # The fabricated device-armed rollback must be gone entirely.
     assert not any("delay" in c for c in seen)
     assert not any("rollback" in c for c in seen)
@@ -307,13 +327,17 @@ async def test_apply_change_config_is_single_atomic_request() -> None:
     """The change body (all interface lines) goes out in ONE NX-API cli
     request, not one request per line — so a mid-list failure can't leave a
     half-applied interface."""
-    config_reqs: list[str] = []
+    config_reqs: list[list[str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())
-        cmd = str(body["params"]["cmd"])
-        if "configure terminal" in cmd:
-            config_reqs.append(cmd)
+        cmds = _nxapi_cmds(body)
+        if isinstance(body, list) and "configure terminal" in cmds:
+            config_reqs.append(cmds)
+            return httpx.Response(
+                200,
+                json=[{"jsonrpc": "2.0", "result": None, "id": i + 1} for i in range(len(body))],
+            )
         return httpx.Response(200, json={"jsonrpc": "2.0", "result": None, "id": 1})
 
     drv = _make_driver(handler=handler)
@@ -322,6 +346,7 @@ async def test_apply_change_config_is_single_atomic_request() -> None:
     )
     result = await drv.apply_change(diff, confirm_seconds=30)
     assert result.success is True
+    # The whole change body goes out in ONE array request (not one per line).
     assert len(config_reqs) == 1
     one = config_reqs[0]
     assert "switchport mode trunk" in one
@@ -335,17 +360,16 @@ async def test_apply_change_surfaces_per_command_error() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content.decode())
-        cmd = str(body["params"]["cmd"])
-        if "configure terminal" in cmd:
-            # NX-OS partial-failure shape: result is a per-command list.
-            return httpx.Response(
-                200,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "result": [{}, {"error": {"message": "Invalid VLAN"}}],
-                },
-            )
+        if isinstance(body, list):
+            # NX-OS command-array partial failure: a per-command JSON-RPC object
+            # carries its own ``error`` (HTTP 500 in real life).
+            resp = [{"jsonrpc": "2.0", "result": None, "id": i + 1} for i in range(len(body))]
+            resp[-1] = {
+                "jsonrpc": "2.0",
+                "id": len(body),
+                "error": {"code": -32602, "data": {"msg": "Invalid VLAN"}},
+            }
+            return httpx.Response(500, json=resp)
         return httpx.Response(200, json={"jsonrpc": "2.0", "result": None, "id": 1})
 
     drv = _make_driver(handler=handler)
@@ -356,14 +380,19 @@ async def test_apply_change_surfaces_per_command_error() -> None:
 
 
 def test_raise_for_config_errors_detects_top_level_and_per_command() -> None:
-    # Top-level error object.
+    # Single object with an error (read-style response).
     with pytest.raises(Exception, match="config error"):
         _raise_for_config_errors({"error": {"code": -1, "message": "boom"}})
-    # Per-command error inside a result list.
+    # Per-command error inside the command-ARRAY response; data.msg is surfaced.
     with pytest.raises(Exception, match="Invalid VLAN"):
-        _raise_for_config_errors({"result": [{}, {"error": {"message": "Invalid VLAN"}}]})
-    # Clean response → no raise.
-    _raise_for_config_errors({"result": None})
+        _raise_for_config_errors(
+            [
+                {"jsonrpc": "2.0", "result": None, "id": 1},
+                {"jsonrpc": "2.0", "id": 2, "error": {"data": {"msg": "Invalid VLAN"}}},
+            ]
+        )
+    # Clean array response → no raise.
+    _raise_for_config_errors([{"jsonrpc": "2.0", "result": None, "id": 1}])
 
 
 @pytest.mark.asyncio

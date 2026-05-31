@@ -96,6 +96,16 @@ def _cisco_handler(request: httpx.Request) -> httpx.Response:
     null-result envelope (NX-OS returns no body on successful config).
     """
     body = json.loads(request.content.decode("utf-8"))
+    # Config goes out as a JSON-RPC command ARRAY (one object per command); NX-OS
+    # returns a per-command result array (null result on success).
+    if isinstance(body, list):
+        return httpx.Response(
+            200,
+            json=[
+                {"jsonrpc": "2.0", "result": None, "id": o.get("id", i + 1)}
+                for i, o in enumerate(body)
+            ],
+        )
     method = body.get("method", "cli")
     cmd = str(body.get("params", {}).get("cmd", ""))
     rid = body.get("id", 1)
