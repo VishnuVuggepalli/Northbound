@@ -612,38 +612,50 @@ def _merge_port_state(
     return out
 
 
-def _parse_interfaces_status_text(text: str) -> list[PortState]:
-    """Coarse ``show interfaces status`` text parser (IOS SSH fallback).
+# Down/disabled status keywords from `show interfaces status` (used only to set
+# admin_up/link_up from the maintained ntc-templates ``status`` field).
+_IFSTATUS_DOWN = {"disabled", "disable", "suspended", "err-disabled", "errdisabled"}
 
-    Columns vary across IOS versions; this is intentionally minimal — it
-    recovers port name, link state, and access VLAN where present. Full
-    structured state is only available on the NX-API path.
+
+def _parse_interfaces_status_text(text: str) -> list[PortState]:
+    """Parse ``show interfaces status`` via the maintained ntc-templates
+    TextFSM template (IOS SSH fallback).
+
+    We do NOT hand-roll the column layout: the "Name" column is optional and
+    usually blank, which shifts every later column and silently dropped the
+    VLAN in a hand-written parser (caught live on IOSvL2). ``ntc-templates``
+    (Network-to-Code) carries community-maintained templates tested against real
+    devices across IOS versions, and returns ``port/name/status/vlan_id/duplex/
+    speed/type``. We map those onto PortState; on any parse failure we return
+    ``[]`` rather than raise (the SSH path is a best-effort fallback).
     """
+    try:
+        from ntc_templates.parse import parse_output
+
+        rows = parse_output(platform="cisco_ios", command="show interfaces status", data=text)
+    except Exception:  # missing template / textfsm parse error — degrade gracefully
+        return []
+
     out: list[PortState] = []
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.lower().startswith("port "):
+    for row in rows:
+        if not isinstance(row, dict):
             continue
-        cols = stripped.split()
-        if len(cols) < 3:
+        name = str(row.get("port") or "").strip()
+        if not name:
             continue
-        name = cols[0]
-        if name[:2].lower() not in ("et", "gi", "fa", "te", "po", "eth"):
-            continue
-        link_up = "connected" in stripped.lower() and "notconnect" not in stripped.lower()
-        vlan = _coerce_int(cols[3]) if len(cols) > 3 else None
+        status = str(row.get("status") or "").lower()
         out.append(
             PortState(
                 name=name,
-                admin_up="disabled" not in stripped.lower(),
-                link_up=link_up,
+                admin_up=status not in _IFSTATUS_DOWN,
+                link_up=status == "connected",
                 speed_mbps=None,
-                duplex=None,
+                duplex=_normalize_duplex(row.get("duplex")),
                 mac=None,
                 mtu=None,
-                untagged_vlan=vlan,
+                untagged_vlan=_coerce_int(row.get("vlan_id")),
                 tagged_vlans=(),
-                description="",
+                description=str(row.get("name") or ""),
                 host_model="",
                 bmc_ip="",
                 notes="",

@@ -14,6 +14,11 @@ dependencies = [
  "ncclient>=0.6.16",
  "beautifulsoup4>=4.12",
  "lxml>=5.3",
+ # Battle-tested, community-maintained CLI parsing templates (TextFSM) instead of
+ # hand-rolled column/regex parsers for Cisco IOS `show` output. ntc-templates is
+ # the Network-to-Code project; tested against real devices across IOS versions.
+ "ntc-templates>=4.0",
+ "textfsm>=1.1",
  # DB layer + migrations + at-rest credential encryption (standard, battle-tested libs).
  "sqlalchemy[asyncio]>=2.0",
  "aiosqlite>=0.20",

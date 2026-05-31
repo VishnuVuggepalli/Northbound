@@ -21,6 +21,7 @@ from northbound.drivers.cisco import (
     _config_lines,
     _merge_port_state,
     _parse_interfaces,
+    _parse_interfaces_status_text,
     _parse_lldp,
     _parse_speed,
     _parse_switchport,
@@ -46,6 +47,35 @@ def _body(name: str) -> Any:
 # ---------------------------------------------------------------------------
 # Pure parser tests — no transport
 # ---------------------------------------------------------------------------
+
+
+# Real `show interfaces status` output captured live from IOSvL2 15.2 (the
+# "Name" column is blank — the case that broke the old hand-rolled parser). This
+# locks in the ntc-templates-backed parse: routed→None, access VLAN extracted,
+# shutdown→admin_up False.
+_IOS_IF_STATUS = """
+Port      Name               Status       Vlan       Duplex  Speed Type
+Gi0/0                        connected    routed     a-full   auto RJ45
+Gi0/1                        connected    20         a-full   auto RJ45
+Gi0/2                        connected    1          a-full   auto RJ45
+Gi0/3                        disabled     1          auto     auto RJ45
+"""
+
+
+def test_parse_interfaces_status_text_via_ntc_templates() -> None:
+    ports = {p.name: p for p in _parse_interfaces_status_text(_IOS_IF_STATUS)}
+    assert set(ports) == {"Gi0/0", "Gi0/1", "Gi0/2", "Gi0/3"}
+    assert ports["Gi0/0"].untagged_vlan is None  # 'routed' is not a VLAN
+    assert ports["Gi0/1"].untagged_vlan == 20  # access VLAN extracted (Name col blank)
+    assert ports["Gi0/2"].untagged_vlan == 1
+    assert ports["Gi0/1"].link_up is True and ports["Gi0/1"].admin_up is True
+    assert ports["Gi0/3"].admin_up is False  # 'disabled' = shutdown
+    assert ports["Gi0/3"].link_up is False
+
+
+def test_parse_interfaces_status_text_empty_on_garbage() -> None:
+    # Degrades gracefully (best-effort SSH fallback), never raises.
+    assert _parse_interfaces_status_text("not a real table") == []
 
 
 def test_parse_interfaces_returns_PortState_list() -> None:

@@ -68,10 +68,14 @@ async def _run(args: argparse.Namespace) -> int:
         print(f"[hostname]         {host!r}")
         fails += 0 if host else 1
         ports = await d.get_ports()
-        print(
-            f"[get_ports]        {len(ports)} (switch-only 'show interfaces status'; "
-            f"empty on an IOSv router — needs a switch image to validate)"
-        )
+        # 'show interfaces status' is switch-only: a switch (IOSvL2/cat9k) returns
+        # ports parsed via ntc-templates; an IOSv ROUTER returns [] (informational,
+        # not a failure on a router).
+        for p in ports:
+            print(
+                f"  port {p.name:8} link_up={p.link_up} admin_up={p.admin_up} vlan={p.untagged_vlan}"
+            )
+        print(f"[get_ports]        {len(ports)} (0 on a router; parsed switchports on a switch)")
     finally:
         await d.aclose()
 

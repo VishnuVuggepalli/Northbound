@@ -13,7 +13,7 @@ behaviorally unverified.
 |---|---|---|---|---|---|---|
 | Mock | `mock` | ✓ | n/a (in-proc) | ✓ (deterministic) | n/a | — |
 | Arista EOS | `arista` | ✓ | **authored** + live | ✓ **LIVE** | **vEOS-lab 4.27.0F** (qemu/KVM) | Full driver validated over eAPI: test_credentials / get_ports / get_running_config + the commit-confirm WRITE path (`configure session` + `commit timer`, confirm, **and** apply→revert). **Found + fixed 3 real bugs** (see below). |
-| Cisco IOS/NX-OS | `cisco` | ✓ | **authored** + partial live | **SSH read ✓ / NX-API ✗ / switch-ports ✗** | **IOSv 15.8(3)M2** (SSH) | SSH read path live-validated vs real IOSv: test_credentials (version parse), reachable, get_running_config, hostname — all PASS, no bugs. STILL unvalidated: `get_ports` (`show interfaces status` is switch-only, empty on an IOSv router — needs IOSvL2/cat9kv) and the entire **NX-API write path** (needs a Nexus 9000v image, absent from the GNS3 repo). |
+| Cisco IOS/NX-OS | `cisco` | ✓ | **authored** + live | **SSH read ✓ (incl ports) / NX-API ✗** | **IOSv 15.8** + **IOSvL2 15.2** (SSH) | SSH read path live-validated: test_credentials, reachable, get_running_config, hostname (vs IOSv) and **get_ports** (vs IOSvL2 switch — `show interfaces status`). **Found + fixed 1 real bug** (VLAN column dropped when the blank "Name" column shifts fields) and **switched the parser to the maintained ntc-templates TextFSM library**. STILL unvalidated: the **NX-API write path** (needs a Nexus 9000v image, absent from the GNS3 repo). |
 | Pica8 PicOS | `pica8` | ✓ | **authored** (XML) | **transport ✓ / data-models ✗** | Netopeer2 (transport) | NETCONF transport + confirmed-commit live-validated vs Netopeer2 (2 bugs found+fixed); PicOS YANG data models still blocked — no free/public PicOS image exists anywhere. |
 
 ## Transport layer status
@@ -132,12 +132,18 @@ Reproduce: boot vEOS per the header of `sandbox/validate_arista.py`, then
 Cisco SSH read path live validation: PASS
 ```
 
-No bugs found this run — the version/hostname/running-config parsers matched real
-IOS output. Honest gaps that remain: `get_ports` (switch `show interfaces
-status`, needs IOSvL2/cat9kv — the cat9kv qcow2 was downloaded but would not boot
-in this sandbox: it needs UEFI/OVMF and the pflash launch failed) and the entire
-**NX-API write path** (needs a Nexus 9000v image — absent from the GNS3 repo).
-Reproduce: boot IOSv per the header of `sandbox/validate_cisco_ssh.py`.
+The version/hostname/running-config parsers matched real IOS output (IOSv). On
+**IOSvL2** (switch), `get_ports` parses `show interfaces status` — which exposed
+a real bug: the optional "Name" column is blank, shifting columns so a
+hand-rolled fixed-index split dropped the access VLAN to None. Fix: the parser
+now uses the **ntc-templates** TextFSM library (community-maintained, tested
+across IOS versions) instead of hand-rolled column logic. Verified live:
+Gi0/1→VLAN 20, Gi0/3 shutdown→admin_up False, Gi0/0 routed→None.
+
+Remaining gap: the **NX-API write path** (needs a Nexus 9000v image — absent from
+the GNS3 repo; the cat9kv qcow2 downloaded but would not boot here without
+UEFI/OVMF, whose pflash launch failed). Reproduce: boot IOSv/IOSvL2 per the
+header of `sandbox/validate_cisco_ssh.py`.
 
 ### Live SNMP transport validation — evidence
 
