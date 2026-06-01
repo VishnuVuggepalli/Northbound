@@ -305,28 +305,47 @@ def _has_child(el: etree._Element, name: str) -> bool:
     return any(_localname(child.tag) == name for child in el)
 
 
+# Physical-port element local-names in the real PicOS xorplus interface model
+# (``http://pica8.com/xorplus/interface``). Each is a sibling list entry under
+# ``<interface>``, NOT a Junos ``<interface><name>`` node — verified live on
+# PicOS-V 4.2.2, where ports are ``<gigabit-ethernet><name>te-1/1/1</name>...``.
+# (The earlier Junos-xnm assumption was a fabricated-fixture bug.)
+_PORT_ELEMENTS = frozenset(
+    {
+        "gigabit-ethernet",
+        "ten-gigabit-ethernet",
+        "twentyfive-gigabit-ethernet",
+        "forty-gigabit-ethernet",
+        "hundred-gigabit-ethernet",
+        "fortygig-ethernet",
+        "hundredgig-ethernet",
+    }
+)
+
+
 def _parse_interfaces_xml(xml: str) -> list[PortState]:
     """Build PortState list from a NETCONF get-config running response.
 
-    Looks for ``<interface>`` blocks under any ``<interfaces>`` container.
-    Each interface yields one PortState. VLAN membership comes from
-    ``<unit>/<family>/<ethernet-switching>`` (Pica8 / Junos-style YANG).
+    Ports are ``<gigabit-ethernet>`` (and higher-speed) list entries under the
+    ``<interface xmlns="http://pica8.com/xorplus/interface">`` container — the
+    real PicOS xorplus model. Each carries ``<name>``, ``<description>``,
+    ``<mtu>``, ``<disable>``. VLAN membership lives in a separate model and is
+    overlaid by ``_parse_vlan_membership`` where present.
     """
     root = _safe_parse(xml)
     if root is None:
         return []
     out: list[PortState] = []
-    for iface_el in _find_all(root, "interface"):
-        # The schema also has <interface> nodes inside <lldp/>; skip those —
-        # they're under a <lldp> ancestor and don't carry full port state.
-        if _has_ancestor(iface_el, "lldp"):
-            continue
+    port_els = [el for el in root.iter() if _localname(el.tag) in _PORT_ELEMENTS]
+    for iface_el in port_els:
         name = _child_text(iface_el, "name")
         if not name:
             continue
-        # <disable/> is a boolean tag — presence (even empty/self-closing)
-        # means admin-down. _child_text can't see it; use _has_child.
-        admin_up = not _has_child(iface_el, "disable")
+        # PicOS xorplus uses a boolean-VALUE leaf ``<disable>false</disable>``
+        # (verified live), NOT a presence flag — so read the text: admin-down
+        # only when it explicitly says "true". Absent ⇒ admin-up.
+        disable_text = (_child_text(iface_el, "disable") or "").strip().lower()
+        admin_up = disable_text != "true"
         description = _child_text(iface_el, "description") or ""
         mtu_text = _child_text(iface_el, "mtu")
         mtu: int | None = None

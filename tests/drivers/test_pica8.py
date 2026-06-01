@@ -42,34 +42,30 @@ def _load(name: str) -> str:
 
 
 def test_parse_interfaces_xml_returns_PortState_list() -> None:
+    # Real PicOS xorplus schema: <gigabit-ethernet> entries (verified live vs
+    # PicOS-V 4.2.2). Ports are te-1/1/x, fields name/description/mtu/disable.
     ports = _parse_interfaces_xml(_load("get_interfaces.xml"))
-    assert len(ports) == 4
+    assert len(ports) == 3
     by_name = {p.name: p for p in ports}
-    assert isinstance(by_name["ge-1/1/1"], PortState)
-    assert by_name["ge-1/1/1"].description == "to-host-01"
-    assert by_name["ge-1/1/1"].untagged_vlan == 10
-    assert by_name["ge-1/1/1"].tagged_vlans == ()
-    assert by_name["ge-1/1/1"].admin_up is True
-    assert by_name["ge-1/1/1"].mtu == 9216
+    assert isinstance(by_name["te-1/1/1"], PortState)
+    assert by_name["te-1/1/1"].description == "uplink-to-core"
+    assert by_name["te-1/1/1"].admin_up is True
+    assert by_name["te-1/1/1"].mtu == 9216
 
 
 def test_parse_interfaces_disabled_port_admin_down() -> None:
+    # <disable>true</disable> is a boolean-VALUE leaf (not a Junos presence flag).
     ports = {p.name: p for p in _parse_interfaces_xml(_load("get_interfaces.xml"))}
-    assert ports["ge-1/1/2"].admin_up is False
+    assert ports["te-1/1/2"].admin_up is False
+    assert ports["te-1/1/3"].admin_up is True  # <disable>false</disable> ⇒ up
 
 
-def test_parse_interfaces_trunk_port_collects_members() -> None:
+def test_parse_interfaces_no_vlan_model_yields_none() -> None:
+    # This PicOS mode carries no per-port Junos VLAN membership in get-config;
+    # ports parse with untagged_vlan=None / no tagged VLANs (not a crash).
     ports = {p.name: p for p in _parse_interfaces_xml(_load("get_interfaces.xml"))}
-    trunk = ports["ge-1/1/3"]
-    assert trunk.untagged_vlan == 100
-    assert trunk.tagged_vlans == (100, 200, 300)
-
-
-def test_parse_interfaces_handles_no_unit_block() -> None:
-    ports = {p.name: p for p in _parse_interfaces_xml(_load("get_interfaces.xml"))}
-    bare = ports["ge-1/1/4"]
-    assert bare.untagged_vlan is None
-    assert bare.tagged_vlans == ()
+    assert ports["te-1/1/1"].untagged_vlan is None
+    assert ports["te-1/1/1"].tagged_vlans == ()
 
 
 def test_parse_lldp_xml_returns_neighbors() -> None:
