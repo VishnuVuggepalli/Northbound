@@ -21,8 +21,15 @@ dependencies = [
  "textfsm>=1.1",
  # Real multi-vendor network device libraries — drivers are backed by these,
  # NOT hand-rolled protocol/commit-confirm logic. napalm: eos (pyeapi) / nxos /
- # ios with structured exceptions + confirmed-commit; junos-eznc (PyEZ) for
- # Junos/Pica8-style NETCONF.
+ # ios with structured exceptions + confirmed-commit.
+ #
+ # Pica8 PicOS speaks its OWN NETCONF YANG (http://pica8.com/xorplus/*), NOT
+ # Junos. PyEZ/junos-eznc was live-tested against PicOS-V and every Junos RPC
+ # was rejected ("operation not supported by this implementation"), so the
+ # Pica8 driver uses ncclient (the de-facto NETCONF library, pinned above)
+ # directly via NetconfClient — NOT PyEZ. junos-eznc remains only as a
+ # transitive dependency of napalm (napalm.junos imports it at package init);
+ # pinned explicitly so the lockfile is honest about it.
  "napalm>=5.0",
  "junos-eznc>=2.7",
  # DB layer + migrations + at-rest credential encryption (standard, battle-tested libs).

@@ -10,6 +10,17 @@ XML namespace handling: Pica8 surfaces YANG nodes under a vendor namespace
 (``http://pica8.com/xorplus/*``). Parsers strip namespaces before reading
 element names — easier to grep, easier to test, no functional cost. If we
 ever need to round-trip XML back to the device we'd revisit.
+
+Why ncclient and NOT junos-eznc/PyEZ: PicOS borrows the Junos *CLI* but its
+NETCONF schema is its own xorplus YANG, not Junos. PyEZ was live-tested
+against PicOS-V (2026-06-01) and every Junos RPC it issues was rejected with
+"operation not supported by this implementation" (get-software-information,
+get-interface-information), facts came back empty, and PyEZ's Junos device
+handler even failed to transform PicOS replies. Only the raw NETCONF
+transport works — which ncclient (the de-facto Python NETCONF library)
+provides directly. So the real-library choice here is ncclient, wrapped by
+NetconfClient; the remaining driver code is the irreducible mapping between
+PicOS's xorplus XML and our PortState (no library does that).
 """
 
 from __future__ import annotations
