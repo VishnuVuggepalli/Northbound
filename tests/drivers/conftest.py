@@ -11,15 +11,12 @@ and leaves ``MockDriver`` untouched.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 
-from northbound._lib.transport.httpx_client import HttpxClient, HttpxParams
 from northbound._lib.transport.netconf_client import NetconfClient, NetconfParams
 from northbound.drivers.base import Driver
 from northbound.schemas.driver import ConnectionParams, Credentials
@@ -89,78 +86,52 @@ def _build_arista_device() -> _FakeAristaNapalm:
 
 
 # ---------------------------------------------------------------------------
-# Cisco NX-OS — mock the NX-API HTTPX transport with canned JSON-RPC responses
+# Cisco — inject a fake NAPALM nxos device (the driver is NAPALM-backed now)
 # ---------------------------------------------------------------------------
 
-
-def _cisco_fixture(name: str) -> object:
-    """Return the parsed JSON-RPC envelope for a Cisco NX-API fixture."""
-    return json.loads((_FIXTURE_DIR / "cisco" / name).read_text())
-
-
-def _cisco_handler(request: httpx.Request) -> httpx.Response:
-    """Route NX-API ``cli`` / ``cli_ascii`` requests to canned fixtures.
-
-    NX-API takes a single ``cmd`` (not a list). Read commands map to the
-    fixture envelopes; config / checkpoint / rollback commands return a
-    null-result envelope (NX-OS returns no body on successful config).
-    """
-    body = json.loads(request.content.decode("utf-8"))
-    # Config goes out as a JSON-RPC command ARRAY (one object per command); NX-OS
-    # returns a per-command result array (null result on success).
-    if isinstance(body, list):
-        return httpx.Response(
-            200,
-            json=[
-                {"jsonrpc": "2.0", "result": None, "id": o.get("id", i + 1)}
-                for i, o in enumerate(body)
-            ],
-        )
-    method = body.get("method", "cli")
-    cmd = str(body.get("params", {}).get("cmd", ""))
-    rid = body.get("id", 1)
-
-    fixture_map = {
-        "show interface": "show_interface.json",
-        "show interface switchport": "show_interface_switchport.json",
-        "show vlan": "show_vlan.json",
-        "show lldp neighbors detail": "show_lldp_neighbors_detail.json",
-        "show version": "show_version.json",
-    }
-    if cmd in fixture_map:
-        env = _cisco_fixture(fixture_map[cmd])
-        return httpx.Response(200, json=env)
-    if cmd == "show hostname":
-        return httpx.Response(
-            200,
-            json={"jsonrpc": "2.0", "result": {"body": {"hostname": "nexus-leaf-01"}}, "id": rid},
-        )
-    if cmd == "show clock":
-        return httpx.Response(
-            200,
-            json={
-                "jsonrpc": "2.0",
-                "result": {"body": {"simple_time": "12:00:00 UTC"}},
-                "id": rid,
-            },
-        )
-    if cmd == "show running-config" and method == "cli_ascii":
-        return httpx.Response(
-            200,
-            json={
-                "jsonrpc": "2.0",
-                "result": {"msg": "! Cisco NX-OS running-config\nhostname nexus-leaf-01\n"},
-                "id": rid,
-            },
-        )
-    # Config / checkpoint / rollback commands: NX-OS returns null result.
-    return httpx.Response(200, json={"jsonrpc": "2.0", "result": None, "id": rid})
+_NXOS_SWITCHPORT = (
+    "Name: Ethernet1/1\n  Switchport: Enabled\n  Operational Mode: access\n"
+    "  Access Mode VLAN: 10 (VLAN0010)\n"
+    "  Trunking Native Mode VLAN: 1 (default)\n  Trunking VLANs Allowed: 1-4094\n"
+)
 
 
-def _build_cisco_http_client() -> HttpxClient:
-    client = HttpxClient(HttpxParams(base_url="https://cisco.test", verify_tls=False))
-    client._client._transport = httpx.MockTransport(_cisco_handler)  # type: ignore[attr-defined]
-    return client
+class _FakeCiscoNapalm:
+    """The slice of NAPALM's nxos driver the CiscoDriver calls (contract test)."""
+
+    def open(self) -> None: ...
+    def close(self) -> None: ...
+    def is_alive(self) -> dict[str, bool]:
+        return {"is_alive": True}
+
+    def get_facts(self) -> dict[str, str]:
+        return {"model": "N9K-v", "os_version": "9.3", "hostname": "nexus-leaf-01"}
+
+    def get_config(self, retrieve: str = "all") -> dict[str, str]:
+        return {
+            "running": "! Cisco NX-OS running-config\nhostname nexus-leaf-01\n",
+            "candidate": "",
+            "startup": "",
+        }
+
+    def get_interfaces(self) -> dict[str, Any]:
+        return {"Ethernet1/1": {"is_enabled": True, "is_up": True, "description": "", "mtu": 1500}}
+
+    def get_lldp_neighbors_detail(self) -> dict[str, Any]:
+        return {}
+
+    def cli(self, cmds: list[str]) -> dict[str, str]:
+        return {cmds[0]: _NXOS_SWITCHPORT}
+
+    def load_merge_candidate(self, config: str | None = None) -> None: ...
+    def commit_config(self, message: str = "", revert_in: int | None = None) -> None: ...
+    def confirm_commit(self) -> None: ...
+    def rollback(self) -> None: ...
+    def discard_config(self) -> None: ...
+
+
+def _build_cisco_device() -> _FakeCiscoNapalm:
+    return _FakeCiscoNapalm()
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +209,7 @@ def driver_factory() -> Callable[[type[Driver]], Driver]:
         if cls.platform_id == "arista":
             return cls(conn, creds, device=_build_arista_device())  # type: ignore[call-arg]
         if cls.platform_id == "cisco":
-            return cls(conn, creds, http=_build_cisco_http_client())  # type: ignore[call-arg]
+            return cls(conn, creds, device=_build_cisco_device())  # type: ignore[call-arg]
         if cls.platform_id == "pica8":
             return cls(conn, creds, netconf=_build_pica8_netconf_client())  # type: ignore[call-arg]
         return cls(conn, creds)
