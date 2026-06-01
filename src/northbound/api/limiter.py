@@ -21,13 +21,16 @@ so the forwarded client IP is used instead — and only from trusted proxy hops.
 from __future__ import annotations
 
 import json
+import os
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
-# Login throttle: 5 attempts / 5 minutes per (ip, username).
-LOGIN_RATE_LIMIT = "5/5minutes"
+# Login throttle: 5 attempts / 5 minutes per (ip, username). Overridable via
+# NB_LOGIN_RATE_LIMIT (e.g. "100/minute" in dev) so local testing isn't locked
+# out after a few mistyped passwords; production keeps the strict default.
+LOGIN_RATE_LIMIT = os.environ.get("NB_LOGIN_RATE_LIMIT", "5/5minutes")
 
 
 def _submitted_username(request: Request) -> str:
