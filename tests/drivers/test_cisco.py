@@ -23,6 +23,7 @@ from northbound.drivers.cisco import (
     _parse_interfaces,
     _parse_interfaces_status_text,
     _parse_lldp,
+    _parse_lldp_text,
     _parse_speed,
     _parse_switchport,
     _parse_trunk_allowed,
@@ -76,6 +77,42 @@ def test_parse_interfaces_status_text_via_ntc_templates() -> None:
 def test_parse_interfaces_status_text_empty_on_garbage() -> None:
     # Degrades gracefully (best-effort SSH fallback), never raises.
     assert _parse_interfaces_status_text("not a real table") == []
+
+
+# Real `show lldp neighbors detail` output captured live from IOSvL2.
+_IOS_LLDP_DETAIL = """
+------------------------------------------------
+Local Intf: Gi0/1
+Chassis id: 0000.0104.0891
+Port id: 6aca.9317.1999
+Port Description: tapA
+System Name: peer-host.example
+
+System Description:
+Debian GNU/Linux 12 (bookworm)
+
+Time remaining: 118 seconds
+System Capabilities: B,R
+Enabled Capabilities: B
+Management Addresses - not advertised
+
+Total entries displayed: 1
+"""
+
+
+def test_parse_lldp_text_via_ntc_templates() -> None:
+    nbrs = _parse_lldp_text(_IOS_LLDP_DETAIL)
+    assert len(nbrs) == 1
+    n = nbrs[0]
+    assert n.chassis_id == "0000.0104.0891"
+    assert n.port_id == "6aca.9317.1999"
+    assert n.system_name == "peer-host.example"
+    # local port encoded as the bracketed prefix for get_neighbors(port=...)
+    assert n.system_description is not None and n.system_description.startswith("[Gi0/1] ")
+
+
+def test_parse_lldp_text_empty_on_garbage() -> None:
+    assert _parse_lldp_text("nope") == []
 
 
 def test_parse_interfaces_returns_PortState_list() -> None:

@@ -181,6 +181,14 @@ TLS doesn't serve).
 Cisco NX-API **trunk** write is now live-validated too (vs NX-OSv 7.3: native
 VLAN 10 + allowed {20,30,40} applied, confirmed, parsed back OK).
 
+UPDATE — **Cisco SSH `get_neighbors` implemented + live-validated.** It was a stub
+returning `[]`; now it parses `show lldp neighbors detail` via the ntc-templates
+TextFSM template, validated against **real IOSvL2** (two switches on a tap/bridge):
+parsed a real neighbor — chassis `0000.0104.0891`, remote port, system name, and
+the `[Gi0/1]` local-port prefix — with the exact port-filter matching. A real
+feature gap closed, not faked. (Linux bridges filter inter-switch LLDP by default;
+even so a real LLDP speaker on the segment was parsed correctly.)
+
 Cisco depth still UNvalidated (honest): **NX-API LLDP `get_neighbors`** against a
 real adjacency — and this is a HARD emulator wall, established across 4 attempts
 (qemu socket link; 2-node tap/bridge; single-node + tap; all on 16 cores / ample

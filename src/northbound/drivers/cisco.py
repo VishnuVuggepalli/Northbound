@@ -366,15 +366,20 @@ class CiscoDriver(Driver):
         return _parse_interfaces_status_text(text)
 
     async def get_neighbors(self, port: str | None = None) -> list[Neighbor]:
-        if not self._use_native:
-            # LLDP parsing on the SSH path would need a separate text parser;
-            # NX-API JSON is the supported source. Return [] on SSH.
-            return []
-        try:
-            body = await self._nxapi_cli("show lldp neighbors detail")
-        except (DriverError, ReachabilityError, AuthError):
-            return []
-        neighbors = _parse_lldp(body)
+        if self._use_native:
+            try:
+                body = await self._nxapi_cli("show lldp neighbors detail")
+            except (DriverError, ReachabilityError, AuthError):
+                return []
+            neighbors = _parse_lldp(body)
+        else:
+            # IOS/IOS-XE SSH path: parse `show lldp neighbors detail` text via the
+            # maintained ntc-templates TextFSM template (live-validated vs IOSvL2).
+            try:
+                text = await self._ssh_run("show lldp neighbors detail")
+            except (DriverError, ReachabilityError, AuthError, NotSupported):
+                return []
+            neighbors = _parse_lldp_text(text)
         if port is None:
             return neighbors
         return [n for n in neighbors if lldp.local_port_matches(n.system_description, port)]
@@ -703,6 +708,45 @@ def _parse_lldp(body: object) -> list[Neighbor]:
                 port_id=remote_port,
                 system_name=sys_name if isinstance(sys_name, str) else None,
                 system_description=(desc_prefix + desc_body) or None,
+            )
+        )
+    return out
+
+
+def _parse_lldp_text(text: str) -> list[Neighbor]:
+    """Parse ``show lldp neighbors detail`` (IOS/IOS-XE SSH) via ntc-templates.
+
+    The maintained ``cisco_ios_show_lldp_neighbors_detail`` TextFSM template
+    yields LOCAL_INTERFACE / CHASSIS_ID / NEIGHBOR_PORT_ID / NEIGHBOR_NAME /
+    NEIGHBOR_DESCRIPTION. The local port is encoded into the
+    ``system_description`` ``[<local_port>] `` prefix (same convention as the
+    NX-API path) so ``get_neighbors(port=...)`` filters identically. Degrades to
+    ``[]`` on a parse failure (best-effort SSH path).
+    """
+    try:
+        from ntc_templates.parse import parse_output
+
+        rows = parse_output(platform="cisco_ios", command="show lldp neighbors detail", data=text)
+    except Exception:
+        return []
+
+    out: list[Neighbor] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        local = str(row.get("local_interface") or "").strip()
+        chassis_raw = str(row.get("chassis_id") or "").strip()
+        remote_port = str(
+            row.get("neighbor_port_id") or row.get("neighbor_interface") or ""
+        ).strip()
+        sys_name = str(row.get("neighbor_name") or "").strip()
+        desc_body = str(row.get("neighbor_description") or "").strip()
+        out.append(
+            Neighbor(
+                chassis_id=lldp.normalize_chassis_id(chassis_raw) if chassis_raw else "",
+                port_id=lldp.normalize_port_id(remote_port) if remote_port else "",
+                system_name=sys_name or None,
+                system_description=(lldp.encode_local_port_prefix(local) + desc_body) or None,
             )
         )
     return out
