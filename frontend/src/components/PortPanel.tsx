@@ -18,10 +18,9 @@ import type {
   Port,
   User,
 } from '@/types';
-import { useApplyRequest, useRejectRequest } from '@/api/queries';
+import { useApplyRequest, usePlatforms, useRejectRequest } from '@/api/queries';
 import { pushToast } from '@/store/toast';
 import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
-import { PLATFORM_REGISTRY } from '@/mocks/registry';
 
 interface PortPanelProps {
   device: Device;
@@ -69,7 +68,8 @@ export function PortPanel({
   const ageMs = fetchedAt ? Math.max(0, now - fetchedAt) : null;
   const stale = ageMs != null && ageMs > STALE_THRESHOLD_MS;
   const aging = ageMs != null && ageMs > CACHE_TTL_MS && ageMs <= STALE_THRESHOLD_MS;
-  const platform = findPlatformForDevice(device, PLATFORM_REGISTRY);
+  const { data: platforms } = usePlatforms();
+  const platform = findPlatformForDevice(device, platforms ?? []);
   const writeLocked = isWriteLocked(device, platform);
   const isAdmin = user.role === 'admin';
   const showNeighbors =

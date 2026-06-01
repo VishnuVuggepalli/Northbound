@@ -10,7 +10,6 @@ import { PlatformIcon } from '@/components/ui/PlatformIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Badge } from '@/components/ui/Badge';
 import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
-import { PLATFORM_REGISTRY } from '@/mocks/registry';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
@@ -18,6 +17,7 @@ import {
   useAudit,
   useDevice,
   usePorts,
+  usePlatforms,
   useRequests,
 } from '@/api/queries';
 import { pushToast } from '@/store/toast';
@@ -66,7 +66,8 @@ export function DeviceDetailPage() {
   }
 
   const selectedPortObj = selectedPort ? ports.find((p) => p.name === selectedPort) : null;
-  const platform = findPlatformForDevice(device, PLATFORM_REGISTRY);
+  const { data: platforms } = usePlatforms();
+  const platform = findPlatformForDevice(device, platforms ?? []);
   const readOnly = isWriteLocked(device, platform);
 
   return (

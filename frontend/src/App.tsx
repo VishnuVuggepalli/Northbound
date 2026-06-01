@@ -20,7 +20,7 @@ import { useThemeStore } from '@/store/theme';
 import { useHotkeys, useSequenceHotkeys } from '@/hooks/useHotkeys';
 import { useCreateRequest, useDevice, usePorts } from '@/api/queries';
 import { pushToast } from '@/store/toast';
-import { apiClient, isApiError, VLANS } from '@/api';
+import { apiClient, isApiError } from '@/api';
 
 /**
  * Validate / refresh the persisted session against `GET /api/users/me` once on
@@ -180,6 +180,19 @@ function GlobalDialogs() {
   const user = useAuthStore((s) => s.user);
   const createReq = useCreateRequest();
   const { data: device } = useDevice(selectedDeviceId);
+  const { data: portSnapshot } = usePorts(selectedDeviceId);
+
+  // VLAN quick-pick suggestions from REAL data — VLANs observed across this
+  // device's ports (untagged + tagged), sorted unique. No hardcoded list; the
+  // modal's numeric input always allows any 1–4094.
+  const vlanOptions = useMemo(() => {
+    const seen = new Set<number>();
+    for (const p of portSnapshot?.ports ?? []) {
+      if (typeof p.untagged_vlan === 'number') seen.add(p.untagged_vlan);
+      for (const v of p.tagged_vlans ?? []) seen.add(v);
+    }
+    return [...seen].sort((a, b) => a - b);
+  }, [portSnapshot]);
 
   return (
     <>
@@ -189,7 +202,7 @@ function GlobalDialogs() {
         port={requestModal.port}
         device={device ?? null}
         theme={theme}
-        vlanOptions={VLANS}
+        vlanOptions={vlanOptions}
         onClose={closeRequest}
         submitting={createReq.isPending}
         onSubmit={({ changes, reason }) => {

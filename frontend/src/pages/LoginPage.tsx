@@ -4,7 +4,7 @@ import { Wordmark } from '@/components/ui/Wordmark';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useAuthStore } from '@/store/auth';
-import { apiClient, USE_MOCKS } from '@/api';
+import { apiClient } from '@/api';
 import { pushToast } from '@/store/toast';
 
 export function LoginPage() {
@@ -87,13 +87,6 @@ export function LoginPage() {
         >
           {submitting ? 'Signing in…' : 'Sign in'}
         </Button>
-
-        {USE_MOCKS && (
-          <div className="rounded-md border border-border bg-bg-elev-1 px-3 py-2 text-xs text-fg-muted">
-            Try <code className="nb-mono text-accent">admin</code> or{' '}
-            <code className="nb-mono text-accent">alice</code>. Mock auth — any password works.
-          </div>
-        )}
 
         <div className="text-center text-[10px] uppercase tracking-wider text-fg-subtle">
           v0.1 · internal

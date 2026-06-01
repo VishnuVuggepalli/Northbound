@@ -14,7 +14,7 @@
  * dragging in TanStack Query or React.
  */
 
-import { findPlatformForDevice } from '@/mocks/registry';
+import { findPlatformForDevice } from '@/lib/platforms';
 import type { Device, PlatformRegistryEntry } from '@/types';
 
 /**

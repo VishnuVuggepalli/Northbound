@@ -6,12 +6,40 @@
 
 import { describe, expect, test } from 'vitest';
 import { isWriteLocked, vendorWebUiUrl, findPlatformForDevice } from './devicePolicy';
-import { PLATFORM_REGISTRY, findPlatform } from '@/mocks/registry';
+import { findPlatform } from '@/lib/platforms';
 import type { Device, DeviceRole, PlatformRegistryEntry } from '@/types';
 
-const cisco = findPlatform('cisco')!;
-const arista = findPlatform('arista')!;
-const freebsd = findPlatform('freebsd')!;
+// Minimal local platform sample (test data — the app fetches the real catalog
+// from GET /api/platforms via usePlatforms()).
+function entry(id: string, writable: boolean, webUi: string | null): PlatformRegistryEntry {
+  return {
+    platform_id: id as PlatformRegistryEntry['platform_id'],
+    platform: id as PlatformRegistryEntry['platform'],
+    display_name: id,
+    description: '',
+    defaultPort: 443,
+    capabilities: {
+      writable,
+      supports_commit_confirm: writable,
+      native_api_available: writable,
+      supports_snmp_read: false,
+      supports_lldp: true,
+      max_concurrency: 5,
+      auth_methods: ['password'],
+    },
+    web_ui_url_template: webUi,
+  };
+}
+const PLATFORM_REGISTRY: readonly PlatformRegistryEntry[] = [
+  entry('cisco', true, 'https://{mgmt_ip}/'),
+  entry('arista', true, 'https://{mgmt_ip}/'),
+  entry('pica8', true, 'https://{mgmt_ip}:8888/'),
+  entry('freebsd', false, null),
+];
+
+const cisco = findPlatform('cisco', PLATFORM_REGISTRY)!;
+const arista = findPlatform('arista', PLATFORM_REGISTRY)!;
+const freebsd = findPlatform('freebsd', PLATFORM_REGISTRY)!;
 
 function dev(role: DeviceRole, overrides: Partial<Device> = {}): Device {
   return {

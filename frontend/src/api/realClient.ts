@@ -25,6 +25,7 @@ import type {
   Port,
   PortListSnapshot,
   PortMap,
+  TopologyLink,
   PlatformRegistryEntry,
   User,
 } from '@/types';
@@ -188,7 +189,7 @@ export async function getDevice(id: string): Promise<Device> {
   return mapDevice(d);
 }
 
-export async function listLinks(_env?: Environment): Promise<ReadonlyArray<never>> {
+export async function listLinks(_env?: Environment): Promise<readonly TopologyLink[]> {
   // The backend does not model topology links; the 3D topology view falls back
   // to an empty link set when running against the real API.
   return [];
@@ -426,4 +427,3 @@ export async function confirmOnboard(draft: OnboardingDraft): Promise<ConfirmOnb
 /* -------------------------------------------------------------------------
  * Reference data
  * ------------------------------------------------------------------------- */
-export { VLANS } from '@/mocks/fixtures';

@@ -13,7 +13,7 @@ import type { ThemeMode } from '@/lib/palette';
 import type { ChangeRequest, Device, Port, User } from '@/types';
 import { cn } from '@/lib/cn';
 import { isWriteLocked, findPlatformForDevice } from '@/lib/devicePolicy';
-import { PLATFORM_REGISTRY } from '@/mocks/registry';
+import { usePlatforms } from '@/api/queries';
 
 type Mode = 'mine' | 'queue';
 
@@ -58,7 +58,8 @@ export function RequestRow({
   // (router/vpn) with platform capability (writable=false on SwOS+FreeBSD).
   // Approve-only stays available so admins can still triage the queue; the
   // apply path is a hard block.
-  const platform = findPlatformForDevice(device, PLATFORM_REGISTRY);
+  const { data: platforms } = usePlatforms();
+  const platform = findPlatformForDevice(device, platforms ?? []);
   const writeLocked = isWriteLocked(device, platform);
 
   return (
