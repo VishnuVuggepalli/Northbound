@@ -4,14 +4,16 @@ import { Wordmark } from '@/components/ui/Wordmark';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useAuthStore } from '@/store/auth';
-import { apiClient } from '@/api';
+import { apiClient, isApiError } from '@/api';
 import { pushToast } from '@/store/toast';
 
 export function LoginPage() {
   const navigate = useNavigate();
   const setSession = useAuthStore((s) => s.setSession);
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('••••••••');
+  const [username, setUsername] = useState('');
+  // Empty by default — never pre-fill a placeholder value. A fake "••••" would
+  // be submitted verbatim and (correctly) rejected 401 by the real backend.
+  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -26,11 +28,15 @@ export function LoginPage() {
       });
       navigate('/');
     } catch (err) {
-      pushToast({
-        kind: 'error',
-        title: 'Sign-in failed',
-        message: err instanceof Error ? err.message : 'Unknown error',
-      });
+      // Distinguish HTTP failure modes rather than one generic message:
+      // 401 = bad credentials, 429 = rate-limited, else = surface the message.
+      let message = err instanceof Error ? err.message : 'Unknown error';
+      if (isApiError(err)) {
+        if (err.status === 401) message = 'Invalid username or password.';
+        else if (err.status === 429)
+          message = 'Too many sign-in attempts. Wait a moment and try again.';
+      }
+      pushToast({ kind: 'error', title: 'Sign-in failed', message });
     } finally {
       setSubmitting(false);
     }
