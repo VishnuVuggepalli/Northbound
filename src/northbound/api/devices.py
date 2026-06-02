@@ -14,12 +14,13 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from northbound.api.deps import get_current_user, require_admin
+from northbound.api.limiter import limiter, write_rate_key, write_rate_limit_provider
 from northbound.db import get_session
 from northbound.drivers.base import AuthError, DriverError, ReachabilityError
 from northbound.drivers.factory import driver_for, driver_from_params
@@ -124,7 +125,9 @@ async def _load_device(session: AsyncSession, device_id: str) -> Device:
 # onboarding probes (stateless — never persist)
 # --------------------------------------------------------------------------- #
 @router.post("/test-connection", response_model=TestConnectionOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def test_connection(
+    request: Request,
     body: ConnectionTestIn,
     _admin: Annotated[User, Depends(require_admin)],
 ) -> TestConnectionOut:
@@ -150,7 +153,9 @@ async def test_connection(
 
 
 @router.post("/discover", response_model=DiscoverOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def discover(
+    request: Request,
     body: DiscoverIn,
     _admin: Annotated[User, Depends(require_admin)],
 ) -> DiscoverOut:
@@ -182,7 +187,9 @@ async def discover(
 # atomic onboard (the only write that creates a device)
 # --------------------------------------------------------------------------- #
 @router.post("", response_model=DeviceOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def create_device(
+    request: Request,
     body: DeviceCreateIn,
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -282,7 +289,9 @@ async def get_device(
 # rotate credentials (re-test first; old creds retained on failure)
 # --------------------------------------------------------------------------- #
 @router.patch("/{device_id}/credentials", response_model=DeviceOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def rotate_credentials(
+    request: Request,
     device_id: str,
     body: CredentialsRotateIn,
     _admin: Annotated[User, Depends(require_admin)],
@@ -324,7 +333,9 @@ async def rotate_credentials(
 # compliance trail is retained — surfaced as 409)
 # --------------------------------------------------------------------------- #
 @router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def delete_device(
+    request: Request,
     device_id: str,
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],

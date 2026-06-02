@@ -14,11 +14,12 @@ import datetime as dt
 import difflib
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from northbound.api.deps import get_current_user, require_admin
+from northbound.api.limiter import limiter, write_rate_key, write_rate_limit_provider
 from northbound.config import get_settings
 from northbound.db import get_session
 from northbound.drivers.base import DriverError
@@ -189,7 +190,9 @@ async def _apply_direct_port_change(
 
 
 @router.patch("/{device_id}/ports/{port_name:path}/description")
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def set_port_description(
+    request: Request,
     device_id: str,
     port_name: str,
     body: PortDescriptionIn,
@@ -215,7 +218,9 @@ async def set_port_description(
 
 
 @router.patch("/{device_id}/ports/{port_name:path}/config")
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def set_port_config(
+    request: Request,
     device_id: str,
     port_name: str,
     body: PortConfigIn,
@@ -250,7 +255,9 @@ async def set_port_config(
 
 
 @router.patch("/{device_id}/ports/{port_name:path}", response_model=PortStateOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def patch_port_metadata(
+    request: Request,
     device_id: str,
     port_name: str,
     body: PortMetadataPatchIn,
@@ -493,7 +500,9 @@ async def get_l3_interfaces(
     response_model=BackupOut,
     status_code=status.HTTP_201_CREATED,
 )
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def backup_now(
+    request: Request,
     device_id: str,
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],

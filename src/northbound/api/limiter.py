@@ -36,6 +36,21 @@ LOGIN_RATE_LIMIT = os.environ.get("NB_LOGIN_RATE_LIMIT", "5/5minutes")
 # Overridable via NB_REGISTER_RATE_LIMIT for local testing.
 REGISTER_RATE_LIMIT = os.environ.get("NB_REGISTER_RATE_LIMIT", "5/hour")
 
+# Write throttle: bound mutation/config-push rate per authenticated user (so a
+# runaway client or a single hostile account can't hammer the devices), with an
+# IP fallback for the rare unauthenticated write path. The value is admin-tunable
+# at runtime (see services.runtime_settings) — write endpoints pass the provider
+# callable below to slowapi, which evaluates it per request. NB_WRITE_RATE_LIMIT
+# seeds the default until an admin overrides it.
+
+
+def write_rate_limit_provider() -> str:
+    """Current write rate-limit string. Slowapi calls this per request, so an
+    admin change via the settings API takes effect on the next request."""
+    from northbound.services.runtime_settings import current_write_rate_limit
+
+    return current_write_rate_limit()
+
 
 def _submitted_username(request: Request) -> str:
     """Best-effort extract the submitted username from the cached login body.
@@ -62,6 +77,25 @@ def _submitted_username(request: Request) -> str:
 def login_rate_key(request: Request) -> str:
     """Composite rate-limit key: ``<client-ip>|<submitted-username>``."""
     return f"{get_remote_address(request)}|{_submitted_username(request)}"
+
+
+def write_rate_key(request: Request) -> str:
+    """Rate-limit key for authenticated write endpoints: ``user:<sub>``.
+
+    Keys on the JWT subject so the budget follows the *user*, not a shared NAT/
+    proxy IP (which would let one user exhaust everyone's budget). Falls back to
+    ``ip:<addr>`` when there is no valid bearer token. Import is local to avoid a
+    module-load cycle (auth.jwt → config → ... ).
+    """
+    auth = request.headers.get("authorization", "")
+    if auth[:7].lower() == "bearer ":
+        from northbound.auth.jwt import InvalidToken, decode_token
+
+        try:
+            return f"user:{decode_token(auth[7:]).sub}"
+        except InvalidToken:
+            pass
+    return f"ip:{get_remote_address(request)}"
 
 
 limiter = Limiter(key_func=get_remote_address)

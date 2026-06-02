@@ -8,6 +8,7 @@ import {
   LogOut,
   Moon,
   Search,
+  Settings,
   Sun,
 } from 'lucide-react';
 import { Wordmark } from '@/components/ui/Wordmark';
@@ -99,6 +100,18 @@ export function TopBar() {
             <ListChecks size={14} />
             <span>Queue</span>
             {pendingCount > 0 && <Badge variant="accent">{pendingCount}</Badge>}
+          </Link>
+        )}
+        {user?.role === 'admin' && (
+          <Link
+            to="/settings"
+            className={cn(
+              'flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm text-fg-muted hover:bg-bg-elev-2 hover:text-fg',
+              location.pathname.startsWith('/settings') && 'bg-bg-elev-2 text-fg',
+            )}
+          >
+            <Settings size={14} />
+            <span>Settings</span>
           </Link>
         )}
         <Link

@@ -32,7 +32,21 @@ export const queryKeys = {
     ['devices', deviceId, 'protocol', slug] as const,
   vlans: (deviceId: string) => ['devices', deviceId, 'vlans'] as const,
   l3: (deviceId: string) => ['devices', deviceId, 'l3-interfaces'] as const,
+  settings: () => ['settings'] as const,
 } as const;
+
+export function useSettings() {
+  return useQuery({ queryKey: queryKeys.settings(), queryFn: () => api.getSettings() });
+}
+
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial<import('./realClient').RuntimeSettings>) =>
+      api.updateSettings(patch),
+    onSuccess: (data) => qc.setQueryData(queryKeys.settings(), data),
+  });
+}
 
 export function useDevices(env?: Environment) {
   return useQuery({

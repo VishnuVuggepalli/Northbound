@@ -18,6 +18,7 @@ from northbound.models.enums import (
     UserRole,
 )
 from northbound.models.port_metadata import PortMetadata
+from northbound.models.runtime_setting import RuntimeSetting
 from northbound.models.site import Site
 from northbound.models.user import User
 
@@ -30,6 +31,7 @@ __all__ = [
     "Device",
     "DeviceRole",
     "PortMetadata",
+    "RuntimeSetting",
     "Site",
     "User",
     "UserRole",

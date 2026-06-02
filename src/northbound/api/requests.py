@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from northbound.api.deps import get_current_user, require_admin
+from northbound.api.limiter import limiter, write_rate_key, write_rate_limit_provider
 from northbound.db import get_session
 from northbound.models.change_request import ChangeRequest
 from northbound.models.device import Device
@@ -54,7 +55,9 @@ async def _load_device(session: AsyncSession, device_id: str) -> Device:
 
 
 @router.post("", response_model=RequestOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def create_request(
+    request: Request,
     body: RequestCreateIn,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -114,7 +117,9 @@ async def get_request(
 
 
 @router.post("/{request_id}/approve", response_model=RequestOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def approve_request(
+    request: Request,
     request_id: str,
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -129,7 +134,9 @@ async def approve_request(
 
 
 @router.post("/{request_id}/reject", response_model=RequestOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def reject_request(
+    request: Request,
     request_id: str,
     body: RequestRejectIn,
     admin: Annotated[User, Depends(require_admin)],
@@ -147,7 +154,9 @@ async def reject_request(
 
 
 @router.post("/{request_id}/apply", response_model=RequestOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def apply_request(
+    request: Request,
     request_id: str,
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -178,7 +187,9 @@ async def apply_request(
 
 
 @router.post("/{request_id}/confirm", response_model=RequestOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def confirm_request(
+    request: Request,
     request_id: str,
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],

@@ -14,6 +14,7 @@ import { AdminQueuePage } from '@/pages/AdminQueuePage';
 import { OnboardPage } from '@/pages/OnboardPage';
 import { SearchResultsPage } from '@/pages/SearchResultsPage';
 import { AboutPage } from '@/pages/About';
+import { SettingsPage } from '@/pages/SettingsPage';
 import { useAuthStore } from '@/store/auth';
 import { useUIStore } from '@/store/ui';
 import { useThemeStore } from '@/store/theme';
@@ -75,6 +76,7 @@ function AppRoutes() {
         <Route path="/onboard" element={<OnboardPage />} />
         <Route path="/requests" element={<RequestsPage />} />
         <Route path="/queue" element={<AdminQueuePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/env/:env" element={<EnvironmentPage />}>
           <Route index element={<EnvironmentTopologyPage />} />
           <Route path="search" element={<SearchResultsPage />} />

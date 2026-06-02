@@ -549,3 +549,18 @@ export async function confirmOnboard(draft: OnboardingDraft): Promise<ConfirmOnb
 /* -------------------------------------------------------------------------
  * Reference data
  * ------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------
+ * Runtime settings (admin)
+ * ------------------------------------------------------------------------- */
+export interface RuntimeSettings {
+  write_rate_limit: string;
+}
+
+export async function getSettings(): Promise<RuntimeSettings> {
+  return request<RuntimeSettings>('/api/settings');
+}
+
+export async function updateSettings(patch: Partial<RuntimeSettings>): Promise<RuntimeSettings> {
+  return request<RuntimeSettings>('/api/settings', { method: 'PATCH', body: patch });
+}

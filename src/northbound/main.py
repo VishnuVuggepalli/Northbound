@@ -15,11 +15,22 @@ import northbound.drivers.arista
 import northbound.drivers.cisco
 import northbound.drivers.mock
 import northbound.drivers.pica8  # noqa: F401  (registers)
-from northbound.api import audit, auth, devices, platforms, ports, requests, sites, users
+from northbound.api import (
+    audit,
+    auth,
+    devices,
+    platforms,
+    ports,
+    requests,
+    sites,
+    users,
+)
+from northbound.api import settings as settings_api
 from northbound.api.limiter import limiter
 from northbound.api.static_spa import mount_spa
 from northbound.config import get_settings
 from northbound.db import async_session_factory
+from northbound.services import runtime_settings
 from northbound.services.scheduler import build_scheduler
 from northbound.services.sites import ensure_default_sites
 
@@ -60,6 +71,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.warning("default-site seed skipped (sites table missing?)", exc_info=True)
 
+    # Seed the runtime-settings cache (e.g. admin-tuned write rate limit) from the
+    # DB. Resilient: a missing table (migration not yet run) only logs; reads fall
+    # back to the env default until then.
+    try:
+        async with async_session_factory() as session:
+            await runtime_settings.load_cache(session)
+    except Exception:
+        logger.warning("runtime-settings cache seed skipped (table missing?)", exc_info=True)
+
     scheduler: AsyncIOScheduler | None = None
     if settings.enable_scheduler:
         scheduler = build_scheduler(settings)
@@ -98,6 +118,7 @@ app.include_router(sites.router)
 app.include_router(ports.router)
 app.include_router(requests.router)
 app.include_router(audit.router)
+app.include_router(settings_api.router)
 
 
 @app.get("/health", response_model=HealthResponse)
