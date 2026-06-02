@@ -78,7 +78,8 @@ class ProtocolStatus:
 
     name: str  # e.g. "lldp", "ospf", "spanning-tree"
     enabled: bool
-    detail: str = ""  # short human note (e.g. "stp mode rstp", "2 areas")
+    detail: str = ""  # one-line summary (e.g. "router-id 10.10.250.2 · 6 areas")
+    params: tuple[tuple[str, str], ...] = ()  # key/value detail rows for expansion
 
 
 @dataclass(frozen=True)

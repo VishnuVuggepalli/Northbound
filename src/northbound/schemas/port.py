@@ -103,6 +103,7 @@ class ProtocolStatusOut(BaseModel):
     name: str
     enabled: bool
     detail: str = ""
+    params: list[tuple[str, str]] = Field(default_factory=list)
 
 
 class MgmtServiceOut(BaseModel):

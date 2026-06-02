@@ -528,7 +528,6 @@ def _parse_lldp_xml(xml: str) -> list[Neighbor]:
 
 
 # Top-level xorplus config sections that represent control-plane protocols.
-# (slug -> human label). Presence in get-config ⇒ configured/enabled.
 _PROTOCOL_SECTIONS: tuple[tuple[str, str], ...] = (
     ("lldp", "LLDP"),
     ("ospf", "OSPF"),
@@ -540,22 +539,112 @@ _PROTOCOL_SECTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _section_enabled(el: etree._Element) -> bool:
+    """True unless the section is an explicit boolean-false leaf or carries
+    ``<enable>false</enable>``. A bare container (no enable child) ⇒ enabled."""
+    txt = (el.text or "").strip().lower()
+    if txt in ("false", "true"):  # boolean leaf like <dhcp>false</dhcp>
+        return txt == "true"
+    enable = _child_text(el, "enable")
+    if enable is not None:
+        return enable.strip().lower() == "true"
+    return True
+
+
+def _iter_local(el: etree._Element, name: str) -> list[etree._Element]:
+    return [e for e in el.iter() if _localname(e.tag) == name]
+
+
+def _detail_lldp(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
+    iv = _child_text(el, "advertisement-interval")
+    n = len(_iter_local(el, "interface"))
+    params = [("Interfaces", str(n))]
+    if iv:
+        params.insert(0, ("Advertisement interval", f"{iv}s"))
+    return params, f"{n} interfaces" + (f" · {iv}s" if iv else "")
+
+
+def _detail_ospf(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
+    rid = _child_text(el, "router-id")
+    ifaces = _iter_local(el, "interface")
+    areas = sorted({_child_text(i, "area") or "" for i in ifaces} - {""})
+    params: list[tuple[str, str]] = []
+    if rid:
+        params.append(("Router ID", rid))
+    params.append(("Interfaces", str(len(ifaces))))
+    if areas:
+        params.append(("Areas", ", ".join(areas)))
+    return params, " · ".join(
+        p for p in ((f"router-id {rid}" if rid else ""), f"{len(ifaces)} ifaces") if p
+    )
+
+
+def _detail_stp(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
+    fv = (_child_text(el, "force-version") or "").strip()
+    mode = {"3": "RSTP/MSTP", "0": "STP"}.get(fv, fv)
+    vlans = _iter_local(el, "vlan")
+    params: list[tuple[str, str]] = []
+    if mode:
+        params.append(("Mode", mode))
+    if vlans:
+        params.append(("PVST VLANs", str(len(vlans))))
+        prio = _child_text(vlans[0], "bridge-priority")
+        if prio:
+            params.append(("Bridge priority", prio))
+    return params, mode + (f" · {len(vlans)} PVST vlans" if vlans else "")
+
+
+def _detail_lacp(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
+    prio = _child_text(el, "priority")
+    return ([("System priority", prio)], f"priority {prio}") if prio else ([], "")
+
+
+def _detail_lbd(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
+    iv = _child_text(el, "message-interval")
+    return ([("Message interval", f"{iv}s")], f"{iv}s interval") if iv else ([], "")
+
+
+def _detail_firewall(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
+    filters = _iter_local(el, "filter")
+    names = [n for n in (_child_text(f, "name") or "" for f in filters) if n]
+    return [("Filters", ", ".join(names) or str(len(filters)))], f"{len(filters)} filter(s)"
+
+
+_PROTOCOL_DETAIL = {
+    "lldp": _detail_lldp,
+    "ospf": _detail_ospf,
+    "spanning-tree": _detail_stp,
+    "lacp": _detail_lacp,
+    "loopback-detection": _detail_lbd,
+    "firewall": _detail_firewall,
+}
+
+
+def _protocol_params(slug: str, el: etree._Element) -> tuple[list[tuple[str, str]], str]:
+    """Extract (key/value detail rows, one-line summary) for a protocol block."""
+    fn = _PROTOCOL_DETAIL.get(slug)
+    return fn(el) if fn else ([], "")
+
+
 def _parse_protocols_xml(xml: str) -> tuple[ProtocolStatus, ...]:
-    """Report which control-plane protocols are configured (top-level xorplus
-    sections). A section's presence ⇒ enabled; absence ⇒ not reported."""
+    """Report configured control-plane protocols with their key parameters.
+
+    A boolean-false leaf (``<dhcp>false</dhcp>``) or ``<enable>false</enable>``
+    is reported as present-but-disabled, NOT as an enabled protocol.
+    """
     root = _safe_parse(xml)
     if root is None:
         return ()
-    present = {_localname(el.tag) for el in root.iter()}
     out: list[ProtocolStatus] = []
     for slug, label in _PROTOCOL_SECTIONS:
-        if slug in present:
-            detail = ""
-            if slug == "spanning-tree":
-                sec = _find_first(root, "spanning-tree")
-                mode = _child_text(sec, "mode") if sec is not None else None
-                detail = f"mode {mode}" if mode else ""
-            out.append(ProtocolStatus(name=label, enabled=True, detail=detail))
+        el = _find_first(root, slug)
+        if el is None:
+            continue
+        enabled = _section_enabled(el)
+        params, summary = _protocol_params(slug, el) if enabled else ([], "disabled")
+        out.append(
+            ProtocolStatus(name=label, enabled=enabled, detail=summary, params=tuple(params))
+        )
     return tuple(out)
 
 

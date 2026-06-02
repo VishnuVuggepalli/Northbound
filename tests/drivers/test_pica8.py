@@ -289,9 +289,16 @@ async def test_apply_change_missing_token_returns_failure() -> None:
 # System info parsers (protocols / services / MAC table)
 # --------------------------------------------------------------------------- #
 _SYS_XML = """<rpc-reply><data>
-  <lldp xmlns="http://pica8.com/xorplus/lldp"><interface><name>te-1/1/1</name></interface></lldp>
-  <ospf xmlns="http://pica8.com/xorplus/ospf"><area>0</area></ospf>
-  <spanning-tree xmlns="http://pica8.com/xorplus/stp"><mode>rstp</mode></spanning-tree>
+  <lldp xmlns="http://pica8.com/xorplus/lldp"><enable>true</enable>
+    <advertisement-interval>30</advertisement-interval>
+    <interface><name>te-1/1/1</name></interface>
+    <interface><name>te-1/1/2</name></interface></lldp>
+  <ospf xmlns="http://pica8.com/xorplus/ospfv2"><router-id>10.10.250.2</router-id>
+    <interface><name>vlan1010</name><area>0.0.0.0</area></interface></ospf>
+  <spanning-tree xmlns="http://pica8.com/xorplus/mstp"><enable>true</enable>
+    <force-version>3</force-version>
+    <pvst><vlan><id>1</id><bridge-priority>32768</bridge-priority></vlan></pvst></spanning-tree>
+  <dhcp>false</dhcp>
   <system xmlns="http://pica8.com/xorplus/system"><services>
     <ssh><port>22</port><disable>false</disable></ssh>
     <web><disable>false</disable>
@@ -302,11 +309,17 @@ _SYS_XML = """<rpc-reply><data>
 </data></rpc-reply>"""
 
 
-def test_parse_protocols_xml_reports_present_sections() -> None:
+def test_parse_protocols_xml_detail_and_validity() -> None:
     protos = {p.name: p for p in _parse_protocols_xml(_SYS_XML)}
-    assert "LLDP" in protos and "OSPF" in protos and "Spanning Tree" in protos
-    assert protos["Spanning Tree"].detail == "mode rstp"
-    assert all(p.enabled for p in protos.values())
+    # LLDP: interface count + advertisement interval surfaced as params
+    assert dict(protos["LLDP"].params)["Interfaces"] == "2"
+    assert dict(protos["LLDP"].params)["Advertisement interval"] == "30s"
+    # OSPF router-id + area
+    assert dict(protos["OSPF"].params)["Router ID"] == "10.10.250.2"
+    # STP force-version 3 -> RSTP/MSTP
+    assert dict(protos["Spanning Tree"].params)["Mode"] == "RSTP/MSTP"
+    # DHCP is <dhcp>false</dhcp>: present but DISABLED, not an enabled protocol
+    assert protos["DHCP"].enabled is False
 
 
 def test_parse_services_xml_ssh_and_web() -> None:

@@ -87,7 +87,7 @@ async def get_ports(
     return [PortStateOut.from_view(v) for v in views]
 
 
-@router.get("/{device_id}/ports/{port_name}", response_model=PortDetailOut)
+@router.get("/{device_id}/ports/{port_name:path}", response_model=PortDetailOut)
 async def get_port_detail(
     device_id: str,
     port_name: str,
@@ -119,7 +119,7 @@ async def get_port_detail(
     )
 
 
-@router.patch("/{device_id}/ports/{port_name}", response_model=PortStateOut)
+@router.patch("/{device_id}/ports/{port_name:path}", response_model=PortStateOut)
 async def patch_port_metadata(
     device_id: str,
     port_name: str,
@@ -229,7 +229,12 @@ async def get_system_info(
         await driver.aclose()
     return SystemInfoOut(
         protocols=[
-            ProtocolStatusOut(name=p.name, enabled=p.enabled, detail=p.detail)
+            ProtocolStatusOut(
+                name=p.name,
+                enabled=p.enabled,
+                detail=p.detail,
+                params=list(p.params),
+            )
             for p in info.protocols
         ],
         services=[
