@@ -58,6 +58,12 @@ PROTOCOL_GETS: dict[str, tuple[ProtocolGet, ...]] = {
         ProtocolGet("Link-state database", "show ospf database", "show_ospf_database.textfsm"),
     ),
     "LLDP": (ProtocolGet("Neighbors", "show lldp neighbor", "show_lldp_neighbor.textfsm"),),
+    # PicOS routing is FRR (confirmed via the FRR route-code legend in
+    # `show ip route`), so BGP show output is FRR-format. Template authored from
+    # FRR docs + unit-tested against the documented sample; pending live confirm
+    # on a BGP-running leaf. Route table (`show ip bgp`) deferred — its columns
+    # are ragged (blank metric/locprf) and need live samples to parse reliably.
+    "BGP": (ProtocolGet("Summary", "show ip bgp summary", "show_ip_bgp_summary.textfsm"),),
 }
 
 # Standalone L3 operational gets (not tied to a configured protocol). Surfaced

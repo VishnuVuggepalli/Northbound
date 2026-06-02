@@ -50,3 +50,37 @@ def test_parse_lldp_ragged_columns() -> None:
 def test_registry_has_ospf_and_lldp() -> None:
     assert "OSPF" in PROTOCOL_GETS and "LLDP" in PROTOCOL_GETS
     assert any(g.command == "show ospf neighbor" for g in PROTOCOL_GETS["OSPF"])
+
+
+# FRR `show ip bgp summary` — PicOS routing is FRR. Sample from FRR docs
+# (https://docs.frrouting.org/en/latest/bgp.html), incl. an IPv6 peer + a
+# non-Established (Active) peer. Doc-derived; pending live confirm on a BGP leaf.
+_BGP_SUMMARY = """IPv4 Unicast Summary:
+BGP router identifier 10.10.10.1, local AS number 65001 VRF default vrf-id 0
+BGP table version 4
+RIB entries 7, using 1344 bytes of memory
+Peers 2, using 43 KiB of memory
+
+Neighbor        V         AS   MsgRcvd   MsgSent   TblVer  InQ OutQ  Up/Down State/PfxRcd   PfxSnt Desc
+192.168.0.2     4      65002         8        10        0    0    0 00:03:09            5 (Policy) N/A
+10.0.0.6        4      65003        90        88        0    0    0 00:40:00         Active N/A
+fe80:1::2222    4      65002         9        11        0    0    0 00:03:09            3 (Policy) N/A
+
+Total number of neighbors 3
+"""
+
+
+def test_parse_bgp_summary_frr() -> None:
+    t = parse_table("Summary", "show_ip_bgp_summary.textfsm", _BGP_SUMMARY)
+    assert t.columns[0] == "Neighbor" and "State Pfxrcd" in t.columns
+    assert len(t.rows) == 3
+    assert t.rows[0][0] == "192.168.0.2" and t.rows[0][2] == "65002"
+    # non-Established peer shows the state word, not a prefix count
+    assert t.rows[1][0] == "10.0.0.6" and t.rows[1][-1] == "Active"
+    # IPv6 peer parses
+    assert t.rows[2][0] == "fe80:1::2222"
+
+
+def test_bgp_registered() -> None:
+    assert "BGP" in PROTOCOL_GETS
+    assert any(g.command == "show ip bgp summary" for g in PROTOCOL_GETS["BGP"])

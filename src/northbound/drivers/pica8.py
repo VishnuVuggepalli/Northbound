@@ -551,9 +551,13 @@ def _parse_lldp_xml(xml: str) -> list[Neighbor]:
 
 
 # Top-level xorplus config sections that represent control-plane protocols.
+# (slug, label). ``bgp`` detection is by element presence — leaf-02 has no BGP,
+# but a BGP-running leaf carries a bgp config element; operational detail then
+# comes from the FRR ``show ip bgp summary`` get.
 _PROTOCOL_SECTIONS: tuple[tuple[str, str], ...] = (
     ("lldp", "LLDP"),
     ("ospf", "OSPF"),
+    ("bgp", "BGP"),
     ("spanning-tree", "Spanning Tree"),
     ("lacp", "LACP"),
     ("loopback-detection", "Loopback Detection"),
@@ -633,9 +637,29 @@ def _detail_firewall(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
     return [("Filters", ", ".join(names) or str(len(filters)))], f"{len(filters)} filter(s)"
 
 
+def _detail_bgp(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
+    # Best-effort over common FRR/xorplus leaf names; reads only what's present
+    # (no assumed structure). Live operational data comes from the summary get.
+    local_as = _child_text(el, "local-as") or _child_text(el, "as") or _child_text(el, "as-number")
+    rid = _child_text(el, "router-id")
+    neighbors = _iter_local(el, "neighbor") or _iter_local(el, "peer")
+    params: list[tuple[str, str]] = []
+    if local_as:
+        params.append(("Local AS", local_as))
+    if rid:
+        params.append(("Router ID", rid))
+    if neighbors:
+        params.append(("Configured peers", str(len(neighbors))))
+    summary = " · ".join(
+        p for p in ((f"AS {local_as}" if local_as else ""), f"{len(neighbors)} peers") if p
+    )
+    return params, summary
+
+
 _PROTOCOL_DETAIL = {
     "lldp": _detail_lldp,
     "ospf": _detail_ospf,
+    "bgp": _detail_bgp,
     "spanning-tree": _detail_stp,
     "lacp": _detail_lacp,
     "loopback-detection": _detail_lbd,
