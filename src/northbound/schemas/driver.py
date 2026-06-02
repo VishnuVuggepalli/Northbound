@@ -100,6 +100,17 @@ class MgmtService:
 
 
 @dataclass(frozen=True)
+class VlanInfo:
+    """One entry of the device's VLAN database."""
+
+    vlan_id: int
+    name: str = ""
+    description: str = ""
+    l3_interface: str = ""  # SVI name if the VLAN is routed (e.g. "vlan1010")
+    port_count: int = 0  # access/trunk member ports referencing this VLAN
+
+
+@dataclass(frozen=True)
 class ProtocolTable:
     """One operational table (e.g. OSPF neighbors) — column headers + rows."""
 

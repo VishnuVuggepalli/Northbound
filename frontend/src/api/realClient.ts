@@ -29,6 +29,7 @@ import type {
   Site,
   SystemInfo,
   TopologyLink,
+  VlanInfo,
   PlatformRegistryEntry,
   User,
 } from '@/types';
@@ -237,6 +238,10 @@ export async function getProtocolDetail(id: string, slug: string): Promise<Proto
   return request<ProtocolDetail>(
     `/api/devices/${encodeURIComponent(id)}/protocols/${encodeURIComponent(slug)}`,
   );
+}
+
+export async function getVlans(id: string): Promise<VlanInfo[]> {
+  return request<VlanInfo[]>(`/api/devices/${encodeURIComponent(id)}/vlans`);
 }
 
 export async function listLinks(_env?: Environment): Promise<readonly TopologyLink[]> {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, Network, ShieldCheck, Table2 } from 'lucide-react';
-import { useProtocolDetail, useSystemInfo } from '@/api/queries';
+import { ChevronDown, ChevronRight, Layers, Loader2, Network, ShieldCheck, Table2 } from 'lucide-react';
+import { useProtocolDetail, useSystemInfo, useVlans } from '@/api/queries';
 import { Section } from '@/components/ui/Section';
 import { KV } from '@/components/ui/KV';
 import { DataTable } from '@/components/ui/DataTable';
@@ -21,10 +21,25 @@ interface DeviceSystemViewProps {
   device: Device;
 }
 
-/** Live system tab: control-plane protocols, mgmt services, L2 MAC table. */
+/** Live system tab: control-plane protocols, mgmt services, L2 MAC table, VLANs. */
 export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const { data, isLoading, isError, error } = useSystemInfo(device.id);
+  const { data: vlans = [] } = useVlans(device.id);
   const [macFilter, setMacFilter] = useState('');
+  const [vlanFilter, setVlanFilter] = useState('');
+
+  const vlanRows = useMemo(() => {
+    const q = vlanFilter.trim().toLowerCase();
+    const rows = q
+      ? vlans.filter(
+          (v) =>
+            String(v.vlan_id).includes(q) ||
+            v.name.toLowerCase().includes(q) ||
+            v.description.toLowerCase().includes(q),
+        )
+      : vlans;
+    return rows;
+  }, [vlans, vlanFilter]);
 
   const macRows = useMemo(() => {
     const rows = data?.mac_table ?? [];
@@ -152,6 +167,45 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                 r.interface,
               ])}
               cellClass={(j) => (j === 4 ? 'text-link' : j === 1 ? 'text-fg' : 'text-fg-muted')}
+            />
+          </div>
+        )}
+      </Section>
+
+      <Section
+        title={
+          <SectionTitle icon={<Layers size={13} className="text-accent" />}>
+            VLANs
+            <span className="nb-mono ml-1 text-xs text-fg-subtle">{vlans.length} defined</span>
+          </SectionTitle>
+        }
+        right={
+          vlans.length > 0 ? (
+            <Input
+              placeholder="Filter by id / name…"
+              value={vlanFilter}
+              onChange={(e) => setVlanFilter(e.target.value)}
+              className="h-8 w-64 text-xs"
+            />
+          ) : undefined
+        }
+      >
+        {vlans.length === 0 ? (
+          <p className="px-1 text-xs text-fg-subtle">No VLANs reported.</p>
+        ) : vlanRows.length === 0 ? (
+          <p className="px-1 text-xs text-fg-subtle">No matching VLANs.</p>
+        ) : (
+          <div className="px-1">
+            <DataTable
+              columns={['VLAN', 'Name', 'Description', 'L3 (SVI)', 'Ports']}
+              rows={vlanRows.map((v) => [
+                String(v.vlan_id),
+                v.name,
+                v.description,
+                v.l3_interface,
+                String(v.port_count),
+              ])}
+              cellClass={(j) => (j === 0 ? 'text-fg' : j === 3 ? 'text-link' : 'text-fg-muted')}
             />
           </div>
         )}

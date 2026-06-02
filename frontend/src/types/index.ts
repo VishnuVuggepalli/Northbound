@@ -193,6 +193,14 @@ export interface ProtocolDetail {
   error: string | null;
 }
 
+export interface VlanInfo {
+  vlan_id: number;
+  name: string;
+  description: string;
+  l3_interface: string;
+  port_count: number;
+}
+
 export interface MgmtService {
   name: string;
   enabled: boolean;

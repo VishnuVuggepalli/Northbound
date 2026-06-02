@@ -361,3 +361,22 @@ def test_parse_mac_table_rows() -> None:
 
 def test_parse_mac_table_skips_banner_and_junk() -> None:
     assert _parse_mac_table("Welcome to PICOS\nadmin@leaf-02>\ngarbage line\n") == ()
+
+
+_VLANS_XML = """<rpc-reply><data>
+  <vlans xmlns="http://pica8.com/xorplus/vlans">
+    <vlan-id><id>1</id><vlan-name>default</vlan-name></vlan-id>
+    <vlan-id><id>1010</id><vlan-name>default</vlan-name><l3-interface>vlan1010</l3-interface></vlan-id>
+    <vlan-id><id>2004</id><vlan-name>2004</vlan-name><description>prod</description></vlan-id>
+  </vlans>
+</data></rpc-reply>"""
+
+
+def test_parse_vlans_xml() -> None:
+    from northbound.drivers.pica8 import _parse_vlans_xml
+
+    vlans = {v.vlan_id: v for v in _parse_vlans_xml(_VLANS_XML, {1010: 14, 2004: 2})}
+    assert set(vlans) == {1, 1010, 2004}
+    assert vlans[1010].l3_interface == "vlan1010" and vlans[1010].port_count == 14
+    assert vlans[2004].name == "2004" and vlans[2004].description == "prod"
+    assert vlans[1].port_count == 0

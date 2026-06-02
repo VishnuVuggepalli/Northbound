@@ -61,6 +61,7 @@ from northbound.schemas.driver import (
     ProtocolTable,
     SystemInfo,
     TestResult,
+    VlanInfo,
 )
 
 # ConfigDiff metadata keys (kept here to avoid magic strings).
@@ -253,6 +254,21 @@ class Pica8Driver(Driver):
             except Exception as exc:
                 error = error if error else f"{get.command}: {exc}"
         return ProtocolDetail(slug=slug, tables=tuple(tables), error=error)
+
+    async def get_vlans(self) -> list[VlanInfo]:
+        """The device VLAN database from get-config, with per-VLAN member-port
+        counts derived from the same config (interface switchport membership)."""
+        try:
+            cfg = await self._netconf.get_config(source="running")
+        except Exception:
+            return []
+        ports = _parse_interfaces_xml(cfg)
+        usage: dict[int, int] = {}
+        for p in ports:
+            for v in {p.untagged_vlan, *p.tagged_vlans}:
+                if isinstance(v, int):
+                    usage[v] = usage.get(v, 0) + 1
+        return _parse_vlans_xml(cfg, usage)
 
     # ---------- write ----------
 
@@ -468,6 +484,34 @@ def _collapse_logical_units(ports: list[PortState]) -> list[PortState]:
     """
     physical = {p.name for p in ports if "." not in p.name}
     return [p for p in ports if p.name.rpartition(".")[0] not in physical]
+
+
+def _parse_vlans_xml(xml: str, usage: dict[int, int]) -> list[VlanInfo]:
+    """Parse the xorplus ``<vlans>`` database: each ``<vlan-id>`` carries an
+    ``<id>``, ``<vlan-name>``, optional ``<description>`` and ``<l3-interface>``
+    (SVI). ``usage`` maps vlan-id -> member-port count (from interfaces)."""
+    root = _safe_parse(xml)
+    if root is None:
+        return []
+    out: list[VlanInfo] = []
+    for el in root.iter():
+        if _localname(el.tag) != "vlan-id":
+            continue
+        id_text = _child_text(el, "id")
+        if not id_text or not id_text.strip().isdigit():
+            continue
+        vid = int(id_text.strip())
+        out.append(
+            VlanInfo(
+                vlan_id=vid,
+                name=_child_text(el, "vlan-name") or "",
+                description=_child_text(el, "description") or "",
+                l3_interface=_child_text(el, "l3-interface") or "",
+                port_count=usage.get(vid, 0),
+            )
+        )
+    out.sort(key=lambda v: v.vlan_id)
+    return out
 
 
 def _has_ancestor(el: etree._Element, ancestor_localname: str) -> bool:

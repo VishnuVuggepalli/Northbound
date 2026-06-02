@@ -42,6 +42,7 @@ from northbound.schemas.port import (
     ProtocolStatusOut,
     ProtocolTableOut,
     SystemInfoOut,
+    VlanInfoOut,
 )
 from northbound.services import audit, port_state
 from northbound.services.credvault import FernetCredVault, deserialize_credentials
@@ -286,6 +287,37 @@ async def get_protocol_detail(
         ],
         error=detail.error,
     )
+
+
+@router.get("/{device_id}/vlans", response_model=list[VlanInfoOut])
+async def get_vlans(
+    device_id: str,
+    _user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[VlanInfoOut]:
+    """The device's VLAN database: id, name, description, L3 SVI, member-port
+    count. Backs the VLANs view and the request VLAN picker."""
+    device = await _load_device(session, device_id)
+    creds = _credentials_for(device)
+    driver = driver_for(device, creds)
+    try:
+        vlans = await driver.get_vlans()
+    except DriverError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"VLAN fetch failed: {exc}"
+        ) from exc
+    finally:
+        await driver.aclose()
+    return [
+        VlanInfoOut(
+            vlan_id=v.vlan_id,
+            name=v.name,
+            description=v.description,
+            l3_interface=v.l3_interface,
+            port_count=v.port_count,
+        )
+        for v in vlans
+    ]
 
 
 @router.post(

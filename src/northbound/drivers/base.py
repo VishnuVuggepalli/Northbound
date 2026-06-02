@@ -23,6 +23,7 @@ from northbound.schemas.driver import (
     ProtocolDetail,
     SystemInfo,
     TestResult,
+    VlanInfo,
 )
 
 
@@ -118,6 +119,10 @@ class Driver(ABC):
     async def get_protocol_detail(self, slug: str) -> ProtocolDetail:
         """Operational detail (named tables) for one protocol. Default: empty."""
         return ProtocolDetail(slug=slug)
+
+    async def get_vlans(self) -> list[VlanInfo]:
+        """The device's VLAN database (id/name/description/SVI/usage). Default: none."""
+        return []
 
     # ---------- write (NotSupported if writable=False) ----------
 

@@ -107,6 +107,14 @@ class ProtocolStatusOut(BaseModel):
     has_detail: bool = False
 
 
+class VlanInfoOut(BaseModel):
+    vlan_id: int
+    name: str = ""
+    description: str = ""
+    l3_interface: str = ""
+    port_count: int = 0
+
+
 class ProtocolTableOut(BaseModel):
     title: str
     columns: list[str] = Field(default_factory=list)

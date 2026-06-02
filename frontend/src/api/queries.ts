@@ -30,6 +30,7 @@ export const queryKeys = {
   system: (deviceId: string) => ['devices', deviceId, 'system'] as const,
   protocol: (deviceId: string, slug: string) =>
     ['devices', deviceId, 'protocol', slug] as const,
+  vlans: (deviceId: string) => ['devices', deviceId, 'vlans'] as const,
 } as const;
 
 export function useDevices(env?: Environment) {
@@ -99,6 +100,14 @@ export function useProtocolDetail(deviceId: string, slug: string, enabled: boole
     queryKey: queryKeys.protocol(deviceId, slug),
     queryFn: () => api.getProtocolDetail(deviceId, slug),
     enabled,
+  });
+}
+
+export function useVlans(deviceId: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.vlans(deviceId ?? ''),
+    queryFn: () => api.getVlans(deviceId!),
+    enabled: !!deviceId,
   });
 }
 

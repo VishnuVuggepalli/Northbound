@@ -18,7 +18,7 @@ import { useAuthStore } from '@/store/auth';
 import { useUIStore } from '@/store/ui';
 import { useThemeStore } from '@/store/theme';
 import { useHotkeys, useSequenceHotkeys } from '@/hooks/useHotkeys';
-import { useCreateRequest, useDevice, usePorts } from '@/api/queries';
+import { useCreateRequest, useDevice, usePorts, useVlans } from '@/api/queries';
 import { pushToast } from '@/store/toast';
 import { apiClient, isApiError } from '@/api';
 
@@ -181,18 +181,21 @@ function GlobalDialogs() {
   const createReq = useCreateRequest();
   const { data: device } = useDevice(selectedDeviceId);
   const { data: portSnapshot } = usePorts(selectedDeviceId);
+  const { data: vlans = [] } = useVlans(selectedDeviceId);
 
-  // VLAN quick-pick suggestions from REAL data — VLANs observed across this
-  // device's ports (untagged + tagged), sorted unique. No hardcoded list; the
-  // modal's numeric input always allows any 1–4094.
+  // VLAN quick-pick suggestions from REAL data — the device's full VLAN database
+  // (so any defined VLAN is pickable, not only ones already on a port), unioned
+  // with VLANs observed on this device's ports. Sorted unique. The modal's
+  // numeric input still allows any 1–4094.
   const vlanOptions = useMemo(() => {
     const seen = new Set<number>();
+    for (const v of vlans) seen.add(v.vlan_id);
     for (const p of portSnapshot?.ports ?? []) {
       if (typeof p.untagged_vlan === 'number') seen.add(p.untagged_vlan);
       for (const v of p.tagged_vlans ?? []) seen.add(v);
     }
     return [...seen].sort((a, b) => a - b);
-  }, [portSnapshot]);
+  }, [vlans, portSnapshot]);
 
   return (
     <>
