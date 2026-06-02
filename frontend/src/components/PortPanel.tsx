@@ -8,6 +8,7 @@ import { StatusDot } from '@/components/ui/StatusDot';
 import { VlanChip } from '@/components/ui/VlanChip';
 import { Kbd } from '@/components/ui/Kbd';
 import { Diff } from '@/components/Diff';
+import { PortConfigEditor } from '@/components/PortConfigEditor';
 import { VendorActions } from '@/components/VendorActions';
 import { portToRequestedChanges, mergeChange } from '@/lib/config';
 import { fmtAge, formatSpeed, timeAgo, timeAgoMin } from '@/lib/format';
@@ -301,27 +302,31 @@ export function PortPanel({
           </div>
         </Section>
 
-        <Section title="VLANs">
-          <div className="mb-2 flex items-center gap-3">
-            <span className="w-20 text-[11px] uppercase tracking-wider text-fg-subtle">
-              Untagged
-            </span>
-            <VlanChip vlan={port.untagged_vlan} theme={theme} large />
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="w-20 text-[11px] uppercase tracking-wider text-fg-subtle">
-              Tagged
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {port.tagged_vlans.length === 0 ? (
-                <span className="text-xs text-fg-muted">none</span>
-              ) : (
-                port.tagged_vlans.map((v) => (
-                  <VlanChip key={v} vlan={v} theme={theme} onRemove={isAdmin ? () => undefined : undefined} />
-                ))
-              )}
-            </div>
-          </div>
+        <Section title={isAdmin && !writeLocked ? 'VLANs & port config' : 'VLANs'}>
+          {isAdmin && !writeLocked ? (
+            <PortConfigEditor deviceId={device.id} port={port} />
+          ) : (
+            <>
+              <div className="mb-2 flex items-center gap-3">
+                <span className="w-20 text-[11px] uppercase tracking-wider text-fg-subtle">
+                  Untagged
+                </span>
+                <VlanChip vlan={port.untagged_vlan} theme={theme} large />
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="w-20 text-[11px] uppercase tracking-wider text-fg-subtle">
+                  Tagged
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {port.tagged_vlans.length === 0 ? (
+                    <span className="text-xs text-fg-muted">none</span>
+                  ) : (
+                    port.tagged_vlans.map((v) => <VlanChip key={v} vlan={v} theme={theme} />)
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </Section>
 
         {showNeighbors && (
@@ -468,7 +473,6 @@ export function PortPanel({
         <div className="flex items-center gap-2">
         {isAdmin ? (
           <>
-            {/* TODO(M2): admin direct edit — see feature-list F40 */}
             {pending.length > 0 && !writeLocked && (
               <Button
                 kind="success"

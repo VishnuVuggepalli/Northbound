@@ -157,6 +157,20 @@ export function useSetPortDescription(deviceId: string) {
   });
 }
 
+export function useSetPortConfig(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { portName: string; patch: import('./realClient').PortConfigPatch }) =>
+      api.setPortConfig(deviceId, input.portName, input.patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.ports(deviceId) });
+      qc.invalidateQueries({ queryKey: queryKeys.allPorts() });
+      qc.invalidateQueries({ queryKey: queryKeys.vlans(deviceId) });
+      qc.invalidateQueries({ queryKey: ['devices', deviceId, 'config'] });
+    },
+  });
+}
+
 function invalidateRequestsAndPorts(qc: QueryClient, deviceId: string) {
   qc.invalidateQueries({ queryKey: ['requests'] });
   qc.invalidateQueries({ queryKey: queryKeys.ports(deviceId) });

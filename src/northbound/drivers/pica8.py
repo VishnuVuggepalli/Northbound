@@ -1081,19 +1081,44 @@ def _build_edit_config_xml(port: str, change: PortChange) -> str:
             desc.set(f"{{{_NC_BASE_NS}}}operation", "delete")
         else:
             desc.text = change.description
-    if change.untagged_vlan is not None or change.tagged_vlans is not None:
-        family = etree.SubElement(ge, "family")
-        eth = etree.SubElement(family, "ethernet-switching")
-        if change.tagged_vlans is not None:
-            etree.SubElement(eth, "port-mode").text = "trunk"
-            if change.untagged_vlan is not None:
-                etree.SubElement(eth, "native-vlan-id").text = str(change.untagged_vlan)
-            vlan = etree.SubElement(eth, "vlan")
-            members = etree.SubElement(vlan, "members")
-            etree.SubElement(members, "id").text = ",".join(str(v) for v in change.tagged_vlans)
-        elif change.untagged_vlan is not None:
-            etree.SubElement(eth, "port-mode").text = "access"
-            vlan = etree.SubElement(eth, "vlan")
-            members = etree.SubElement(vlan, "members")
-            etree.SubElement(members, "id").text = str(change.untagged_vlan)
+    if change.mtu is not None:
+        etree.SubElement(ge, "mtu").text = str(change.mtu)
+    if change.enabled is not None:
+        # xorplus models admin-down as <disable>; enabled=True -> disable=false.
+        etree.SubElement(ge, "disable").text = "false" if change.enabled else "true"
+    _append_switching(ge, change)
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
+
+
+def _append_switching(ge: etree._Element, change: PortChange) -> None:
+    """Append ``<family><ethernet-switching>`` (port-mode + VLANs) when relevant.
+
+    Effective port-mode: an explicit ``change.port_mode`` wins; otherwise it is
+    inferred from the VLAN fields so request-flow callers (which only set
+    untagged/tagged) keep working.
+    """
+    mode = change.port_mode
+    if mode is None and (change.untagged_vlan is not None or change.tagged_vlans is not None):
+        mode = "trunk" if change.tagged_vlans is not None else "access"
+    if mode is None:
+        return
+    family = etree.SubElement(ge, "family")
+    eth = etree.SubElement(family, "ethernet-switching")
+    etree.SubElement(eth, "port-mode").text = mode
+    if mode == "trunk":
+        if change.untagged_vlan is not None:
+            etree.SubElement(eth, "native-vlan-id").text = str(change.untagged_vlan)
+        if change.tagged_vlans is not None:
+            members = etree.SubElement(etree.SubElement(eth, "vlan"), "members")
+            etree.SubElement(members, "id").text = ",".join(str(v) for v in change.tagged_vlans)
+    else:  # access
+        # xorplus access ports carry their VLAN in <native-vlan-id>, NOT
+        # <vlan><members> — the device rejects members in access mode
+        # ("can't include any vlan member at the access mode").
+        if change.untagged_vlan is not None:
+            etree.SubElement(eth, "native-vlan-id").text = str(change.untagged_vlan)
+        # Switching trunk -> access leaves the old <vlan><members> behind (merge
+        # never deletes); remove it so the port is a clean access port. "remove"
+        # is idempotent — no error when there is nothing to delete.
+        vlan = etree.SubElement(eth, "vlan")
+        vlan.set(f"{{{_NC_BASE_NS}}}operation", "remove")

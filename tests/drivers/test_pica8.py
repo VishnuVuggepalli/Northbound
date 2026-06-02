@@ -143,7 +143,9 @@ def test_render_change_builds_edit_config_xml_access() -> None:
     assert ge.findtext("{*}description") == "srv-01"
     eth_sw = root.find(".//{*}ethernet-switching")
     assert eth_sw is not None and eth_sw.findtext("{*}port-mode") == "access"
-    assert root.find(".//{*}members/{*}id").text == "10"
+    # access VLAN lives in <native-vlan-id>, not <members> (device rejects members in access)
+    assert eth_sw.findtext("{*}native-vlan-id") == "10"
+    assert root.find(".//{*}members") is None
 
 
 def test_render_change_builds_edit_config_xml_trunk() -> None:
@@ -165,6 +167,34 @@ def test_render_change_description_only_xorplus_ns() -> None:
     xml = _build_edit_config_xml("xe-1/1/1", PortChange(description="NB-TEST"))
     assert "http://pica8.com/xorplus/interface" in xml
     assert "<gigabit-ethernet>" in xml and "<unit>" not in xml
+
+
+def test_render_change_mtu_and_admin_disable() -> None:
+    xml = _build_edit_config_xml("xe-1/1/2", PortChange(mtu=9216, enabled=False))
+    root = etree.fromstring(xml.encode("utf-8"))
+    assert root.findtext(".//{*}mtu") == "9216"
+    assert root.findtext(".//{*}disable") == "true"  # enabled=False -> disable=true
+    # no switching family when only mtu/enabled are set
+    assert root.find(".//{*}ethernet-switching") is None
+
+
+def test_render_change_explicit_access_mode() -> None:
+    xml = _build_edit_config_xml("xe-1/1/2", PortChange(port_mode="access", untagged_vlan=100))
+    root = etree.fromstring(xml.encode("utf-8"))
+    assert root.findtext(".//{*}port-mode") == "access"
+    # xorplus access ports carry the VLAN in native-vlan-id, never in members
+    assert root.findtext(".//{*}native-vlan-id") == "100"
+    assert root.find(".//{*}members") is None
+
+
+def test_render_change_explicit_trunk_native_and_tagged() -> None:
+    xml = _build_edit_config_xml(
+        "xe-1/1/2", PortChange(port_mode="trunk", untagged_vlan=1010, tagged_vlans=[1002, 1003])
+    )
+    root = etree.fromstring(xml.encode("utf-8"))
+    assert root.findtext(".//{*}port-mode") == "trunk"
+    assert root.findtext(".//{*}native-vlan-id") == "1010"
+    assert root.find(".//{*}members/{*}id").text == "1002,1003"
 
 
 def test_render_change_empty_description_emits_delete_operation() -> None:

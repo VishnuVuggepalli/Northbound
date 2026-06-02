@@ -6,7 +6,9 @@ single view. Credentials never cross this boundary.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field, model_validator
 
 from northbound.services.port_state import PortStateView
 
@@ -67,6 +69,29 @@ class PortDescriptionIn(BaseModel):
     """Admin direct edit of the port's on-device description (config write)."""
 
     description: str = Field(max_length=256)
+
+
+class PortConfigIn(BaseModel):
+    """Admin direct edit of on-device port tunables (config write).
+
+    All fields optional; at least one must be set. VLAN IDs follow 802.1Q
+    (1..4094). ``enabled`` maps to the device's admin shut/no-shut.
+    """
+
+    port_mode: Literal["access", "trunk"] | None = None
+    untagged_vlan: Annotated[int, Field(ge=1, le=4094)] | None = None
+    tagged_vlans: list[Annotated[int, Field(ge=1, le=4094)]] | None = None
+    mtu: Annotated[int, Field(ge=64, le=16360)] | None = None
+    enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> PortConfigIn:
+        if all(
+            v is None
+            for v in (self.port_mode, self.untagged_vlan, self.tagged_vlans, self.mtu, self.enabled)
+        ):
+            raise ValueError("at least one tunable must be set")
+        return self
 
 
 class AuditEntryOut(BaseModel):

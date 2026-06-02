@@ -302,6 +302,27 @@ export async function setPortDescription(
   );
 }
 
+/** Admin direct edit of on-device port tunables. Only set fields are sent. */
+export interface PortConfigPatch {
+  port_mode?: 'access' | 'trunk';
+  untagged_vlan?: number;
+  tagged_vlans?: number[];
+  mtu?: number;
+  enabled?: boolean;
+}
+
+export async function setPortConfig(
+  deviceId: string,
+  portName: string,
+  patch: PortConfigPatch,
+): Promise<{ port_name: string } & PortConfigPatch> {
+  // Raw port name (slashes) so the `/config` suffix matches the :path route.
+  return request<{ port_name: string } & PortConfigPatch>(
+    `/api/devices/${encodeURIComponent(deviceId)}/ports/${portName}/config`,
+    { method: 'PATCH', body: patch },
+  );
+}
+
 export async function listAllPorts(): Promise<PortMap> {
   const devices = await listDevices();
   const map: PortMap = {};

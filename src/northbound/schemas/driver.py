@@ -261,3 +261,8 @@ class PortChange(BaseModel):
     bmc_ip: str | None = None
     notes: str | None = None
     description: str | None = None
+    # Device-level tunables (admin direct write). port_mode is explicit so the
+    # builder no longer has to infer access/trunk from tagged-VLAN presence.
+    port_mode: Literal["access", "trunk"] | None = None
+    mtu: Annotated[int, Field(ge=64, le=16360)] | None = None
+    enabled: bool | None = None  # maps to <disable> (disable = not enabled)

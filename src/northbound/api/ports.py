@@ -38,6 +38,7 @@ from northbound.schemas.port import (
     L3InterfaceOut,
     MacEntryOut,
     MgmtServiceOut,
+    PortConfigIn,
     PortDescriptionIn,
     PortDetailOut,
     PortMetadataPatchIn,
@@ -127,22 +128,21 @@ async def get_port_detail(
     )
 
 
-@router.patch("/{device_id}/ports/{port_name:path}/description")
-async def set_port_description(
-    device_id: str,
+async def _apply_direct_port_change(
+    session: AsyncSession,
+    device: Device,
     port_name: str,
-    body: PortDescriptionIn,
-    admin: Annotated[User, Depends(require_admin)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> dict[str, str]:
-    """Admin-only DIRECT write of the on-device port description.
+    change: PortChange,
+    *,
+    admin: User,
+    action: str,
+    after: dict[str, object],
+) -> None:
+    """Admin DIRECT device write: backup → render → apply → confirm + audit.
 
-    Declared BEFORE the metadata ``:path`` route so ``…/description`` matches
-    here, not as a port named ``…/description``. The description lives on the
-    device, so this is a real config write: backup → render → apply
-    (commit-confirm) → confirm (immediate, no approval gate). 403 on read-only.
+    Shared by the description and config endpoints. Immediate commit (no approval
+    gate); raises 502 on driver/apply failure and always closes the driver.
     """
-    device = await _load_device(session, device_id)
     assert_writable(device)
     creds = _credentials_for(device)
     driver = driver_for(device, creds)
@@ -157,20 +157,20 @@ async def set_port_description(
             )
         )
         await session.flush()
-        diff = await driver.render_change(port_name, PortChange(description=body.description))
+        diff = await driver.render_change(port_name, change)
         result = await driver.apply_change(
             diff, confirm_seconds=get_settings().commit_confirm_seconds
         )
         if not result.success:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Description apply failed: {result.error}",
+                detail=f"Apply failed: {result.error}",
             )
         if result.confirm_token:
             await driver.confirm(result.confirm_token)  # make permanent (direct write)
     except DriverError as exc:
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Description write failed: {exc}"
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Write failed: {exc}"
         ) from exc
     finally:
         await driver.aclose()
@@ -178,15 +178,75 @@ async def set_port_description(
     await audit.append_audit(
         session,
         user_id=admin.id,
-        action="port.description_set",
-        target_device_id=device_id,
+        action=action,
+        target_device_id=device.id,
         target_port=port_name,
-        after={"description": body.description},
+        after=after,
         result="ok",
     )
-    _config_cache.pop(device_id, None)  # running-config changed
+    _config_cache.pop(device.id, None)  # running-config changed
     port_state.invalidate(device.id)  # live port view changed
+
+
+@router.patch("/{device_id}/ports/{port_name:path}/description")
+async def set_port_description(
+    device_id: str,
+    port_name: str,
+    body: PortDescriptionIn,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, str]:
+    """Admin-only DIRECT write of the on-device port description.
+
+    Declared BEFORE the metadata ``:path`` route so ``…/description`` matches
+    here, not as a port named ``…/description``.
+    """
+    device = await _load_device(session, device_id)
+    await _apply_direct_port_change(
+        session,
+        device,
+        port_name,
+        PortChange(description=body.description),
+        admin=admin,
+        action="port.description_set",
+        after={"description": body.description},
+    )
     return {"port_name": port_name, "description": body.description}
+
+
+@router.patch("/{device_id}/ports/{port_name:path}/config")
+async def set_port_config(
+    device_id: str,
+    port_name: str,
+    body: PortConfigIn,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, object]:
+    """Admin-only DIRECT write of device port tunables.
+
+    Covers port-mode (access/trunk), native/untagged VLAN, tagged VLANs, MTU and
+    admin enable/disable. Declared BEFORE the metadata ``:path`` route. Immediate
+    commit, no approval gate; 403 for non-admin, 422 if no field is set.
+    """
+    device = await _load_device(session, device_id)
+    change = PortChange(
+        port_mode=body.port_mode,
+        untagged_vlan=body.untagged_vlan,
+        tagged_vlans=body.tagged_vlans,
+        mtu=body.mtu,
+        enabled=body.enabled,
+    )
+    after = body.model_dump(exclude_none=True)
+    await _apply_direct_port_change(
+        session,
+        device,
+        port_name,
+        change,
+        admin=admin,
+        action="port.config_set",
+        after=after,
+    )
+    return {"port_name": port_name, **after}
 
 
 @router.patch("/{device_id}/ports/{port_name:path}", response_model=PortStateOut)
