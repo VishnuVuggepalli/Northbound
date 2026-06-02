@@ -322,11 +322,23 @@ def test_parse_protocols_xml_detail_and_validity() -> None:
     assert protos["DHCP"].enabled is False
 
 
-def test_parse_services_xml_ssh_and_web() -> None:
+def test_parse_services_xml_canonical_set_with_absent() -> None:
     svcs = {s.name: s for s in _parse_services_xml(_SYS_XML)}
-    assert svcs["SSH"].port == 22 and svcs["SSH"].enabled
-    assert svcs["Web (HTTP)"].port == 80
+    # present-in-config services carry real state
+    assert svcs["SSH"].port == 22 and svcs["SSH"].enabled and svcs["SSH"].configured
+    assert svcs["Web (HTTP)"].port == 80 and svcs["Web (HTTP)"].configured
     assert svcs["Web (HTTPS)"].port == 443 and svcs["Web (HTTPS)"].enabled
+    # NETCONF: we read the config over it -> present + enabled
+    assert svcs["NETCONF"].enabled and svcs["NETCONF"].configured
+
+
+def test_parse_services_xml_marks_absent_not_configured() -> None:
+    # No <services> block at all: every canonical service is reported absent.
+    svcs = {s.name: s for s in _parse_services_xml("<rpc-reply><data></data></rpc-reply>")}
+    assert {"SSH", "Web (HTTP)", "Web (HTTPS)", "NETCONF"} <= set(svcs)
+    assert svcs["SSH"].configured is False and svcs["SSH"].enabled is False
+    # NETCONF still present (root parsed ⇒ reachable over netconf)
+    assert svcs["NETCONF"].configured is True
 
 
 _MAC_OUT = """admin@leaf-02>

@@ -185,6 +185,8 @@ export interface MgmtService {
   enabled: boolean;
   port: number | null;
   detail: string;
+  /** false = a known service that is absent from the device config. */
+  configured: boolean;
 }
 
 export interface SystemInfo {

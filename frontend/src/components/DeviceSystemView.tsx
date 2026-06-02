@@ -92,12 +92,20 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
         ) : (
           <ul className="space-y-1.5 px-1">
             {data.services.map((s) => (
-              <li key={s.name} className="flex items-center justify-between text-sm">
+              <li
+                key={s.name}
+                className={
+                  'flex items-center justify-between text-sm ' +
+                  (s.configured ? '' : 'opacity-50')
+                }
+              >
                 <span className="flex items-center gap-2 text-fg">
-                  <StatusDot state={s.enabled ? 'up' : 'off'} size={6} />
+                  <StatusDot state={s.configured ? (s.enabled ? 'up' : 'off') : 'disabled'} size={6} />
                   {s.name}
                 </span>
-                {s.port != null && <span className="nb-mono text-xs text-fg-subtle">:{s.port}</span>}
+                <span className="nb-mono text-xs text-fg-subtle">
+                  {s.configured ? (s.port != null ? `:${s.port}` : '') : 'not configured'}
+                </span>
               </li>
             ))}
           </ul>

@@ -238,7 +238,13 @@ async def get_system_info(
             for p in info.protocols
         ],
         services=[
-            MgmtServiceOut(name=s.name, enabled=s.enabled, port=s.port, detail=s.detail)
+            MgmtServiceOut(
+                name=s.name,
+                enabled=s.enabled,
+                port=s.port,
+                detail=s.detail,
+                configured=s.configured,
+            )
             for s in info.services
         ],
         mac_table=[

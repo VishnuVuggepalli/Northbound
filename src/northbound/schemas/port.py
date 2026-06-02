@@ -111,6 +111,7 @@ class MgmtServiceOut(BaseModel):
     enabled: bool
     port: int | None = None
     detail: str = ""
+    configured: bool = True
 
 
 class SystemInfoOut(BaseModel):

@@ -648,45 +648,67 @@ def _parse_protocols_xml(xml: str) -> tuple[ProtocolStatus, ...]:
     return tuple(out)
 
 
-def _parse_services_xml(xml: str) -> tuple[MgmtService, ...]:
-    """Parse the ``<system><services>`` block: ssh / web (http+https) / netconf.
+# Canonical mgmt services we always report, so absent ones surface greyed as
+# "not configured" rather than silently missing. (name, default port).
+_KNOWN_SERVICES: tuple[tuple[str, int | None], ...] = (
+    ("SSH", 22),
+    ("Web (HTTP)", 80),
+    ("Web (HTTPS)", 443),
+    ("NETCONF", 830),
+)
 
-    ``<disable>true</disable>`` is the xorplus boolean-value leaf (not presence).
+
+def _service_disabled(el: etree._Element) -> bool:
+    return (_child_text(el, "disable") or "").strip().lower() == "true"
+
+
+def _service_port(el: etree._Element, default: int | None) -> int | None:
+    txt = _child_text(el, "port")
+    return int(txt) if txt and txt.isdigit() else default
+
+
+def _parse_services_xml(xml: str) -> tuple[MgmtService, ...]:
+    """Report the canonical mgmt service set (ssh / web http+https / netconf).
+
+    Present-in-config services carry their real enabled state + port; absent
+    ones come back ``configured=False`` so the UI can grey them as "not
+    configured". ``<disable>true</disable>`` is the xorplus boolean leaf.
+    NETCONF: we're talking to the device over it, so a successful read ⇒
+    present + enabled even though it lives under <protocols>, not <services>.
     """
     root = _safe_parse(xml)
-    if root is None:
-        return ()
-    services_el = _find_first(root, "services")
-    if services_el is None:
-        return ()
+    services_el = _find_first(root, "services") if root is not None else None
 
-    def _enabled(el: etree._Element) -> bool:
-        return (_child_text(el, "disable") or "").strip().lower() != "true"
+    def _find_under(parent: etree._Element | None, name: str) -> etree._Element | None:
+        return _find_first(parent, name) if parent is not None else None
 
-    def _port(el: etree._Element) -> int | None:
-        txt = _child_text(el, "port")
-        return int(txt) if txt and txt.isdigit() else None
-
-    out: list[MgmtService] = []
-    ssh_el = _find_first(services_el, "ssh")
+    web_el = _find_under(services_el, "web")
+    found: dict[str, MgmtService] = {}
+    ssh_el = _find_under(services_el, "ssh")
     if ssh_el is not None:
-        out.append(MgmtService(name="SSH", enabled=_enabled(ssh_el), port=_port(ssh_el)))
-    web_el = _find_first(services_el, "web")
+        found["SSH"] = MgmtService(
+            name="SSH", enabled=not _service_disabled(ssh_el), port=_service_port(ssh_el, 22)
+        )
     if web_el is not None:
-        web_on = _enabled(web_el)
-        for proto in ("http", "https"):
+        web_on = not _service_disabled(web_el)
+        for proto, port in (("http", 80), ("https", 443)):
             sub = _find_first(web_el, proto)
             if sub is not None:
-                out.append(
-                    MgmtService(
-                        name=f"Web ({proto.upper()})",
-                        enabled=web_on and _enabled(sub),
-                        port=_port(sub),
-                    )
+                found[f"Web ({proto.upper()})"] = MgmtService(
+                    name=f"Web ({proto.upper()})",
+                    enabled=web_on and not _service_disabled(sub),
+                    port=_service_port(sub, port),
                 )
-    netconf_el = _find_first(services_el, "netconf")
-    if netconf_el is not None:
-        out.append(MgmtService(name="NETCONF", enabled=_enabled(netconf_el), port=830))
+    # NETCONF: reachable (this XML came over it) ⇒ present + enabled.
+    if root is not None:
+        found["NETCONF"] = MgmtService(name="NETCONF", enabled=True, port=830)
+
+    out: list[MgmtService] = []
+    for name, default_port in _KNOWN_SERVICES:
+        if name in found:
+            out.append(found[name])
+        else:
+            out.append(MgmtService(name=name, enabled=False, port=default_port, configured=False))
     return tuple(out)
 
 

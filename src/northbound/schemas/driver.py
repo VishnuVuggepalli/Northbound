@@ -84,12 +84,18 @@ class ProtocolStatus:
 
 @dataclass(frozen=True)
 class MgmtService:
-    """A management-plane service the device exposes (ssh/web/netconf/...)."""
+    """A management-plane service the device exposes (ssh/web/netconf/...).
+
+    ``configured`` distinguishes a service present in the device config from a
+    known service that is absent (surfaced greyed as "not configured" so an
+    admin can see what could be turned on).
+    """
 
     name: str
     enabled: bool
     port: int | None = None
     detail: str = ""
+    configured: bool = True
 
 
 @dataclass(frozen=True)
