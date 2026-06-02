@@ -71,6 +71,9 @@ PROTOCOL_GETS: dict[str, tuple[ProtocolGet, ...]] = {
 STANDALONE_GETS: dict[str, tuple[ProtocolGet, ...]] = {
     "ARP": (ProtocolGet("ARP table", "show arp", "show_arp.textfsm"),),
     "Routing": (ProtocolGet("IP routes", "show route", "show_route.textfsm"),),
+    "Counters": (
+        ProtocolGet("Interface counters", "show interface", "show_interface_counters.textfsm"),
+    ),
     "Optics": (
         ProtocolGet(
             "Transceivers",

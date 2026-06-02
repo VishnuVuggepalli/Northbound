@@ -1,0 +1,14 @@
+Value NAME ([\w/.-]+)
+Value IN_PKTS (\d+)
+Value OUT_PKTS (\d+)
+Value IN_OCTETS (\d+)
+Value OUT_OCTETS (\d+)
+
+Start
+  # Per-interface traffic counters from `show interface`. NAME is set on the
+  # block header and persists until Record fires on the last counter line.
+  ^Physical\s+interface:\s+${NAME},
+  ^\s+Input\s+Packets\.+${IN_PKTS}\s*$$
+  ^\s+Output\s+Packets\.+${OUT_PKTS}\s*$$
+  ^\s+Input\s+Octets\.+${IN_OCTETS}\s*$$
+  ^\s+Output\s+Octets\.+${OUT_OCTETS}\s*$$ -> Record

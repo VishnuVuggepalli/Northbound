@@ -269,6 +269,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
         <div className="space-y-1 px-1">
           <ProtocolGets deviceId={device.id} slug="Routing" label="IP routing table" />
           <ProtocolGets deviceId={device.id} slug="Optics" label="Transceivers / optics (DOM)" />
+          <ProtocolGets deviceId={device.id} slug="Counters" label="Interface traffic counters" />
           <ProtocolGets deviceId={device.id} slug="ARP" label="ARP table" />
         </div>
       </Section>
