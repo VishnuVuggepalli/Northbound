@@ -66,7 +66,7 @@ export function DeviceConfigView({ device, ports, user }: DeviceConfigViewProps)
         </Button>
         <span className="text-xs text-fg-subtle">last backup · 2 h ago</span>
       </header>
-      <div className="flex-1 overflow-auto nb-scroll">
+      <div className="min-h-0 flex-1 overflow-auto nb-scroll pb-16">
         {showDiff && ports.length > 0 ? (
           <div className="p-4">
             <ConfigDiff

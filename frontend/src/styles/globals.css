@@ -141,22 +141,26 @@ h1 {
     @apply text-accent underline-offset-2 hover:underline;
   }
 
-  /* Scrollbars */
+  /* Scrollbars — visible enough that scrollable areas read as scrollable. */
+  .nb-scroll {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: var(--nb-fg-subtle) transparent;
+  }
   .nb-scroll::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
   }
   .nb-scroll::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--nb-bg-sunken);
   }
   .nb-scroll::-webkit-scrollbar-thumb {
-    background: var(--nb-border-strong);
+    background: var(--nb-fg-subtle);
     border-radius: 999px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
   .nb-scroll::-webkit-scrollbar-thumb:hover {
-    background: var(--nb-fg-subtle);
+    background: var(--nb-fg-muted);
     background-clip: padding-box;
     border: 2px solid transparent;
   }

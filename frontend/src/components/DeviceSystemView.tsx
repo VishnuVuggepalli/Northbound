@@ -55,7 +55,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   }
 
   return (
-    <div className="h-full overflow-auto nb-scroll px-4">
+    <div className="h-full overflow-auto nb-scroll px-4 pb-16">
       <Section title={<SectionTitle icon={<Network size={13} className="text-accent" />}>Control-plane protocols</SectionTitle>}>
         {data.protocols.length === 0 ? (
           <p className="px-1 text-xs text-fg-subtle">None configured.</p>
