@@ -28,6 +28,7 @@ from northbound.api import (
 from northbound.api import settings as settings_api
 from northbound.api.limiter import limiter
 from northbound.api.static_spa import mount_spa
+from northbound.api.versioning import ApiVersionMiddleware
 from northbound.config import get_settings
 from northbound.db import async_session_factory
 from northbound.services import runtime_settings
@@ -96,6 +97,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Northbound", version="0.1.0", lifespan=lifespan)
+
+# API versioning: 406 a request that pins an unsupported version via Accept, and
+# stamp X-API-Version on every response. Added first so it wraps outermost.
+app.add_middleware(ApiVersionMiddleware)
 
 # Reverse-proxy support: only honour X-Forwarded-* (so the rate limiter and
 # logs see the real client IP, not the proxy's) when explicitly enabled and

@@ -35,6 +35,7 @@ import type {
   User,
 } from '@/types';
 import type { components } from './schema.gen';
+import type { SettingsOut, SettingsPatch } from './schema';
 import { ApiError } from './errors';
 import { clearAuthSession, getAuthToken } from '@/store/auth';
 import {
@@ -551,16 +552,15 @@ export async function confirmOnboard(draft: OnboardingDraft): Promise<ConfirmOnb
  * ------------------------------------------------------------------------- */
 
 /* -------------------------------------------------------------------------
- * Runtime settings (admin)
+ * Runtime settings (admin) — types sourced from the generated OpenAPI schema
+ * (schema.gen.ts) so they track the backend contract automatically.
  * ------------------------------------------------------------------------- */
-export interface RuntimeSettings {
-  write_rate_limit: string;
-}
+export type RuntimeSettings = SettingsOut;
 
 export async function getSettings(): Promise<RuntimeSettings> {
   return request<RuntimeSettings>('/api/settings');
 }
 
-export async function updateSettings(patch: Partial<RuntimeSettings>): Promise<RuntimeSettings> {
+export async function updateSettings(patch: SettingsPatch): Promise<RuntimeSettings> {
   return request<RuntimeSettings>('/api/settings', { method: 'PATCH', body: patch });
 }

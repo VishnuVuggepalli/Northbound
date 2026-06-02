@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "gen:api": "openapi-typescript http://localhost:8090/openapi.json -o src/api/schema.gen.ts"
+    "gen:api": "openapi-typescript ./openapi.json -o src/api/schema.gen.ts",
+    "gen:api:live": "openapi-typescript http://localhost:8090/openapi.json -o src/api/schema.gen.ts"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",

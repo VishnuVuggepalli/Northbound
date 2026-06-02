@@ -1,0 +1,4110 @@
+{
+  "components": {
+    "schemas": {
+      "AuditEntryOut": {
+        "description": "A single audit-log row (also reused by the audit router).",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "after": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          },
+          "target_device_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Device Id"
+          },
+          "target_port": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Port"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "result",
+          "created_at"
+        ],
+        "title": "AuditEntryOut",
+        "type": "object"
+      },
+      "AuthMethod": {
+        "enum": [
+          "password",
+          "ssh_key",
+          "api_token",
+          "snmp_v2c_community",
+          "snmp_v3"
+        ],
+        "title": "AuthMethod",
+        "type": "string"
+      },
+      "BackupDiffOut": {
+        "description": "Unified diff between a stored backup and the current running config.",
+        "properties": {
+          "backup_id": {
+            "title": "Backup Id",
+            "type": "string"
+          },
+          "diff": {
+            "title": "Diff",
+            "type": "string"
+          }
+        },
+        "required": [
+          "backup_id",
+          "diff"
+        ],
+        "title": "BackupDiffOut",
+        "type": "object"
+      },
+      "BackupOut": {
+        "description": "A stored config backup row.",
+        "properties": {
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "fetched_at": {
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "fetched_by": {
+            "title": "Fetched By",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "device_id",
+          "fetched_at",
+          "fetched_by"
+        ],
+        "title": "BackupOut",
+        "type": "object"
+      },
+      "ChangeRequestStatus": {
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "applying",
+          "awaiting_confirm",
+          "applied",
+          "failed",
+          "reverted"
+        ],
+        "title": "ChangeRequestStatus",
+        "type": "string"
+      },
+      "ConfigOut": {
+        "description": "Running config snapshot.",
+        "properties": {
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "config_text": {
+            "title": "Config Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "config_text",
+          "cached"
+        ],
+        "title": "ConfigOut",
+        "type": "object"
+      },
+      "ConnectionTestIn": {
+        "description": "Body of ``POST /api/devices/test-connection`` \u2014 transient, no persist.",
+        "properties": {
+          "credentials": {
+            "$ref": "#/components/schemas/CredentialsIn"
+          },
+          "mgmt_ip": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Mgmt Ip",
+            "type": "string"
+          },
+          "platform_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Platform Id",
+            "type": "string"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "prefer_native_api": {
+            "default": true,
+            "title": "Prefer Native Api",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "platform_id",
+          "mgmt_ip"
+        ],
+        "title": "ConnectionTestIn",
+        "type": "object"
+      },
+      "CredentialsIn": {
+        "description": "Inbound credential bag. All fields optional; the driver interprets\nthem per its declared ``auth_methods``. Never echoed back in a response.",
+        "properties": {
+          "api_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Token"
+          },
+          "enable_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Secret"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "snmp_community": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snmp Community"
+          },
+          "ssh_private_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh Private Key"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "title": "CredentialsIn",
+        "type": "object"
+      },
+      "CredentialsRotateIn": {
+        "description": "Body of ``PATCH /api/devices/{id}/credentials``.",
+        "properties": {
+          "credentials": {
+            "$ref": "#/components/schemas/CredentialsIn"
+          }
+        },
+        "required": [
+          "credentials"
+        ],
+        "title": "CredentialsRotateIn",
+        "type": "object"
+      },
+      "DeviceCreateIn": {
+        "description": "Body of ``POST /api/devices`` \u2014 atomic onboard.",
+        "properties": {
+          "credentials": {
+            "$ref": "#/components/schemas/CredentialsIn"
+          },
+          "environment": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Environment",
+            "type": "string"
+          },
+          "mgmt_ip": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Mgmt Ip",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "platform_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Platform Id",
+            "type": "string"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "prefer_native_api": {
+            "default": true,
+            "title": "Prefer Native Api",
+            "type": "boolean"
+          },
+          "role": {
+            "$ref": "#/components/schemas/DeviceRole"
+          },
+          "ssh_user": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh User"
+          }
+        },
+        "required": [
+          "name",
+          "environment",
+          "role",
+          "platform_id",
+          "mgmt_ip"
+        ],
+        "title": "DeviceCreateIn",
+        "type": "object"
+      },
+      "DeviceFactsOut": {
+        "properties": {
+          "base_mac": {
+            "default": "",
+            "title": "Base Mac",
+            "type": "string"
+          },
+          "license": {
+            "default": "",
+            "title": "License",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "title": "Model",
+            "type": "string"
+          },
+          "os_version": {
+            "default": "",
+            "title": "Os Version",
+            "type": "string"
+          },
+          "released": {
+            "default": "",
+            "title": "Released",
+            "type": "string"
+          },
+          "serial": {
+            "default": "",
+            "title": "Serial",
+            "type": "string"
+          },
+          "uptime": {
+            "default": "",
+            "title": "Uptime",
+            "type": "string"
+          }
+        },
+        "title": "DeviceFactsOut",
+        "type": "object"
+      },
+      "DeviceOut": {
+        "description": "Public view of a device. NEVER includes credentials of any kind.",
+        "properties": {
+          "capabilities": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DriverCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "environment": {
+            "title": "Environment",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mgmt_ip": {
+            "title": "Mgmt Ip",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "prefer_native_api": {
+            "title": "Prefer Native Api",
+            "type": "boolean"
+          },
+          "reachable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reachable"
+          },
+          "role": {
+            "$ref": "#/components/schemas/DeviceRole"
+          },
+          "ssh_user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ssh User"
+          },
+          "writable": {
+            "default": false,
+            "title": "Writable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "environment",
+          "role",
+          "platform",
+          "mgmt_ip",
+          "prefer_native_api"
+        ],
+        "title": "DeviceOut",
+        "type": "object"
+      },
+      "DeviceRole": {
+        "enum": [
+          "leaf",
+          "spine",
+          "router",
+          "vpn"
+        ],
+        "title": "DeviceRole",
+        "type": "string"
+      },
+      "DiscoverIn": {
+        "description": "Body of ``POST /api/devices/discover`` \u2014 same shape as test-connection.",
+        "properties": {
+          "credentials": {
+            "$ref": "#/components/schemas/CredentialsIn"
+          },
+          "mgmt_ip": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Mgmt Ip",
+            "type": "string"
+          },
+          "platform_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Platform Id",
+            "type": "string"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "prefer_native_api": {
+            "default": true,
+            "title": "Prefer Native Api",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "platform_id",
+          "mgmt_ip"
+        ],
+        "title": "DiscoverIn",
+        "type": "object"
+      },
+      "DiscoverOut": {
+        "description": "Onboarding preview \u2014 never persisted.",
+        "properties": {
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "ports": {
+            "items": {
+              "$ref": "#/components/schemas/PortOut"
+            },
+            "title": "Ports",
+            "type": "array"
+          },
+          "running_config": {
+            "default": "",
+            "title": "Running Config",
+            "type": "string"
+          },
+          "services": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Services",
+            "type": "object"
+          }
+        },
+        "required": [
+          "hostname"
+        ],
+        "title": "DiscoverOut",
+        "type": "object"
+      },
+      "DriverCapabilities": {
+        "description": "What a driver can and cannot do. Surfaced to the UI verbatim.",
+        "properties": {
+          "auth_methods": {
+            "items": {
+              "$ref": "#/components/schemas/AuthMethod"
+            },
+            "title": "Auth Methods",
+            "type": "array"
+          },
+          "max_concurrency": {
+            "title": "Max Concurrency",
+            "type": "integer"
+          },
+          "native_api_available": {
+            "title": "Native Api Available",
+            "type": "boolean"
+          },
+          "supports_commit_confirm": {
+            "title": "Supports Commit Confirm",
+            "type": "boolean"
+          },
+          "supports_lldp": {
+            "title": "Supports Lldp",
+            "type": "boolean"
+          },
+          "supports_snmp_read": {
+            "title": "Supports Snmp Read",
+            "type": "boolean"
+          },
+          "web_ui_url_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Web Ui Url Template"
+          },
+          "writable": {
+            "title": "Writable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "writable",
+          "supports_commit_confirm",
+          "native_api_available",
+          "supports_snmp_read",
+          "supports_lldp",
+          "max_concurrency",
+          "auth_methods"
+        ],
+        "title": "DriverCapabilities",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "L3InterfaceOut": {
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "gateway": {
+            "default": "",
+            "title": "Gateway",
+            "type": "string"
+          },
+          "ipv4": {
+            "default": "",
+            "title": "Ipv4",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "mtu": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtu"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "L3InterfaceOut",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "description": "Body of ``POST /api/auth/login``.",
+        "properties": {
+          "password": {
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "LoginResponse": {
+        "description": "Successful login result. ``token_type`` is always ``bearer``.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "token_type": {
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "role",
+          "username"
+        ],
+        "title": "LoginResponse",
+        "type": "object"
+      },
+      "MacEntryOut": {
+        "properties": {
+          "age": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age"
+          },
+          "interface": {
+            "title": "Interface",
+            "type": "string"
+          },
+          "mac": {
+            "title": "Mac",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "vlan": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vlan"
+          }
+        },
+        "required": [
+          "mac",
+          "interface",
+          "type"
+        ],
+        "title": "MacEntryOut",
+        "type": "object"
+      },
+      "MgmtServiceOut": {
+        "properties": {
+          "configured": {
+            "default": true,
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          }
+        },
+        "required": [
+          "name",
+          "enabled"
+        ],
+        "title": "MgmtServiceOut",
+        "type": "object"
+      },
+      "PlatformInfo": {
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/DriverCapabilities"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "platform_id": {
+            "title": "Platform Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform_id",
+          "display_name",
+          "capabilities"
+        ],
+        "title": "PlatformInfo",
+        "type": "object"
+      },
+      "PortChange": {
+        "description": "User-facing change request payload.\n\nVLAN IDs are validated against the 802.1Q valid range 1..4094; 0 and 4095\nare reserved and rejected at this system boundary.",
+        "properties": {
+          "bmc_ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bmc Ip"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "host_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Model"
+          },
+          "mtu": {
+            "anyOf": [
+              {
+                "maximum": 16360.0,
+                "minimum": 64.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtu"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "port_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "access",
+                  "trunk"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port Mode"
+          },
+          "tagged_vlans": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 4094.0,
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tagged Vlans"
+          },
+          "untagged_vlan": {
+            "anyOf": [
+              {
+                "maximum": 4094.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untagged Vlan"
+          }
+        },
+        "title": "PortChange",
+        "type": "object"
+      },
+      "PortConfigIn": {
+        "description": "Admin direct edit of on-device port tunables (config write).\n\nAll fields optional; at least one must be set. VLAN IDs follow 802.1Q\n(1..4094). ``enabled`` maps to the device's admin shut/no-shut.",
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "mtu": {
+            "anyOf": [
+              {
+                "maximum": 16360.0,
+                "minimum": 64.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtu"
+          },
+          "port_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "access",
+                  "trunk"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port Mode"
+          },
+          "tagged_vlans": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 4094.0,
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tagged Vlans"
+          },
+          "untagged_vlan": {
+            "anyOf": [
+              {
+                "maximum": 4094.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untagged Vlan"
+          }
+        },
+        "title": "PortConfigIn",
+        "type": "object"
+      },
+      "PortDescriptionIn": {
+        "description": "Admin direct edit of the port's on-device description (config write).",
+        "properties": {
+          "description": {
+            "maxLength": 256,
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "title": "PortDescriptionIn",
+        "type": "object"
+      },
+      "PortDetailOut": {
+        "description": "Single-port detail: live state + metadata + recent audit history.",
+        "properties": {
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEntryOut"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "port": {
+            "$ref": "#/components/schemas/PortStateOut"
+          }
+        },
+        "required": [
+          "port"
+        ],
+        "title": "PortDetailOut",
+        "type": "object"
+      },
+      "PortMetadataPatchIn": {
+        "description": "Admin direct edit of port metadata (DB-only; no device write).",
+        "properties": {
+          "bmc_ip": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bmc Ip"
+          },
+          "host_model": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Model"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "title": "PortMetadataPatchIn",
+        "type": "object"
+      },
+      "PortOut": {
+        "description": "A discovered port, with parsed human fields surfaced for preview.",
+        "properties": {
+          "admin_up": {
+            "title": "Admin Up",
+            "type": "boolean"
+          },
+          "bmc_ip": {
+            "default": "",
+            "title": "Bmc Ip",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "duplex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplex"
+          },
+          "host_model": {
+            "default": "",
+            "title": "Host Model",
+            "type": "string"
+          },
+          "link_up": {
+            "title": "Link Up",
+            "type": "boolean"
+          },
+          "mac": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mac"
+          },
+          "mtu": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtu"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "speed_mbps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Mbps"
+          },
+          "tagged_vlans": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Tagged Vlans",
+            "type": "array"
+          },
+          "untagged_vlan": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untagged Vlan"
+          }
+        },
+        "required": [
+          "name",
+          "admin_up",
+          "link_up"
+        ],
+        "title": "PortOut",
+        "type": "object"
+      },
+      "PortStateOut": {
+        "description": "A live port plus its human-authored metadata.",
+        "properties": {
+          "admin_up": {
+            "title": "Admin Up",
+            "type": "boolean"
+          },
+          "bmc_ip": {
+            "default": "",
+            "title": "Bmc Ip",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "duplex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplex"
+          },
+          "host_model": {
+            "default": "",
+            "title": "Host Model",
+            "type": "string"
+          },
+          "last_human_edit_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Human Edit At"
+          },
+          "last_human_edit_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Human Edit By"
+          },
+          "link_up": {
+            "title": "Link Up",
+            "type": "boolean"
+          },
+          "mac": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mac"
+          },
+          "mtu": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtu"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "title": "Notes",
+            "type": "string"
+          },
+          "services": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Services",
+            "type": "object"
+          },
+          "speed_mbps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed Mbps"
+          },
+          "tagged_vlans": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Tagged Vlans",
+            "type": "array"
+          },
+          "untagged_vlan": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untagged Vlan"
+          }
+        },
+        "required": [
+          "name",
+          "admin_up",
+          "link_up"
+        ],
+        "title": "PortStateOut",
+        "type": "object"
+      },
+      "ProtocolDetailOut": {
+        "description": "Operational detail for one protocol \u2014 named tables from CLI gets.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/ProtocolTableOut"
+            },
+            "title": "Tables",
+            "type": "array"
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "title": "ProtocolDetailOut",
+        "type": "object"
+      },
+      "ProtocolStatusOut": {
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_detail": {
+            "default": false,
+            "title": "Has Detail",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Params",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "enabled"
+        ],
+        "title": "ProtocolStatusOut",
+        "type": "object"
+      },
+      "ProtocolTableOut": {
+        "properties": {
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "ProtocolTableOut",
+        "type": "object"
+      },
+      "RegisterRequest": {
+        "description": "Body of ``POST /api/auth/register`` (public self-registration).\n\nThe role is intentionally absent \u2014 self-registered accounts are always\nREQUESTER; only an admin can mint privileged users via ``POST /api/users``.\nA longer password floor than login applies because this creates the secret.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "password": {
+            "maxLength": 256,
+            "minLength": 8,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 128,
+            "minLength": 3,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "RegisterRequest",
+        "type": "object"
+      },
+      "RequestCreateIn": {
+        "description": "Body of ``POST /api/requests`` \u2014 file a change request.",
+        "properties": {
+          "device_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Device Id",
+            "type": "string"
+          },
+          "port_name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Port Name",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          },
+          "requested_changes": {
+            "$ref": "#/components/schemas/PortChange"
+          }
+        },
+        "required": [
+          "device_id",
+          "port_name",
+          "requested_changes"
+        ],
+        "title": "RequestCreateIn",
+        "type": "object"
+      },
+      "RequestOut": {
+        "description": "Public view of a change request.",
+        "properties": {
+          "applied_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "awaiting_confirm": {
+            "default": false,
+            "title": "Awaiting Confirm",
+            "type": "boolean"
+          },
+          "confirm_deadline_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm Deadline At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "diff_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff Text"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "port_name": {
+            "title": "Port Name",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "requested_by": {
+            "title": "Requested By",
+            "type": "string"
+          },
+          "requested_changes": {
+            "additionalProperties": true,
+            "title": "Requested Changes",
+            "type": "object"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewer_comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer Comment"
+          },
+          "reviewer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ChangeRequestStatus"
+          }
+        },
+        "required": [
+          "id",
+          "device_id",
+          "port_name",
+          "requested_by",
+          "requested_changes",
+          "reason",
+          "status",
+          "created_at"
+        ],
+        "title": "RequestOut",
+        "type": "object"
+      },
+      "RequestRejectIn": {
+        "description": "Body of ``POST /api/requests/{id}/reject`` \u2014 comment required.",
+        "properties": {
+          "comment": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Comment",
+            "type": "string"
+          }
+        },
+        "required": [
+          "comment"
+        ],
+        "title": "RequestRejectIn",
+        "type": "object"
+      },
+      "SettingsOut": {
+        "description": "Current admin-tunable runtime settings.",
+        "properties": {
+          "write_rate_limit": {
+            "description": "Write-endpoint rate limit as a slowapi/limits string, e.g. '30/minute'.",
+            "title": "Write Rate Limit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "write_rate_limit"
+        ],
+        "title": "SettingsOut",
+        "type": "object"
+      },
+      "SettingsPatch": {
+        "description": "Partial update of runtime settings. Only set fields are applied.",
+        "properties": {
+          "write_rate_limit": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Write Rate Limit"
+          }
+        },
+        "title": "SettingsPatch",
+        "type": "object"
+      },
+      "SiteCreateIn": {
+        "description": "Body of ``POST /api/sites`` (admin only).",
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name"
+        ],
+        "title": "SiteCreateIn",
+        "type": "object"
+      },
+      "SiteOut": {
+        "description": "Public view of a site, with a live device count for the picker.",
+        "properties": {
+          "device_count": {
+            "default": 0,
+            "title": "Device Count",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name"
+        ],
+        "title": "SiteOut",
+        "type": "object"
+      },
+      "SiteUpdateIn": {
+        "description": "Body of ``PATCH /api/sites/{id}`` \u2014 rename only (slug is immutable).",
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SiteUpdateIn",
+        "type": "object"
+      },
+      "SystemInfoOut": {
+        "description": "Live system snapshot: device facts, protocols, mgmt services, MAC table.",
+        "properties": {
+          "facts": {
+            "$ref": "#/components/schemas/DeviceFactsOut"
+          },
+          "mac_supported": {
+            "default": false,
+            "title": "Mac Supported",
+            "type": "boolean"
+          },
+          "mac_table": {
+            "items": {
+              "$ref": "#/components/schemas/MacEntryOut"
+            },
+            "title": "Mac Table",
+            "type": "array"
+          },
+          "protocols": {
+            "items": {
+              "$ref": "#/components/schemas/ProtocolStatusOut"
+            },
+            "title": "Protocols",
+            "type": "array"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/MgmtServiceOut"
+            },
+            "title": "Services",
+            "type": "array"
+          }
+        },
+        "title": "SystemInfoOut",
+        "type": "object"
+      },
+      "TestConnectionOut": {
+        "description": "Result of a live credential probe. Mirrors the driver TestResult.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "number"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "platform_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Version"
+          }
+        },
+        "required": [
+          "ok",
+          "latency_ms"
+        ],
+        "title": "TestConnectionOut",
+        "type": "object"
+      },
+      "UserCreate": {
+        "description": "Body of ``POST /api/users`` (admin only).",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "password": {
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "username": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password",
+          "role"
+        ],
+        "title": "UserCreate",
+        "type": "object"
+      },
+      "UserOut": {
+        "description": "Public view of a user. NEVER includes ``password_hash``.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "role"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      },
+      "UserRole": {
+        "enum": [
+          "admin",
+          "requester"
+        ],
+        "title": "UserRole",
+        "type": "string"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VlanInfoOut": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "l3_interface": {
+            "default": "",
+            "title": "L3 Interface",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "port_count": {
+            "default": 0,
+            "title": "Port Count",
+            "type": "integer"
+          },
+          "vlan_id": {
+            "title": "Vlan Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "vlan_id"
+        ],
+        "title": "VlanInfoOut",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "Northbound",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/audit": {
+      "get": {
+        "description": "Filtered audit list, newest first (``?device_id=&port=&user=``).",
+        "operationId": "list_audit_api_audit_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Device Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "port",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Port"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditEntryOut"
+                  },
+                  "title": "Response List Audit Api Audit Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Audit",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "description": "Verify credentials and issue a JWT. 401 (generic) on any mismatch.",
+        "operationId": "login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "description": "Stateless logout: server-side no-op for v1; client discards the token.",
+        "operationId": "logout_api_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "description": "Public self-registration. Always creates a REQUESTER and auto-logs in.\n\nThe role is forced \u2014 the client cannot escalate to admin here (only\n``POST /api/users`` can, and that is admin-gated). 403 when open\nregistration is disabled; 409 on a duplicate username; throttled per\n(ip, username) like login. Returns a JWT so the UI logs in immediately.",
+        "operationId": "register_api_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/devices": {
+      "get": {
+        "description": "List devices (optional ``?environment=<site slug>`` filter). Never returns creds.",
+        "operationId": "list_devices_api_devices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "environment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceOut"
+                  },
+                  "title": "Response List Devices Api Devices Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Devices",
+        "tags": [
+          "devices"
+        ]
+      },
+      "post": {
+        "description": "Atomic onboard: re-discover, then persist device + ports + backup + audit.\n\nDiscovery runs BEFORE the transaction \u2014 if it fails, there is no DB hit.\nThe persist runs inside one ``session.begin()`` block; any failure rolls\nthe whole unit back, leaving no orphan device or ports.",
+        "operationId": "create_device_api_devices_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Device",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/api/devices/discover": {
+      "post": {
+        "description": "Discovery preview for the wizard. Does NOT persist anything.",
+        "operationId": "discover_api_devices_discover_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoverIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoverOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Discover",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/api/devices/test-connection": {
+      "post": {
+        "description": "Live credential probe. Does NOT persist anything.",
+        "operationId": "test_connection_api_devices_test_connection_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionTestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestConnectionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Test Connection",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/api/devices/{device_id}": {
+      "delete": {
+        "description": "Offboard a device.\n\nport_metadata + backups cascade via FK ondelete=CASCADE (operational data).\nChange-request history uses FK ondelete=RESTRICT, so a device that has any\nchange requests CANNOT be hard-deleted \u2014 the compliance trail must be\nretained. That case surfaces as 409 Conflict rather than an unhandled 500.",
+        "operationId": "delete_device_api_devices__device_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Device",
+        "tags": [
+          "devices"
+        ]
+      },
+      "get": {
+        "description": "Device detail. Never returns creds.",
+        "operationId": "get_device_api_devices__device_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Device",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/config": {
+      "get": {
+        "description": "Running config (cached). ``?refresh=true`` re-fetches from the device.",
+        "operationId": "get_config_api_devices__device_id__config_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Config",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/config/backup": {
+      "post": {
+        "description": "Take a config backup now (admin).",
+        "operationId": "backup_now_api_devices__device_id__config_backup_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Backup Now",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/config/backups": {
+      "get": {
+        "description": "List a device's config backups, newest first.",
+        "operationId": "list_backups_api_devices__device_id__config_backups_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BackupOut"
+                  },
+                  "title": "Response List Backups Api Devices  Device Id  Config Backups Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Backups",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/config/backups/{backup_id}/diff": {
+      "get": {
+        "description": "Unified diff of a stored backup vs the current running config.",
+        "operationId": "backup_diff_api_devices__device_id__config_backups__backup_id__diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "backup_id",
+            "required": true,
+            "schema": {
+              "title": "Backup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupDiffOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Backup Diff",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/credentials": {
+      "patch": {
+        "description": "Re-test new creds against the device; only store them if the probe passes.\n\nOn a failed probe the stored (old) credentials are left untouched \u2014 400.",
+        "operationId": "rotate_credentials_api_devices__device_id__credentials_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialsRotateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Rotate Credentials",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/l3-interfaces": {
+      "get": {
+        "description": "Addressed/non-switchport interfaces: management port, L3 VLAN SVIs, LAGs.",
+        "operationId": "get_l3_interfaces_api_devices__device_id__l3_interfaces_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/L3InterfaceOut"
+                  },
+                  "title": "Response Get L3 Interfaces Api Devices  Device Id  L3 Interfaces Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get L3 Interfaces",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/ports": {
+      "get": {
+        "description": "Live port list (cached 30s). ``?refresh=true`` bypasses the cache.",
+        "operationId": "get_ports_api_devices__device_id__ports_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PortStateOut"
+                  },
+                  "title": "Response Get Ports Api Devices  Device Id  Ports Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Ports",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/ports/{port_name}": {
+      "get": {
+        "description": "Single-port detail: live state + metadata + recent audit history.",
+        "operationId": "get_port_detail_api_devices__device_id__ports__port_name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "port_name",
+            "required": true,
+            "schema": {
+              "title": "Port Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Port Detail",
+        "tags": [
+          "ports"
+        ]
+      },
+      "patch": {
+        "description": "Admin direct edit of port *metadata* (host_model/bmc_ip/notes).\n\nMetadata-only: this writes the DB ``port_metadata`` row, NOT the device, so\n``assert_writable`` is deliberately not invoked. Writes an audit entry and\nstamps ``last_human_edit_*``.",
+        "operationId": "patch_port_metadata_api_devices__device_id__ports__port_name__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "port_name",
+            "required": true,
+            "schema": {
+              "title": "Port Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortMetadataPatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Port Metadata",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/ports/{port_name}/config": {
+      "patch": {
+        "description": "Admin-only DIRECT write of device port tunables.\n\nCovers port-mode (access/trunk), native/untagged VLAN, tagged VLANs, MTU and\nadmin enable/disable. Declared BEFORE the metadata ``:path`` route. Immediate\ncommit, no approval gate; 403 for non-admin, 422 if no field is set.",
+        "operationId": "set_port_config_api_devices__device_id__ports__port_name__config_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "port_name",
+            "required": true,
+            "schema": {
+              "title": "Port Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortConfigIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Port Config Api Devices  Device Id  Ports  Port Name  Config Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Port Config",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/ports/{port_name}/description": {
+      "patch": {
+        "description": "Admin-only DIRECT write of the on-device port description.\n\nDeclared BEFORE the metadata ``:path`` route so ``\u2026/description`` matches\nhere, not as a port named ``\u2026/description``.",
+        "operationId": "set_port_description_api_devices__device_id__ports__port_name__description_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "port_name",
+            "required": true,
+            "schema": {
+              "title": "Port Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortDescriptionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Set Port Description Api Devices  Device Id  Ports  Port Name  Description Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Port Description",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/protocols/{slug}": {
+      "get": {
+        "description": "Operational detail (named tables) for one protocol \u2014 e.g. OSPF neighbors\n+ link-state database. Parsed from device CLI gets via TextFSM.",
+        "operationId": "get_protocol_detail_api_devices__device_id__protocols__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtocolDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Protocol Detail",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/system": {
+      "get": {
+        "description": "Live system snapshot: control-plane protocols, mgmt services, MAC table.\n\nSections a driver can't reach come back empty (``mac_supported=false``\ndistinguishes an unreadable MAC table from a genuinely empty one).",
+        "operationId": "get_system_info_api_devices__device_id__system_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemInfoOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get System Info",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/vlans": {
+      "get": {
+        "description": "The device's VLAN database: id, name, description, L3 SVI, member-port\ncount. Backs the VLANs view and the request VLAN picker.",
+        "operationId": "get_vlans_api_devices__device_id__vlans_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VlanInfoOut"
+                  },
+                  "title": "Response Get Vlans Api Devices  Device Id  Vlans Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Vlans",
+        "tags": [
+          "ports"
+        ]
+      }
+    },
+    "/api/platforms": {
+      "get": {
+        "operationId": "list_platforms_api_platforms_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlatformInfo"
+                  },
+                  "title": "Response List Platforms Api Platforms Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Platforms",
+        "tags": [
+          "platforms"
+        ]
+      }
+    },
+    "/api/requests": {
+      "get": {
+        "description": "List requests.\n\nNon-admin callers ALWAYS see only their own requests \u2014 the client ``?mine``\nflag is ignored for them so it cannot be used to enumerate others' requests.\nAdmins see every request and may narrow with ``?mine`` / ``?request_status``.",
+        "operationId": "list_requests_api_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Mine",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "request_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ChangeRequestStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Request Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RequestOut"
+                  },
+                  "title": "Response List Requests Api Requests Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Requests",
+        "tags": [
+          "requests"
+        ]
+      },
+      "post": {
+        "description": "File a change request. 403 if the target device is read-only (fail fast).",
+        "operationId": "create_request_api_requests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Request",
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/requests/{request_id}": {
+      "get": {
+        "description": "Request detail, including the rendered diff if available.\n\nNon-admin callers may only read their own request; a foreign id returns 404\n(object-level authz \u2014 see :func:`_assert_can_read`).",
+        "operationId": "get_request_api_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Request",
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/requests/{request_id}/apply": {
+      "post": {
+        "description": "Apply an approved (or pending, approve+apply shortcut) request via the driver.",
+        "operationId": "apply_request_api_requests__request_id__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Apply Request",
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/requests/{request_id}/approve": {
+      "post": {
+        "description": "Approve (no apply). pending \u2192 approved.",
+        "operationId": "approve_request_api_requests__request_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve Request",
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/requests/{request_id}/confirm": {
+      "post": {
+        "description": "Confirm a commit-confirm apply within its window. awaiting_confirm \u2192 applied.",
+        "operationId": "confirm_request_api_requests__request_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Request",
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/requests/{request_id}/reject": {
+      "post": {
+        "description": "Reject with a required comment. pending \u2192 rejected.",
+        "operationId": "reject_request_api_requests__request_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestRejectIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reject Request",
+        "tags": [
+          "requests"
+        ]
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "description": "Return the current admin-tunable settings.",
+        "operationId": "get_runtime_settings_api_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Runtime Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "description": "Update runtime settings (admin). 422 on an invalid rate-limit string.",
+        "operationId": "update_runtime_settings_api_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Runtime Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/sites": {
+      "get": {
+        "description": "List every site in the catalog, with live device counts.",
+        "operationId": "list_sites_api_sites_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SiteOut"
+                  },
+                  "title": "Response List Sites Api Sites Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Sites",
+        "tags": [
+          "sites"
+        ]
+      },
+      "post": {
+        "description": "Create a new site (admin only). Slug must be unique.",
+        "operationId": "create_site_api_sites_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiteCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Site",
+        "tags": [
+          "sites"
+        ]
+      }
+    },
+    "/api/sites/{site_id}": {
+      "delete": {
+        "description": "Delete a site (admin only). Blocked if any device is still assigned.",
+        "operationId": "delete_site_api_sites__site_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Site",
+        "tags": [
+          "sites"
+        ]
+      },
+      "patch": {
+        "description": "Rename a site (admin only). The slug is immutable to keep URLs stable.",
+        "operationId": "rename_site_api_sites__site_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "site_id",
+            "required": true,
+            "schema": {
+              "title": "Site Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiteUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Rename Site",
+        "tags": [
+          "sites"
+        ]
+      }
+    },
+    "/api/users": {
+      "get": {
+        "description": "List all users (admin only).",
+        "operationId": "list_users_api_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UserOut"
+                  },
+                  "title": "Response List Users Api Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Users",
+        "tags": [
+          "users"
+        ]
+      },
+      "post": {
+        "description": "Create a user with a hashed password (admin only). 409 on duplicate name.",
+        "operationId": "create_user_api_users_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/users/me": {
+      "get": {
+        "description": "Return the currently authenticated user.",
+        "operationId": "read_me_api_users_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Me",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    }
+  }
+}
