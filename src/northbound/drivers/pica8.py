@@ -25,6 +25,7 @@ PicOS's xorplus XML and our PortState (no library does that).
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 import uuid
@@ -303,12 +304,21 @@ class Pica8Driver(Driver):
 
     async def render_change(self, port: str, change: PortChange) -> ConfigDiff:
         token = f"pica8-{uuid.uuid4().hex[:8]}"
-        xml_payload = _build_edit_config_xml(port, change)
+        main = _build_edit_config_xml(port, change)
+        # Setting (non-empty) tagged VLANs on a trunk is a two-phase write: phase 1
+        # clears the keyed <members> list, phase 2 installs the new set. Otherwise
+        # a single payload suffices.
+        mode = change.port_mode or ("trunk" if change.tagged_vlans is not None else None)
+        commands: tuple[str, ...]
+        if change.tagged_vlans and mode == "trunk":
+            commands = (_clear_vlan_xml(port), main)
+        else:
+            commands = (main,)
         return ConfigDiff(
             summary=f"Update {port}",
             raw_before=f"<!-- previous state for {port} not captured -->",
-            raw_after=xml_payload,
-            commands=(xml_payload,),
+            raw_after="\n".join(commands),
+            commands=commands,
             metadata={_TOKEN_KEY: token},
         )
 
@@ -326,25 +336,35 @@ class Pica8Driver(Driver):
                 confirm_deadline_at=None,
                 error="ConfigDiff missing pending_token or commands",
             )
-        xml_payload = diff.commands[0]
-        # A targeted delete (clearing a leaf) needs default-operation="none": the
-        # key nodes select the target and only the operation="delete" node acts.
-        # Under the default "merge", xorplus silently keeps the existing leaf.
-        default_op = "none" if 'operation="delete"' in xml_payload else None
+        # xorplus has no :confirmed-commit, so every phase is a plain commit and
+        # there is no revert window. A change may need >1 phase (a trunk tagged-VLAN
+        # write is clear-then-set); each phase is its own clean discard→edit→commit
+        # so a keyed <members> list is wiped before the new set is merged in.
         try:
-            await self._netconf.edit_config(
-                target="candidate", config=xml_payload, default_operation=default_op
-            )
-            # PicOS/xorplus does NOT advertise :confirmed-commit (a confirmed
-            # commit errors "Server does not support [:confirmed-commit]"). When
-            # absent, fall back to a plain commit: the change is permanent
-            # immediately, so there is no pending token / revert window.
             confirmed = await self._netconf.supports(":confirmed-commit")
-            await self._netconf.commit(
-                confirmed=confirmed,
-                timeout=confirm_seconds if confirmed else None,
-            )
+            for xml_payload in diff.commands:
+                # A targeted delete (clearing a leaf) needs default-operation="none":
+                # only the operation-tagged node acts; under "merge" xorplus keeps
+                # the existing leaf. remove/replace work under the default merge.
+                default_op = "none" if 'operation="delete"' in xml_payload else None
+                # Clean candidate first: a prior apply that failed AFTER edit_config
+                # leaves its edit staged; without this, retries stack <interface>
+                # blocks → commit fails 'Duplicate key "interface:id"'. (discard only
+                # touches the uncommitted candidate, never a committed prior phase.)
+                with contextlib.suppress(Exception):
+                    await self._netconf.discard_changes()
+                await self._netconf.edit_config(
+                    target="candidate", config=xml_payload, default_operation=default_op
+                )
+                await self._netconf.commit(
+                    confirmed=confirmed,
+                    timeout=confirm_seconds if confirmed else None,
+                )
         except Exception as exc:
+            # Don't leave the rejected edit staged in the candidate — it would
+            # collide with the next apply. Discard is best-effort.
+            with contextlib.suppress(Exception):
+                await self._netconf.discard_changes()
             return ApplyResult(
                 success=False,
                 confirm_token=None,
@@ -1090,6 +1110,21 @@ def _build_edit_config_xml(port: str, change: PortChange) -> str:
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
 
 
+def _clear_vlan_xml(port: str) -> str:
+    """Phase-1 payload: remove a port's whole ``<vlan>`` subtree (clears members).
+
+    Run before a trunk tagged-VLAN set so the keyed <members> list starts empty
+    and the phase-2 merge can't collide ('Duplicate key "interface:id"').
+    """
+    cfg = etree.Element("config")
+    iface = etree.SubElement(cfg, "interface", nsmap={None: _XORPLUS_IFACE_NS})
+    ge = etree.SubElement(iface, "gigabit-ethernet")
+    etree.SubElement(ge, "name").text = port
+    eth = etree.SubElement(etree.SubElement(ge, "family"), "ethernet-switching")
+    etree.SubElement(eth, "vlan").set(f"{{{_NC_BASE_NS}}}operation", "remove")
+    return etree.tostring(cfg, pretty_print=True).decode("utf-8")
+
+
 def _append_switching(ge: etree._Element, change: PortChange) -> None:
     """Append ``<family><ethernet-switching>`` (port-mode + VLANs) when relevant.
 
@@ -1109,8 +1144,18 @@ def _append_switching(ge: etree._Element, change: PortChange) -> None:
         if change.untagged_vlan is not None:
             etree.SubElement(eth, "native-vlan-id").text = str(change.untagged_vlan)
         if change.tagged_vlans is not None:
-            members = etree.SubElement(etree.SubElement(eth, "vlan"), "members")
-            etree.SubElement(members, "id").text = ",".join(str(v) for v in change.tagged_vlans)
+            # <members> is a list keyed by <id>: a plain merge APPENDS a new entry,
+            # so merging a changed set stacks duplicates and the commit fails with
+            # 'Duplicate key "interface:id"'. A tagged write is therefore applied in
+            # TWO phases (see render_change): phase 1 removes the whole <vlan>
+            # subtree, phase 2 (this payload) merges the new members into the now-
+            # empty list → one clean <members> entry. Empty list ⇒ just remove.
+            vlan = etree.SubElement(eth, "vlan")
+            if change.tagged_vlans:
+                members = etree.SubElement(vlan, "members")
+                etree.SubElement(members, "id").text = ",".join(str(v) for v in change.tagged_vlans)
+            else:
+                vlan.set(f"{{{_NC_BASE_NS}}}operation", "remove")
     else:  # access
         # xorplus access ports carry their VLAN in <native-vlan-id>, NOT
         # <vlan><members> — the device rejects members in access mode

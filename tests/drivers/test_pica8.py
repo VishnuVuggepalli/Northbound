@@ -195,6 +195,46 @@ def test_render_change_explicit_trunk_native_and_tagged() -> None:
     assert root.findtext(".//{*}port-mode") == "trunk"
     assert root.findtext(".//{*}native-vlan-id") == "1010"
     assert root.find(".//{*}members/{*}id").text == "1002,1003"
+    # The members merge is plain (no operation): the keyed <members> list is wiped
+    # in render_change's phase-1 clear, so phase 2 merges into an empty list.
+    vlan = root.find(".//{*}vlan")
+    assert vlan is not None
+    assert vlan.get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation") is None
+
+
+@pytest.mark.asyncio
+async def test_render_change_trunk_tagged_is_two_phase() -> None:
+    # Trunk tagged-VLAN write = phase 1 clear (remove <vlan>) + phase 2 set members.
+    drv, _ = _make_driver()
+    diff = await drv.render_change(
+        "ge-1/1/1", PortChange(port_mode="trunk", untagged_vlan=10, tagged_vlans=[20, 30])
+    )
+    assert len(diff.commands) == 2
+    phase1 = etree.fromstring(diff.commands[0].encode())
+    assert (
+        phase1.find(".//{*}vlan").get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation")
+        == "remove"
+    )
+    assert phase1.find(".//{*}members") is None  # phase 1 only clears
+    phase2 = etree.fromstring(diff.commands[1].encode())
+    assert phase2.find(".//{*}members/{*}id").text == "20,30"
+
+
+@pytest.mark.asyncio
+async def test_render_change_access_is_single_phase() -> None:
+    drv, _ = _make_driver()
+    diff = await drv.render_change("ge-1/1/1", PortChange(port_mode="access", untagged_vlan=10))
+    assert len(diff.commands) == 1
+
+
+def test_render_change_trunk_empty_tagged_removes_vlan() -> None:
+    # Trunk with no tagged VLANs clears the member list → remove the <vlan> subtree.
+    xml = _build_edit_config_xml("xe-1/1/2", PortChange(port_mode="trunk", tagged_vlans=[]))
+    root = etree.fromstring(xml.encode("utf-8"))
+    vlan = root.find(".//{*}vlan")
+    assert vlan is not None
+    assert vlan.get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation") == "remove"
+    assert root.find(".//{*}members") is None
 
 
 def test_render_change_empty_description_emits_delete_operation() -> None:
@@ -286,6 +326,35 @@ async def test_apply_change_calls_commit_confirmed() -> None:
     assert confirmed is True
     # ncclient needs the confirm-timeout as str (lxml text); wrapper coerces.
     assert timeout == "45"
+
+
+@pytest.mark.asyncio
+async def test_apply_change_discards_candidate_before_edit() -> None:
+    # Regression: a prior failed apply can leave its edit staged in the candidate.
+    # apply_change must discard BEFORE edit_config, else retries stack <interface>
+    # blocks and commit fails with 'Duplicate key "interface:id"'.
+    drv, fake = _make_driver()
+    diff = await drv.render_change("ge-1/1/1", PortChange(untagged_vlan=10))
+    await drv.apply_change(diff)
+    ops = [c[0] for c in fake.calls]
+    assert "discard_changes" in ops
+    assert ops.index("discard_changes") < ops.index("edit_config")
+
+
+@pytest.mark.asyncio
+async def test_apply_change_discards_candidate_on_failure() -> None:
+    # A rejected edit/commit must not leave the candidate dirty for the next apply.
+    drv, fake = _make_driver()
+
+    def _boom(*_a: object, **_k: object) -> str:
+        raise RuntimeError("Datastore fails to validate")
+
+    fake.commit = _boom  # type: ignore[assignment, method-assign]
+    diff = await drv.render_change("ge-1/1/1", PortChange(untagged_vlan=10))
+    result = await drv.apply_change(diff)
+    assert result.success is False
+    # discard called twice: once pre-edit, once on the failure path.
+    assert [c[0] for c in fake.calls].count("discard_changes") >= 2
 
 
 @pytest.mark.asyncio
