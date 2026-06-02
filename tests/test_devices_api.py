@@ -31,7 +31,7 @@ from northbound.models.audit_log import AuditLog
 from northbound.models.change_request import ChangeRequest
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
-from northbound.models.enums import ChangeRequestStatus, DeviceRole, Environment, UserRole
+from northbound.models.enums import ChangeRequestStatus, DeviceRole, UserRole
 from northbound.models.port_metadata import PortMetadata
 from northbound.models.user import User
 from northbound.schemas.driver import (
@@ -558,7 +558,7 @@ async def test_delete_blocked_by_change_request_history_409(
 def _device(role: DeviceRole, platform: str = "mock") -> Device:
     return Device(
         name="x",
-        environment=Environment.LAB,
+        environment="lab",
         platform=platform,
         role=role,
         mgmt_ip="10.0.0.1",

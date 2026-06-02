@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.models.port_metadata import PortMetadata
 from northbound.schemas.driver import Credentials, DiscoveryResult
 from northbound.services import audit
@@ -58,7 +58,7 @@ async def onboard_device(
     session: AsyncSession,
     *,
     name: str,
-    environment: Environment,
+    environment: str,
     role: DeviceRole,
     platform_id: str,
     mgmt_ip: str,

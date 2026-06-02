@@ -15,11 +15,13 @@ import northbound.drivers.arista
 import northbound.drivers.cisco
 import northbound.drivers.mock
 import northbound.drivers.pica8  # noqa: F401  (registers)
-from northbound.api import audit, auth, devices, platforms, ports, requests, users
+from northbound.api import audit, auth, devices, platforms, ports, requests, sites, users
 from northbound.api.limiter import limiter
 from northbound.api.static_spa import mount_spa
 from northbound.config import get_settings
+from northbound.db import async_session_factory
 from northbound.services.scheduler import build_scheduler
+from northbound.services.sites import ensure_default_sites
 
 logger = logging.getLogger("northbound.main")
 
@@ -49,6 +51,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     jobs (reachability poll, nightly backup, audit verify, reconciler) run here.
     """
     settings = get_settings()
+
+    # Seed the default Lab/DC sites so a fresh DB has a usable catalog. Idempotent
+    # and resilient: a missing ``sites`` table (migration not yet run) only logs.
+    try:
+        async with async_session_factory() as session, session.begin():
+            await ensure_default_sites(session)
+    except Exception:
+        logger.warning("default-site seed skipped (sites table missing?)", exc_info=True)
+
     scheduler: AsyncIOScheduler | None = None
     if settings.enable_scheduler:
         scheduler = build_scheduler(settings)
@@ -83,6 +94,7 @@ app.include_router(platforms.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(devices.router)
+app.include_router(sites.router)
 app.include_router(ports.router)
 app.include_router(requests.router)
 app.include_router(audit.router)

@@ -14,9 +14,11 @@ class UserRole(StrEnum):
     REQUESTER = "requester"
 
 
-class Environment(StrEnum):
-    LAB = "lab"
-    DC = "dc"
+# NOTE: a device's site (formerly the fixed "environment" enum of lab/dc) is now
+# a free-form slug string referencing the runtime-managed ``sites`` catalog
+# (see northbound.models.site.Site) — mirroring how ``platform`` is a free-form
+# string backed by the platforms catalog. Admins add sites at runtime; no enum,
+# no migration per new site.
 
 
 class DeviceRole(StrEnum):

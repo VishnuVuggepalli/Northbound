@@ -18,7 +18,7 @@ from northbound.models.change_request_event import ChangeRequestEvent
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus as S
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.models.user import User
 from northbound.schemas.driver import (
     ApplyResult,
@@ -149,7 +149,7 @@ async def _device(db_session: AsyncSession, platform: str) -> Device:
     vault = FernetCredVault.from_settings()
     device = Device(
         name=f"dev-{platform}",
-        environment=Environment.LAB,
+        environment="lab",
         platform=platform,
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.7",
@@ -331,7 +331,7 @@ async def test_apply_failure_persists_through_get_session(
         await seed.flush()
         device = Device(
             name="dev-applyfail-http",
-            environment=Environment.LAB,
+            environment="lab",
             platform="applyfail",
             role=DeviceRole.LEAF,
             mgmt_ip="10.0.0.77",

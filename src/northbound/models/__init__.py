@@ -15,10 +15,10 @@ from northbound.models.device import Device
 from northbound.models.enums import (
     ChangeRequestStatus,
     DeviceRole,
-    Environment,
     UserRole,
 )
 from northbound.models.port_metadata import PortMetadata
+from northbound.models.site import Site
 from northbound.models.user import User
 
 __all__ = [
@@ -29,8 +29,8 @@ __all__ = [
     "ConfigBackup",
     "Device",
     "DeviceRole",
-    "Environment",
     "PortMetadata",
+    "Site",
     "User",
     "UserRole",
 ]

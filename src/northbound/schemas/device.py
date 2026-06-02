@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.schemas.driver import Credentials, DriverCapabilities
 
 
@@ -54,7 +54,7 @@ class DeviceCreateIn(BaseModel):
     """Body of ``POST /api/devices`` — atomic onboard."""
 
     name: str = Field(min_length=1, max_length=128)
-    environment: Environment
+    environment: str = Field(min_length=1, max_length=64)  # site slug; must exist in catalog
     role: DeviceRole
     platform_id: str = Field(min_length=1, max_length=64)
     mgmt_ip: str = Field(min_length=1, max_length=64)
@@ -113,7 +113,7 @@ class DeviceOut(BaseModel):
 
     id: str
     name: str
-    environment: Environment
+    environment: str  # site slug
     role: DeviceRole
     platform: str
     mgmt_ip: str

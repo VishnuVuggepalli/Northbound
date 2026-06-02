@@ -22,7 +22,7 @@ from northbound.db import get_session
 from northbound.main import app
 from northbound.models.audit_log import AuditLog
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment, UserRole
+from northbound.models.enums import DeviceRole, UserRole
 from northbound.models.port_metadata import PortMetadata
 from northbound.models.user import User
 from northbound.schemas.driver import Credentials
@@ -50,7 +50,7 @@ async def seeded(
     alice = User(username="alice", password_hash=hash_password("b"), role=UserRole.REQUESTER)
     leaf = Device(
         name="lab-leaf",
-        environment=Environment.LAB,
+        environment="lab",
         platform="mock",
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.5",

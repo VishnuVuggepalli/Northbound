@@ -24,7 +24,7 @@ from northbound.config import get_settings
 from northbound.db import get_session
 from northbound.main import app
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment, UserRole
+from northbound.models.enums import DeviceRole, UserRole
 from northbound.models.user import User
 from northbound.schemas.driver import Credentials
 from northbound.services import port_state
@@ -49,7 +49,7 @@ async def seeded(
     alice = User(username="alice", password_hash=hash_password("b"), role=UserRole.REQUESTER)
     leaf = Device(
         name="lab-leaf",
-        environment=Environment.LAB,
+        environment="lab",
         platform="mock",
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.5",
@@ -58,7 +58,7 @@ async def seeded(
     )
     router = Device(
         name="core-router",
-        environment=Environment.DC,
+        environment="dc",
         platform="mock",
         role=DeviceRole.ROUTER,
         mgmt_ip="10.0.0.1",

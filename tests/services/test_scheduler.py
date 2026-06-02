@@ -21,7 +21,7 @@ from northbound.config import Settings
 from northbound.main import lifespan
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.services import audit, reachability, reconciler, scheduler
 from northbound.services.scheduler import (
     JOB_NIGHTLY_BACKUP,
@@ -145,7 +145,7 @@ async def test_nightly_backup_one_failure_does_not_abort_batch(
     # the job swallows per-device. The mock device must still be backed up.
     broken = Device(
         name="broken-box",
-        environment=Environment.LAB,
+        environment="lab",
         platform="does_not_exist",
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.99",

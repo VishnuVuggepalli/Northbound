@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from northbound.drivers import registry
 from northbound.drivers.base import Driver
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.models.port_metadata import PortMetadata
 from northbound.schemas.driver import (
     AuthMethod,
@@ -98,7 +98,7 @@ async def counting_device(db_session: AsyncSession) -> Device:
     vault = FernetCredVault.from_settings()
     device = Device(
         name="lab-counting-1",
-        environment=Environment.LAB,
+        environment="lab",
         platform="counting",
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.9",

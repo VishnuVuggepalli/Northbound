@@ -54,10 +54,11 @@ from northbound.auth.password import hash_password
 from northbound.config import get_settings
 from northbound.db import Base, async_session_factory, engine
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment, UserRole
+from northbound.models.enums import DeviceRole, UserRole
 from northbound.models.user import User
 from northbound.schemas.driver import Credentials
 from northbound.services.credvault import FernetCredVault, serialize_credentials
+from northbound.services.sites import ensure_default_sites
 
 logger = logging.getLogger("northbound.seed")
 
@@ -175,13 +176,13 @@ async def seed_users(session: AsyncSession) -> int:
 _SAMPLE_DEVICES: tuple[dict[str, object], ...] = (
     {
         "name": "lab-leaf-01",
-        "environment": Environment.LAB,
+        "environment": "lab",
         "role": DeviceRole.LEAF,
         "mgmt_ip": "10.0.0.11",
     },
     {
         "name": "lab-spine-01",
-        "environment": Environment.DC,
+        "environment": "dc",
         "role": DeviceRole.SPINE,
         "mgmt_ip": "10.0.0.21",
     },
@@ -237,6 +238,9 @@ async def run(*, use_alembic: bool, with_sample_devices: bool) -> None:
 
     async with async_session_factory() as session:
         users_created = await seed_users(session)
+        # Default Lab/DC sites are baseline (the onboarding flow validates the
+        # site catalog), so seed them regardless of --with-sample-devices.
+        await ensure_default_sites(session)
         devices_created = 0
         if with_sample_devices:
             devices_created = await seed_sample_devices(session)

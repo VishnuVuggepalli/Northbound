@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from northbound.models.change_request_event import ChangeRequestEvent
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus as S
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.models.user import User
 from northbound.schemas.driver import PortChange
 from northbound.services import requests
@@ -47,7 +47,7 @@ async def test_create_against_router_is_403(
     _, alice = users
     router = Device(
         name="core-router",
-        environment=Environment.DC,
+        environment="dc",
         platform="mock",
         role=DeviceRole.ROUTER,
         mgmt_ip="10.0.0.1",

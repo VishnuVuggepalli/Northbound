@@ -25,7 +25,6 @@ from northbound.drivers.base import AuthError, DriverError, ReachabilityError
 from northbound.drivers.factory import driver_for, driver_from_params
 from northbound.drivers.registry import get_driver_class
 from northbound.models.device import Device
-from northbound.models.enums import Environment
 from northbound.models.user import User
 from northbound.schemas.device import (
     ConnectionTestIn,
@@ -47,6 +46,7 @@ from northbound.services import audit, reachability
 from northbound.services.credvault import FernetCredVault, serialize_credentials
 from northbound.services.device_policy import is_writable
 from northbound.services.onboarding import onboard_device
+from northbound.services.sites import site_exists
 
 logger = logging.getLogger("northbound.api.devices")
 
@@ -194,6 +194,11 @@ async def create_device(
     the whole unit back, leaving no orphan device or ports.
     """
     _require_known_platform(body.platform_id)
+    if not await site_exists(session, body.environment):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown site: {body.environment}. Create it first via POST /api/sites.",
+        )
     creds: Credentials = body.credentials.to_credentials()
 
     # Step 6: re-run discovery (outside the transaction). No DB hit on failure.
@@ -251,9 +256,9 @@ async def create_device(
 async def list_devices(
     _user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    environment: Environment | None = None,
+    environment: str | None = None,
 ) -> list[DeviceOut]:
-    """List devices (optional ``?environment=`` filter). Never returns creds."""
+    """List devices (optional ``?environment=<site slug>`` filter). Never returns creds."""
     stmt = select(Device).order_by(Device.name)
     if environment is not None:
         stmt = stmt.where(Device.environment == environment)

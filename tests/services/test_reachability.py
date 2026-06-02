@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from northbound.drivers import registry
 from northbound.drivers.base import ReachabilityError
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.schemas.driver import (
     AuthMethod,
     ConnectionParams,
@@ -139,7 +139,7 @@ async def test_poll_marks_unreachable_without_raising(
     """A driver that raises in reachable() → reachable=False, no exception."""
     device = Device(
         name="down-box",
-        environment=Environment.LAB,
+        environment="lab",
         platform="unreachable_test",
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.9",
