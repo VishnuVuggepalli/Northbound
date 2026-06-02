@@ -1,9 +1,20 @@
 import { useMemo, useState } from 'react';
 import { Loader2, Network, ShieldCheck, Table2 } from 'lucide-react';
 import { useSystemInfo } from '@/api/queries';
+import { Section } from '@/components/ui/Section';
+import { KV } from '@/components/ui/KV';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Input } from '@/components/ui/Input';
 import type { Device } from '@/types';
+
+function SectionTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-2">
+      {icon}
+      {children}
+    </span>
+  );
+}
 
 interface DeviceSystemViewProps {
   device: Device;
@@ -43,81 +54,84 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   }
 
   return (
-    <div className="h-full overflow-auto nb-scroll p-4">
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Protocols */}
-        <section className="rounded-lg border border-border bg-bg-elev-1/40 p-4">
-          <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-fg">
-            <Network size={14} className="text-accent" /> Control-plane protocols
-          </h3>
-          {data.protocols.length === 0 ? (
-            <p className="text-xs text-fg-subtle">None configured.</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {data.protocols.map((p) => (
-                <li key={p.name} className="flex items-center justify-between text-sm">
+    <div className="h-full overflow-auto nb-scroll px-4">
+      <Section title={<SectionTitle icon={<Network size={13} className="text-accent" />}>Control-plane protocols</SectionTitle>}>
+        {data.protocols.length === 0 ? (
+          <p className="px-1 text-xs text-fg-subtle">None configured.</p>
+        ) : (
+          <ul className="space-y-2.5 px-1">
+            {data.protocols.map((p) => (
+              <li key={p.name} className="text-sm">
+                <div className="flex items-center justify-between">
                   <span className="flex items-center gap-2 text-fg">
                     <StatusDot state={p.enabled ? 'up' : 'off'} size={6} />
                     {p.name}
                   </span>
-                  {p.detail && <span className="nb-mono text-xs text-fg-subtle">{p.detail}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* Mgmt services */}
-        <section className="rounded-lg border border-border bg-bg-elev-1/40 p-4">
-          <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-fg">
-            <ShieldCheck size={14} className="text-accent" /> Management services
-          </h3>
-          {data.services.length === 0 ? (
-            <p className="text-xs text-fg-subtle">None reported.</p>
-          ) : (
-            <ul className="space-y-1.5">
-              {data.services.map((s) => (
-                <li key={s.name} className="flex items-center justify-between text-sm">
-                  <span className="flex items-center gap-2 text-fg">
-                    <StatusDot state={s.enabled ? 'up' : 'off'} size={6} />
-                    {s.name}
+                  <span className="nb-mono text-xs text-fg-subtle">
+                    {p.enabled ? p.detail : 'disabled'}
                   </span>
-                  {s.port != null && (
-                    <span className="nb-mono text-xs text-fg-subtle">:{s.port}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
+                </div>
+                {p.enabled && p.params.length > 0 && (
+                  <dl className="ml-4 mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+                    {p.params.map(([k, v]) => (
+                      <KV key={k} label={k}>
+                        <span className="nb-mono text-fg-muted">{v}</span>
+                      </KV>
+                    ))}
+                  </dl>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
 
-      {/* MAC table */}
-      <section className="mt-4 rounded-lg border border-border bg-bg-elev-1/40 p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-fg">
-            <Table2 size={14} className="text-accent" /> MAC address table
-            <span className="nb-mono text-xs text-fg-subtle">
+      <Section title={<SectionTitle icon={<ShieldCheck size={13} className="text-accent" />}>Management services</SectionTitle>}>
+        {data.services.length === 0 ? (
+          <p className="px-1 text-xs text-fg-subtle">None reported.</p>
+        ) : (
+          <ul className="space-y-1.5 px-1">
+            {data.services.map((s) => (
+              <li key={s.name} className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2 text-fg">
+                  <StatusDot state={s.enabled ? 'up' : 'off'} size={6} />
+                  {s.name}
+                </span>
+                {s.port != null && <span className="nb-mono text-xs text-fg-subtle">:{s.port}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      <Section
+        title={
+          <SectionTitle icon={<Table2 size={13} className="text-accent" />}>
+            MAC address table
+            <span className="nb-mono ml-1 text-xs text-fg-subtle">
               {data.mac_supported ? `${data.mac_table.length} entries` : 'not available'}
             </span>
-          </h3>
-          {data.mac_supported && data.mac_table.length > 0 && (
+          </SectionTitle>
+        }
+        right={
+          data.mac_supported && data.mac_table.length > 0 ? (
             <Input
               placeholder="Filter by MAC / VLAN / interface…"
               value={macFilter}
               onChange={(e) => setMacFilter(e.target.value)}
               className="h-8 w-64 text-xs"
             />
-          )}
-        </div>
+          ) : undefined
+        }
+      >
         {!data.mac_supported ? (
-          <p className="text-xs text-fg-subtle">
+          <p className="px-1 text-xs text-fg-subtle">
             This device&apos;s management API does not expose the forwarding table.
           </p>
         ) : macRows.length === 0 ? (
-          <p className="text-xs text-fg-subtle">No matching entries.</p>
+          <p className="px-1 text-xs text-fg-subtle">No matching entries.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto px-1">
             <table className="w-full border-collapse text-left text-xs">
               <thead>
                 <tr className="border-b border-border text-fg-subtle">
@@ -142,7 +156,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
             </table>
           </div>
         )}
-      </section>
+      </Section>
     </div>
   );
 }

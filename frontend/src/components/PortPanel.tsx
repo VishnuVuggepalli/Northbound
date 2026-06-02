@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { AlertCircle, Clock, Network, RefreshCw, Send, X } from 'lucide-react';
+import { AlertCircle, Clock, Network, Pencil, RefreshCw, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Textarea } from '@/components/ui/Input';
 import { Section } from '@/components/ui/Section';
+import { KV } from '@/components/ui/KV';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { VlanChip } from '@/components/ui/VlanChip';
 import { Kbd } from '@/components/ui/Kbd';
 import { Diff } from '@/components/Diff';
 import { VendorActions } from '@/components/VendorActions';
-import { renderConfigSnippet } from '@/lib/config';
 import { portToRequestedChanges, mergeChange } from '@/lib/config';
 import { fmtAge, formatSpeed, timeAgo, timeAgoMin } from '@/lib/format';
 import type { ThemeMode } from '@/lib/palette';
@@ -18,7 +19,7 @@ import type {
   Port,
   User,
 } from '@/types';
-import { useApplyRequest, usePlatforms, useRejectRequest } from '@/api/queries';
+import { useApplyRequest, usePlatforms, useRejectRequest, useUpdatePortMetadata } from '@/api/queries';
 import { pushToast } from '@/store/toast';
 import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
 
@@ -84,6 +85,25 @@ export function PortPanel({
 
   const apply = useApplyRequest();
   const reject = useRejectRequest();
+  const updateMeta = useUpdatePortMetadata(device.id);
+
+  // Notes editing (admin-only). Local draft seeded from the port; reset when the
+  // selected port changes (key on the aside remounts, but guard anyway).
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notesDraft, setNotesDraft] = useState(port.notes ?? '');
+  const saveNotes = () => {
+    updateMeta.mutate(
+      { portName: port.name, patch: { notes: notesDraft } },
+      {
+        onSuccess: () => {
+          setEditingNotes(false);
+          pushToast({ kind: 'success', message: 'Notes saved.' });
+        },
+        onError: (e: unknown) =>
+          pushToast({ kind: 'error', message: e instanceof Error ? e.message : 'Save failed.' }),
+      },
+    );
+  };
 
   return (
     <aside
@@ -160,23 +180,63 @@ export function PortPanel({
       <div className="nb-scroll flex-1 space-y-1 overflow-y-auto px-4">
         <Section title="Overview">
           <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1.5 text-xs">
-            <KV k="Description">
+            <KV label="Description">
               <span className="nb-mono text-[11px]">{port.description || '—'}</span>
             </KV>
-            <KV k="Host model">{port.host_model || '—'}</KV>
-            <KV k="BMC IP">
+            <KV label="Host model">{port.host_model || '—'}</KV>
+            <KV label="BMC IP">
               <span className="nb-mono text-[11px]">{port.bmc_ip || '—'}</span>
             </KV>
-            <KV k="MAC">
+            <KV label="MAC">
               <span className="nb-mono text-[11px]">{port.mac || '—'}</span>
             </KV>
-            <KV k="Speed">{formatSpeed(port.speed_mbps)}</KV>
-            <KV k="Duplex">{port.duplex ?? '—'}</KV>
-            <KV k="MTU">{port.mtu}</KV>
+            <KV label="Speed">{formatSpeed(port.speed_mbps)}</KV>
+            <KV label="Duplex">{port.duplex ?? '—'}</KV>
+            <KV label="MTU">{port.mtu}</KV>
           </dl>
           <div className="mt-3 rounded-md border border-border bg-bg-elev-1 p-2.5 text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-fg-subtle">Notes</div>
-            <div className="mt-1 text-fg">{port.notes || <em className="text-fg-subtle">No notes</em>}</div>
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-wider text-fg-subtle">Notes</div>
+              {isAdmin && !editingNotes && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotesDraft(port.notes ?? '');
+                    setEditingNotes(true);
+                  }}
+                  className="flex items-center gap-1 text-[10px] text-accent hover:underline"
+                >
+                  <Pencil size={10} /> Edit
+                </button>
+              )}
+            </div>
+            {editingNotes ? (
+              <div className="mt-1.5 space-y-1.5">
+                <Textarea
+                  value={notesDraft}
+                  onChange={(e) => setNotesDraft(e.target.value)}
+                  rows={3}
+                  placeholder="Operational notes for this port…"
+                  className="text-[11px]"
+                />
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={saveNotes} disabled={updateMeta.isPending}>
+                    {updateMeta.isPending ? 'Saving…' : 'Save'}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingNotes(false)}
+                    className="text-xs text-fg-subtle hover:text-fg"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-1 text-fg">
+                {port.notes || <em className="text-fg-subtle">No notes</em>}
+              </div>
+            )}
           </div>
         </Section>
 
@@ -229,40 +289,25 @@ export function PortPanel({
           </Section>
         )}
 
-        <Section
-          title="Live config"
-          right={
-            <button
-              type="button"
-              onClick={onRefetch}
-              className="flex items-center gap-1 text-xs text-accent hover:underline"
-            >
-              <RefreshCw size={12} /> Refetch
-            </button>
-          }
-        >
-          <pre className="nb-mono overflow-x-auto rounded-md border border-border bg-bg-elev-1 p-2.5 text-[11px] leading-relaxed">
-            <code>{renderConfigSnippet(device, port)}</code>
-          </pre>
-        </Section>
-
-        <Section title="Services">
-          <div className="flex flex-wrap gap-1.5">
-            {Object.entries(port.services).map(([k, on]) => (
-              <span
-                key={k}
-                className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${
-                  on
-                    ? 'border-success/30 bg-success/10 text-success'
-                    : 'border-border bg-bg-elev-1 text-fg-subtle'
-                }`}
-              >
-                <StatusDot state={on ? 'up' : 'off'} size={5} />
-                <span>{k.toUpperCase()}</span>
-              </span>
-            ))}
-          </div>
-        </Section>
+        {Object.keys(port.services).length > 0 && (
+          <Section title="Services">
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(port.services).map(([k, on]) => (
+                <span
+                  key={k}
+                  className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${
+                    on
+                      ? 'border-success/30 bg-success/10 text-success'
+                      : 'border-border bg-bg-elev-1 text-fg-subtle'
+                  }`}
+                >
+                  <StatusDot state={on ? 'up' : 'off'} size={5} />
+                  <span>{k.toUpperCase()}</span>
+                </span>
+              ))}
+            </div>
+          </Section>
+        )}
 
         <Section title="Pending requests" defaultOpen={pending.length > 0}>
           {pending.length === 0 ? (
@@ -402,11 +447,3 @@ export function PortPanel({
   );
 }
 
-function KV({ k, children }: { k: string; children: React.ReactNode }) {
-  return (
-    <>
-      <dt className="text-[11px] uppercase tracking-wider text-fg-subtle">{k}</dt>
-      <dd className="text-fg">{children}</dd>
-    </>
-  );
-}

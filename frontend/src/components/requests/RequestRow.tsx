@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/Input';
 import { VlanChip } from '@/components/ui/VlanChip';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Badge } from '@/components/ui/Badge';
+import { KV } from '@/components/ui/KV';
 import { Diff, ConfigDiff } from '@/components/Diff';
 import { ApplyConfirmModal } from '@/components/requests/ApplyConfirmModal';
 import { applyChangeToPort, mergeChange, portToRequestedChanges } from '@/lib/config';
@@ -123,26 +124,20 @@ export function RequestRow({
               </span>
             </div>
           )}
-          <KV label="Reason" value={request.reason} />
+          <KV label="Reason" variant="stacked">{request.reason}</KV>
           {request.reviewer_comment && (
-            <KV label="Reviewer comment" value={request.reviewer_comment} />
+            <KV label="Reviewer comment" variant="stacked">{request.reviewer_comment}</KV>
           )}
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <div>
-              <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-subtle">
-                Field changes
-              </div>
+            <KV label="Field changes" variant="stacked">
               <Diff
                 before={portToRequestedChanges(port)}
                 after={mergeChange(port, request.requested_changes)}
               />
-            </div>
-            <div>
-              <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-subtle">
-                Rendered config delta
-              </div>
+            </KV>
+            <KV label="Rendered config delta" variant="stacked">
               <ConfigDiff device={device} portBefore={port} portAfter={after} />
-            </div>
+            </KV>
           </div>
 
           {rejecting ? (
@@ -242,11 +237,3 @@ export function RequestRow({
   );
 }
 
-function KV({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div>
-      <div className="mb-0.5 text-[10px] uppercase tracking-wider text-fg-subtle">{label}</div>
-      <div className="text-sm text-fg">{value}</div>
-    </div>
-  );
-}

@@ -261,6 +261,18 @@ export async function listPortsForDevice(
   };
 }
 
+export async function updatePortMetadata(
+  deviceId: string,
+  portName: string,
+  patch: { host_model?: string; bmc_ip?: string; notes?: string },
+): Promise<Port> {
+  const p = await request<PortStateOut>(
+    `/api/devices/${encodeURIComponent(deviceId)}/ports/${encodeURIComponent(portName)}`,
+    { method: 'PATCH', body: patch },
+  );
+  return mapPort(p, deviceId, 0);
+}
+
 export async function listAllPorts(): Promise<PortMap> {
   const devices = await listDevices();
   const map: PortMap = {};

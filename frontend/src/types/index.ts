@@ -66,15 +66,12 @@ export interface Device {
   ssh_user?: string;
 }
 
-export interface PortServices {
-  lldp: boolean;
-  stp: boolean;
-  mstp: boolean;
-  lacp: boolean;
-  bgp: boolean;
-  ospf: boolean;
-  erspan: boolean;
-}
+/**
+ * Per-port service/protocol flags. Free-form: real drivers report what they
+ * model (often nothing — pica8/NETCONF has no per-port flags, so this is {} and
+ * the panel's Services section hides). Keyed by lowercase name -> enabled.
+ */
+export type PortServices = Record<string, boolean>;
 
 export interface Port {
   device_id: string;
@@ -180,6 +177,7 @@ export interface ProtocolStatus {
   name: string;
   enabled: boolean;
   detail: string;
+  params: [string, string][];
 }
 
 export interface MgmtService {

@@ -130,15 +130,10 @@ export function mapPort(p: PortStateOut, deviceId: string, index: number): Port 
     host_model: p.host_model ?? '',
     bmc_ip: p.bmc_ip ?? '',
     notes: p.notes ?? '',
-    services: {
-      lldp: services.lldp ?? false,
-      stp: services.stp ?? false,
-      mstp: services.mstp ?? false,
-      lacp: services.lacp ?? false,
-      bgp: services.bgp ?? false,
-      ospf: services.ospf ?? false,
-      erspan: services.erspan ?? false,
-    },
+    // Pass through whatever per-port services the backend reports. Real drivers
+    // (pica8/NETCONF) don't model per-port protocol flags -> {} -> the panel's
+    // Services section hides itself. No synthesized always-false chips.
+    services,
     traffic: 0,
     last_change: toEpochMs(p.last_human_edit_at) ?? Date.now(),
   };

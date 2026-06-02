@@ -102,6 +102,20 @@ export function useCreateSite() {
   });
 }
 
+export function useUpdatePortMetadata(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      portName: string;
+      patch: { host_model?: string; bmc_ip?: string; notes?: string };
+    }) => api.updatePortMetadata(deviceId, input.portName, input.patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.ports(deviceId) });
+      qc.invalidateQueries({ queryKey: queryKeys.allPorts() });
+    },
+  });
+}
+
 function invalidateRequestsAndPorts(qc: QueryClient, deviceId: string) {
   qc.invalidateQueries({ queryKey: ['requests'] });
   qc.invalidateQueries({ queryKey: queryKeys.ports(deviceId) });
