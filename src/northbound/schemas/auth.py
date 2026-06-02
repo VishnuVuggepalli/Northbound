@@ -54,3 +54,16 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=1)
     role: UserRole
     email: str | None = Field(default=None, max_length=256)
+
+
+class RegisterRequest(BaseModel):
+    """Body of ``POST /api/auth/register`` (public self-registration).
+
+    The role is intentionally absent — self-registered accounts are always
+    REQUESTER; only an admin can mint privileged users via ``POST /api/users``.
+    A longer password floor than login applies because this creates the secret.
+    """
+
+    username: str = Field(min_length=3, max_length=128)
+    password: str = Field(min_length=8, max_length=256)
+    email: str | None = Field(default=None, max_length=256)

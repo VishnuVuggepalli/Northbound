@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256")
     jwt_expiry_minutes: int = Field(default=480)
 
+    # Open self-registration: when true, anyone can POST /api/auth/register to
+    # create a REQUESTER account (never admin). Kill-switch for deployments that
+    # require admin-provisioned accounts only.
+    allow_open_registration: bool = Field(default=True)
+
     # Commit-confirm window (seconds) for platforms with native commit-confirm
     # (Arista session timer, Pica8 confirmed-commit). The apply flow passes this
     # to ``driver.apply_change``; the reconciler (next wave) honours the deadline.

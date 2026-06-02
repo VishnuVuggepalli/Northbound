@@ -231,3 +231,76 @@ async def test_login_throttle_keyed_per_username_same_ip(client: AsyncClient) ->
     # Same IP, different username → independent bucket, first attempt allowed.
     other = await client.post("/api/auth/login", json={"username": "alice", "password": "wrong"})
     assert other.status_code == 401  # bad password, NOT 429 (its own budget)
+
+
+# --------------------------------------------------------------------------- #
+# POST /api/auth/register (public self-registration → requester + auto-login)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_register_creates_requester_and_returns_token(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/api/auth/register",
+        json={"username": "bob", "password": "hunter2pw", "email": "bob@example.com"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["role"] == "requester"  # always requester, never admin
+    assert body["username"] == "bob"
+    assert body["access_token"]  # auto-login token issued
+    # The issued token decodes to a requester.
+    assert decode_token(body["access_token"], settings=_TEST_SETTINGS).role == UserRole.REQUESTER
+
+
+@pytest.mark.asyncio
+async def test_register_can_login_afterwards(client: AsyncClient) -> None:
+    await client.post("/api/auth/register", json={"username": "carol", "password": "hunter2pw"})
+    login = await client.post(
+        "/api/auth/login", json={"username": "carol", "password": "hunter2pw"}
+    )
+    assert login.status_code == 200
+    assert login.json()["role"] == "requester"
+
+
+@pytest.mark.asyncio
+async def test_register_ignores_role_escalation_attempt(client: AsyncClient) -> None:
+    # An attacker passing role=admin must NOT get admin — the field is unknown to
+    # RegisterRequest and is ignored; the account is still a requester.
+    resp = await client.post(
+        "/api/auth/register",
+        json={"username": "mallory", "password": "hunter2pw", "role": "admin"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["role"] == "requester"
+
+
+@pytest.mark.asyncio
+async def test_register_duplicate_username_409(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/api/auth/register", json={"username": "admin", "password": "hunter2pw"}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Username already exists"
+
+
+@pytest.mark.asyncio
+async def test_register_short_password_422(client: AsyncClient) -> None:
+    resp = await client.post("/api/auth/register", json={"username": "dave", "password": "short"})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_disabled_returns_403(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import northbound.api.auth as auth_module
+
+    disabled = Settings(
+        environment="development",
+        secret_key="unit-test-secret-key",
+        allow_open_registration=False,
+    )
+    monkeypatch.setattr(auth_module, "get_settings", lambda: disabled)
+    resp = await client.post(
+        "/api/auth/register", json={"username": "eve", "password": "hunter2pw"}
+    )
+    assert resp.status_code == 403

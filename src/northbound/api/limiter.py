@@ -32,6 +32,10 @@ from starlette.requests import Request
 # out after a few mistyped passwords; production keeps the strict default.
 LOGIN_RATE_LIMIT = os.environ.get("NB_LOGIN_RATE_LIMIT", "5/5minutes")
 
+# Registration throttle: bound account-creation spam per (ip, username).
+# Overridable via NB_REGISTER_RATE_LIMIT for local testing.
+REGISTER_RATE_LIMIT = os.environ.get("NB_REGISTER_RATE_LIMIT", "5/hour")
+
 
 def _submitted_username(request: Request) -> str:
     """Best-effort extract the submitted username from the cached login body.

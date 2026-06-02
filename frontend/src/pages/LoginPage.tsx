@@ -7,20 +7,28 @@ import { useAuthStore } from '@/store/auth';
 import { apiClient, isApiError } from '@/api';
 import { pushToast } from '@/store/toast';
 
+type Mode = 'signin' | 'register';
+
 export function LoginPage() {
   const navigate = useNavigate();
   const setSession = useAuthStore((s) => s.setSession);
+  const [mode, setMode] = useState<Mode>('signin');
   const [username, setUsername] = useState('');
   // Empty by default — never pre-fill a placeholder value. A fake "••••" would
   // be submitted verbatim and (correctly) rejected 401 by the real backend.
   const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const registering = mode === 'register';
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const result = await apiClient.login(username, password);
+      const result = registering
+        ? await apiClient.register(username, password, email || undefined)
+        : await apiClient.login(username, password);
       setSession({
         access_token: result.access_token,
         username: result.user.username,
@@ -28,15 +36,27 @@ export function LoginPage() {
       });
       navigate('/');
     } catch (err) {
-      // Distinguish HTTP failure modes rather than one generic message:
-      // 401 = bad credentials, 429 = rate-limited, else = surface the message.
       let message = err instanceof Error ? err.message : 'Unknown error';
       if (isApiError(err)) {
-        if (err.status === 401) message = 'Invalid username or password.';
-        else if (err.status === 429)
-          message = 'Too many sign-in attempts. Wait a moment and try again.';
+        if (registering) {
+          if (err.status === 409) message = 'That username is taken. Try another.';
+          else if (err.status === 422)
+            message = 'Username needs 3+ characters and password 8+.';
+          else if (err.status === 403)
+            message = 'Self-registration is disabled. Ask an admin for an account.';
+          else if (err.status === 429)
+            message = 'Too many attempts. Wait a moment and try again.';
+        } else {
+          if (err.status === 401) message = 'Invalid username or password.';
+          else if (err.status === 429)
+            message = 'Too many sign-in attempts. Wait a moment and try again.';
+        }
       }
-      pushToast({ kind: 'error', title: 'Sign-in failed', message });
+      pushToast({
+        kind: 'error',
+        title: registering ? 'Registration failed' : 'Sign-in failed',
+        message,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -77,10 +97,27 @@ export function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
+              autoComplete={registering ? 'new-password' : 'current-password'}
               name="password"
             />
+            {registering && (
+              <span className="mt-1 block text-[10px] text-fg-subtle">At least 8 characters.</span>
+            )}
           </label>
+          {registering && (
+            <label className="block">
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-fg-subtle">
+                Email <span className="text-fg-subtle/70">(optional)</span>
+              </span>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                name="email"
+              />
+            </label>
+          )}
         </div>
 
         <Button
@@ -91,8 +128,25 @@ export function LoginPage() {
           className="nb-reveal w-full"
           style={{ '--nb-reveal-i': 4 } as React.CSSProperties}
         >
-          {submitting ? 'Signing in…' : 'Sign in'}
+          {submitting
+            ? registering
+              ? 'Creating account…'
+              : 'Signing in…'
+            : registering
+              ? 'Create account'
+              : 'Sign in'}
         </Button>
+
+        <div className="text-center text-xs text-fg-muted">
+          {registering ? 'Already have an account?' : 'New here?'}{' '}
+          <button
+            type="button"
+            onClick={() => setMode(registering ? 'signin' : 'register')}
+            className="font-medium text-accent hover:underline"
+          >
+            {registering ? 'Sign in' : 'Create a requester account'}
+          </button>
+        </div>
 
         <div className="text-center text-[10px] uppercase tracking-wider text-fg-subtle">
           v0.1 · internal

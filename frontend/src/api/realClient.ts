@@ -151,6 +151,23 @@ export async function login(username: string, password: string): Promise<LoginRe
   };
 }
 
+export async function register(
+  username: string,
+  password: string,
+  email?: string,
+): Promise<LoginResult> {
+  // Self-registration always yields a requester and a token (auto-login).
+  const res = await request<LoginResponse>('/api/auth/register', {
+    method: 'POST',
+    body: { username, password, ...(email ? { email } : {}) },
+    anonymous: true,
+  });
+  return {
+    access_token: res.access_token,
+    user: { username: res.username, role: res.role, name: res.username },
+  };
+}
+
 export async function getCurrentUser(_username?: string): Promise<User> {
   const me = await request<UserOut>('/api/users/me');
   return { username: me.username, role: me.role, name: me.username };
