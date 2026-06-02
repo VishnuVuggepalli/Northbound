@@ -132,32 +132,48 @@ def test_localname_strips_namespace() -> None:
 
 
 def test_render_change_builds_edit_config_xml_access() -> None:
-    xml = _build_edit_config_xml("ge-1/1/1", PortChange(description="srv-01", untagged_vlan=10))
+    # xorplus schema: <config><interface xmlns><gigabit-ethernet><name>/<description>
+    # + <family><ethernet-switching>... ; {*} = namespace-agnostic match.
+    xml = _build_edit_config_xml("xe-1/1/1", PortChange(description="srv-01", untagged_vlan=10))
     root = etree.fromstring(xml.encode())
     assert root.tag == "config"
-    iface = root.find(".//interface")
-    assert iface is not None
-    assert iface.findtext("name") == "ge-1/1/1"
-    assert iface.findtext("description") == "srv-01"
-    # access mode + vlan 10
-    eth_sw = root.find(".//ethernet-switching")
-    assert eth_sw is not None
-    assert eth_sw.findtext("port-mode") == "access"
-    members = root.findall(".//members")
-    assert [m.text for m in members] == ["10"]
+    ge = root.find(".//{*}gigabit-ethernet")
+    assert ge is not None
+    assert ge.findtext("{*}name") == "xe-1/1/1"
+    assert ge.findtext("{*}description") == "srv-01"
+    eth_sw = root.find(".//{*}ethernet-switching")
+    assert eth_sw is not None and eth_sw.findtext("{*}port-mode") == "access"
+    assert root.find(".//{*}members/{*}id").text == "10"
 
 
 def test_render_change_builds_edit_config_xml_trunk() -> None:
     xml = _build_edit_config_xml(
-        "ge-1/1/3", PortChange(untagged_vlan=100, tagged_vlans=[100, 200, 300])
+        "xe-1/1/3", PortChange(untagged_vlan=100, tagged_vlans=[100, 200, 300])
     )
     root = etree.fromstring(xml.encode())
-    eth_sw = root.find(".//ethernet-switching")
+    eth_sw = root.find(".//{*}ethernet-switching")
     assert eth_sw is not None
-    assert eth_sw.findtext("port-mode") == "trunk"
-    assert eth_sw.findtext("native-vlan-id") == "100"
-    members = root.findall(".//members")
-    assert [m.text for m in members] == ["100", "200", "300"]
+    assert eth_sw.findtext("{*}port-mode") == "trunk"
+    assert eth_sw.findtext("{*}native-vlan-id") == "100"
+    # tagged members are a single comma-joined <id>
+    assert root.find(".//{*}members/{*}id").text == "100,200,300"
+
+
+def test_render_change_description_only_xorplus_ns() -> None:
+    # Description-only edit must use the xorplus interface namespace (the Junos
+    # tree returned "no device/data that could be affected" on the real device).
+    xml = _build_edit_config_xml("xe-1/1/1", PortChange(description="NB-TEST"))
+    assert "http://pica8.com/xorplus/interface" in xml
+    assert "<gigabit-ethernet>" in xml and "<unit>" not in xml
+
+
+def test_render_change_empty_description_emits_delete_operation() -> None:
+    # xorplus ignores an empty <description/>; clearing must DELETE the node.
+    xml = _build_edit_config_xml("xe-1/1/1", PortChange(description=""))
+    root = etree.fromstring(xml.encode("utf-8"))
+    desc = root.find(".//{*}description")
+    assert desc is not None
+    assert desc.get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation") == "delete"
 
 
 # ---------------------------------------------------------------------------
@@ -166,9 +182,13 @@ def test_render_change_builds_edit_config_xml_trunk() -> None:
 
 
 class _FakeManager:
-    def __init__(self) -> None:
+    def __init__(self, *, confirmed_commit: bool = True) -> None:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self._running = _load("get_interfaces.xml")
+        caps = ["urn:ietf:params:netconf:base:1.0"]
+        if confirmed_commit:
+            caps.append("urn:ietf:params:netconf:capability:confirmed-commit:1.0")
+        self.server_capabilities = caps
 
     def get_config(self, source: str, filter: Any = None, with_defaults: Any = None) -> str:
         self.calls.append(("get_config", (source,)))
@@ -205,8 +225,8 @@ class _FakeManager:
         self.calls.append(("close_session", ()))
 
 
-def _make_driver() -> tuple[Pica8Driver, _FakeManager]:
-    fake = _FakeManager()
+def _make_driver(*, confirmed_commit: bool = True) -> tuple[Pica8Driver, _FakeManager]:
+    fake = _FakeManager(confirmed_commit=confirmed_commit)
     netconf = NetconfClient(
         NetconfParams(host="pica8.test", username="u", password="p"),
         manager_factory=lambda: fake,
@@ -236,6 +256,22 @@ async def test_apply_change_calls_commit_confirmed() -> None:
     assert confirmed is True
     # ncclient needs the confirm-timeout as str (lxml text); wrapper coerces.
     assert timeout == "45"
+
+
+@pytest.mark.asyncio
+async def test_apply_change_falls_back_to_plain_commit_without_capability() -> None:
+    # PicOS/xorplus does NOT advertise :confirmed-commit. apply_change must do a
+    # plain commit (permanent now) and return no confirm token / deadline.
+    drv, fake = _make_driver(confirmed_commit=False)
+    diff = await drv.render_change("ge-1/1/1", PortChange(untagged_vlan=10))
+    result = await drv.apply_change(diff, confirm_seconds=45)
+    assert result.success is True
+    assert result.confirm_token is None
+    assert result.confirm_deadline_at is None
+    commit_call = next(c for c in fake.calls if c[0] == "commit")
+    confirmed, timeout = commit_call[1]
+    assert confirmed is False
+    assert timeout is None
 
 
 @pytest.mark.asyncio

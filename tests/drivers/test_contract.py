@@ -101,5 +101,7 @@ async def test_writable_driver_can_render_and_apply(driver: Driver) -> None:
     result = await driver.apply_change(diff, confirm_seconds=30)
     assert isinstance(result, ApplyResult)
     assert result.success is True
-    assert result.confirm_token is not None
-    assert result.confirm_deadline_at is not None
+    # A platform that advertises :confirmed-commit returns a token+deadline to
+    # confirm later; one that does not (e.g. PicOS/xorplus) commits immediately
+    # with neither. Both are valid — but the two fields must agree.
+    assert (result.confirm_token is None) == (result.confirm_deadline_at is None)

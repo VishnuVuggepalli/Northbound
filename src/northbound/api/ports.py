@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from northbound.api.deps import get_current_user, require_admin
+from northbound.config import get_settings
 from northbound.db import get_session
 from northbound.drivers.base import DriverError
 from northbound.drivers.factory import driver_for
@@ -28,7 +29,7 @@ from northbound.models.device import Device
 from northbound.models.port_metadata import PortMetadata
 from northbound.models.user import User
 from northbound.schemas.audit import audit_entry_out
-from northbound.schemas.driver import Credentials
+from northbound.schemas.driver import Credentials, PortChange
 from northbound.schemas.port import (
     BackupDiffOut,
     BackupOut,
@@ -37,6 +38,7 @@ from northbound.schemas.port import (
     L3InterfaceOut,
     MacEntryOut,
     MgmtServiceOut,
+    PortDescriptionIn,
     PortDetailOut,
     PortMetadataPatchIn,
     PortStateOut,
@@ -48,6 +50,7 @@ from northbound.schemas.port import (
 )
 from northbound.services import audit, port_state
 from northbound.services.credvault import FernetCredVault, deserialize_credentials
+from northbound.services.device_policy import assert_writable
 
 router = APIRouter(prefix="/api/devices", tags=["ports"])
 
@@ -122,6 +125,68 @@ async def get_port_detail(
         port=PortStateOut.from_view(match),
         history=[audit_entry_out(r) for r in history_rows.all()],
     )
+
+
+@router.patch("/{device_id}/ports/{port_name:path}/description")
+async def set_port_description(
+    device_id: str,
+    port_name: str,
+    body: PortDescriptionIn,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, str]:
+    """Admin-only DIRECT write of the on-device port description.
+
+    Declared BEFORE the metadata ``:path`` route so ``…/description`` matches
+    here, not as a port named ``…/description``. The description lives on the
+    device, so this is a real config write: backup → render → apply
+    (commit-confirm) → confirm (immediate, no approval gate). 403 on read-only.
+    """
+    device = await _load_device(session, device_id)
+    assert_writable(device)
+    creds = _credentials_for(device)
+    driver = driver_for(device, creds)
+    try:
+        backup_text = await driver.backup_config()
+        session.add(
+            ConfigBackup(
+                device_id=device.id,
+                config_text=backup_text,
+                fetched_at=dt.datetime.now(tz=dt.UTC),
+                fetched_by=admin.id,
+            )
+        )
+        await session.flush()
+        diff = await driver.render_change(port_name, PortChange(description=body.description))
+        result = await driver.apply_change(
+            diff, confirm_seconds=get_settings().commit_confirm_seconds
+        )
+        if not result.success:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Description apply failed: {result.error}",
+            )
+        if result.confirm_token:
+            await driver.confirm(result.confirm_token)  # make permanent (direct write)
+    except DriverError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Description write failed: {exc}"
+        ) from exc
+    finally:
+        await driver.aclose()
+
+    await audit.append_audit(
+        session,
+        user_id=admin.id,
+        action="port.description_set",
+        target_device_id=device_id,
+        target_port=port_name,
+        after={"description": body.description},
+        result="ok",
+    )
+    _config_cache.pop(device_id, None)  # running-config changed
+    port_state.invalidate(device.id)  # live port view changed
+    return {"port_name": port_name, "description": body.description}
 
 
 @router.patch("/{device_id}/ports/{port_name:path}", response_model=PortStateOut)

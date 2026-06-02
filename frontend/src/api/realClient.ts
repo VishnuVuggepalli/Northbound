@@ -290,6 +290,18 @@ export async function updatePortMetadata(
   return mapPort(p, deviceId, 0);
 }
 
+export async function setPortDescription(
+  deviceId: string,
+  portName: string,
+  description: string,
+): Promise<{ port_name: string; description: string }> {
+  // Raw port name (slashes) so the `/description` suffix matches the :path route.
+  return request<{ port_name: string; description: string }>(
+    `/api/devices/${encodeURIComponent(deviceId)}/ports/${portName}/description`,
+    { method: 'PATCH', body: { description } },
+  );
+}
+
 export async function listAllPorts(): Promise<PortMap> {
   const devices = await listDevices();
   const map: PortMap = {};

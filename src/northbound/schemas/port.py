@@ -63,6 +63,12 @@ class PortMetadataPatchIn(BaseModel):
     notes: str | None = None
 
 
+class PortDescriptionIn(BaseModel):
+    """Admin direct edit of the port's on-device description (config write)."""
+
+    description: str = Field(max_length=256)
+
+
 class AuditEntryOut(BaseModel):
     """A single audit-log row (also reused by the audit router)."""
 

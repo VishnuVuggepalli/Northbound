@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, Clock, Network, Pencil, RefreshCw, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Textarea } from '@/components/ui/Input';
+import { Input, Textarea } from '@/components/ui/Input';
 import { Section } from '@/components/ui/Section';
 import { KV } from '@/components/ui/KV';
 import { StatusDot } from '@/components/ui/StatusDot';
@@ -19,7 +19,13 @@ import type {
   Port,
   User,
 } from '@/types';
-import { useApplyRequest, usePlatforms, useRejectRequest, useUpdatePortMetadata } from '@/api/queries';
+import {
+  useApplyRequest,
+  usePlatforms,
+  useRejectRequest,
+  useSetPortDescription,
+  useUpdatePortMetadata,
+} from '@/api/queries';
 import { pushToast } from '@/store/toast';
 import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
 
@@ -105,6 +111,25 @@ export function PortPanel({
     );
   };
 
+  // Description editing (admin-only). DIRECT device write — commits immediately,
+  // not a change request. Read-locked devices are rejected by the backend.
+  const setDesc = useSetPortDescription(device.id);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState(port.description ?? '');
+  const saveDesc = () => {
+    setDesc.mutate(
+      { portName: port.name, description: descDraft },
+      {
+        onSuccess: () => {
+          setEditingDesc(false);
+          pushToast({ kind: 'success', message: 'Description written to device.' });
+        },
+        onError: (e: unknown) =>
+          pushToast({ kind: 'error', message: e instanceof Error ? e.message : 'Write failed.' }),
+      },
+    );
+  };
+
   return (
     <aside
       key={`${device.id}:${port.name}`}
@@ -180,9 +205,45 @@ export function PortPanel({
       <div className="nb-scroll flex-1 space-y-1 overflow-y-auto px-4">
         <Section title="Overview">
           <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1.5 text-xs">
-            <KV label="Description">
-              <span className="nb-mono text-[11px]">{port.description || '—'}</span>
-            </KV>
+            {isAdmin && (
+              <KV label="Description">
+                {editingDesc ? (
+                  <span className="flex items-center gap-1.5">
+                    <Input
+                      value={descDraft}
+                      onChange={(e) => setDescDraft(e.target.value)}
+                      aria-label="Port description"
+                      className="h-7 flex-1 text-[11px]"
+                    />
+                    <Button size="sm" onClick={saveDesc} disabled={setDesc.isPending}>
+                      {setDesc.isPending ? '…' : 'Write'}
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingDesc(false)}
+                      className="text-xs text-fg-subtle hover:text-fg"
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <span className="nb-mono text-[11px]">{port.description || '—'}</span>
+                    <button
+                      type="button"
+                      title="Edit description (writes to device)"
+                      onClick={() => {
+                        setDescDraft(port.description ?? '');
+                        setEditingDesc(true);
+                      }}
+                      className="text-accent hover:text-fg"
+                    >
+                      <Pencil size={11} />
+                    </button>
+                  </span>
+                )}
+              </KV>
+            )}
             <KV label="Host model">{port.host_model || '—'}</KV>
             <KV label="BMC IP">
               <span className="nb-mono text-[11px]">{port.bmc_ip || '—'}</span>

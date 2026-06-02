@@ -129,6 +129,17 @@ class NetconfClient:
         timeout_str = str(timeout) if timeout is not None else None
         return await asyncio.to_thread(lambda: mgr.commit(confirmed=confirmed, timeout=timeout_str))
 
+    async def supports(self, capability: str) -> bool:
+        """True if the connected server advertises a NETCONF capability.
+
+        Detects ``:confirmed-commit`` — PicOS/xorplus accepts a plain
+        ``<commit>`` but does NOT advertise confirmed-commit, so callers must
+        fall back to a non-confirmed commit instead of erroring.
+        """
+        mgr = await self._ensure_manager()
+        caps = getattr(mgr, "server_capabilities", None) or []
+        return any(capability in str(c) for c in caps)
+
     async def discard_changes(self) -> Any:
         mgr = await self._ensure_manager()
         return await asyncio.to_thread(mgr.discard_changes)

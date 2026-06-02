@@ -8,6 +8,7 @@ import { isPlausibleIp } from '@/lib/format';
 import type { ThemeMode } from '@/lib/palette';
 import type { Device, Port, RequestedChanges } from '@/types';
 import { cn } from '@/lib/cn';
+import { useAuthStore } from '@/store/auth';
 
 interface RequestModalProps {
   open: boolean;
@@ -36,6 +37,7 @@ export function RequestModal({
   const [bmc, setBmc] = useState(port?.bmc_ip ?? '');
   const [notes, setNotes] = useState(port?.notes ?? '');
   const [reason, setReason] = useState('');
+  const isAdmin = useAuthStore((s) => s.user?.role) === 'admin';
 
   useEffect(() => {
     if (open && port) {
@@ -163,9 +165,11 @@ export function RequestModal({
           </Field>
         </div>
 
-        <Field label="Notes (optional)">
-          <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </Field>
+        {isAdmin && (
+          <Field label="Notes (optional)">
+            <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </Field>
+        )}
 
         <Field label="Reason for change (required)">
           <Textarea

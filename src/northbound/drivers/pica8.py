@@ -327,15 +327,36 @@ class Pica8Driver(Driver):
                 error="ConfigDiff missing pending_token or commands",
             )
         xml_payload = diff.commands[0]
+        # A targeted delete (clearing a leaf) needs default-operation="none": the
+        # key nodes select the target and only the operation="delete" node acts.
+        # Under the default "merge", xorplus silently keeps the existing leaf.
+        default_op = "none" if 'operation="delete"' in xml_payload else None
         try:
-            await self._netconf.edit_config(target="candidate", config=xml_payload)
-            await self._netconf.commit(confirmed=True, timeout=confirm_seconds)
+            await self._netconf.edit_config(
+                target="candidate", config=xml_payload, default_operation=default_op
+            )
+            # PicOS/xorplus does NOT advertise :confirmed-commit (a confirmed
+            # commit errors "Server does not support [:confirmed-commit]"). When
+            # absent, fall back to a plain commit: the change is permanent
+            # immediately, so there is no pending token / revert window.
+            confirmed = await self._netconf.supports(":confirmed-commit")
+            await self._netconf.commit(
+                confirmed=confirmed,
+                timeout=confirm_seconds if confirmed else None,
+            )
         except Exception as exc:
             return ApplyResult(
                 success=False,
                 confirm_token=None,
                 confirm_deadline_at=None,
                 error=_classify_netconf_error(exc),
+            )
+        if not confirmed:
+            return ApplyResult(
+                success=True,
+                confirm_token=None,
+                confirm_deadline_at=None,
+                error=None,
             )
         self._pending_token = token
         return ApplyResult(
@@ -1029,37 +1050,50 @@ def _parse_mac_table(text: str) -> tuple[MacEntry, ...]:
     return tuple(out)
 
 
-def _build_edit_config_xml(port: str, change: PortChange) -> str:
-    """Render a Pica8 ``<config>`` payload for an interface change.
+# Real PicOS xorplus interface model (verified against live get-config on an
+# N8560-32C): interfaces live under <interface xmlns="…/xorplus/interface"> as a
+# <gigabit-ethernet> list with <name>/<description> and VLAN membership under
+# <family><ethernet-switching> (native-vlan-id + port-mode + vlan/members/id).
+# This is NOT the Junos <interfaces><interface><unit> tree — that produced
+# "no device/data that could be affected" on edit-config.
+_XORPLUS_IFACE_NS = "http://pica8.com/xorplus/interface"
+_NC_BASE_NS = "urn:ietf:params:xml:ns:netconf:base:1.0"
 
-    Keeps the XML small — only emit elements for fields the caller set.
-    Pica8's edit-config merges by default, so absent fields are left
-    untouched on the device.
+
+def _build_edit_config_xml(port: str, change: PortChange) -> str:
+    """Render a Pica8 ``<config>`` edit payload matching the xorplus schema.
+
+    Only emits elements for fields the caller set; edit-config merges, so absent
+    fields are left untouched. Ports on the supported hardware are
+    ``<gigabit-ethernet>`` entries.
     """
-    # Use namespace-less XML — Pica8 accepts the family-style tree under
-    # the device's default ns, and ncclient wraps with the proper rpc
-    # envelope. Producing namespace-explicit XML here ties us to one
-    # firmware revision.
     cfg = etree.Element("config")
-    interfaces = etree.SubElement(cfg, "interfaces")
-    iface = etree.SubElement(interfaces, "interface")
-    etree.SubElement(iface, "name").text = port
+    # Default namespace on the interface subtree (children unprefixed), mirroring
+    # how the device returns it in get-config.
+    iface = etree.SubElement(cfg, "interface", nsmap={None: _XORPLUS_IFACE_NS})
+    ge = etree.SubElement(iface, "gigabit-ethernet")
+    etree.SubElement(ge, "name").text = port
     if change.description is not None:
-        etree.SubElement(iface, "description").text = change.description
+        desc = etree.SubElement(ge, "description")
+        if change.description == "":
+            # xorplus ignores an empty <description/> (no-op). To CLEAR a
+            # description, delete the node via the NETCONF operation attribute.
+            desc.set(f"{{{_NC_BASE_NS}}}operation", "delete")
+        else:
+            desc.text = change.description
     if change.untagged_vlan is not None or change.tagged_vlans is not None:
-        unit = etree.SubElement(iface, "unit")
-        etree.SubElement(unit, "name").text = "0"
-        family = etree.SubElement(unit, "family")
+        family = etree.SubElement(ge, "family")
         eth = etree.SubElement(family, "ethernet-switching")
         if change.tagged_vlans is not None:
             etree.SubElement(eth, "port-mode").text = "trunk"
             if change.untagged_vlan is not None:
                 etree.SubElement(eth, "native-vlan-id").text = str(change.untagged_vlan)
             vlan = etree.SubElement(eth, "vlan")
-            for v in change.tagged_vlans:
-                etree.SubElement(vlan, "members").text = str(v)
+            members = etree.SubElement(vlan, "members")
+            etree.SubElement(members, "id").text = ",".join(str(v) for v in change.tagged_vlans)
         elif change.untagged_vlan is not None:
             etree.SubElement(eth, "port-mode").text = "access"
             vlan = etree.SubElement(eth, "vlan")
-            etree.SubElement(vlan, "members").text = str(change.untagged_vlan)
+            members = etree.SubElement(vlan, "members")
+            etree.SubElement(members, "id").text = str(change.untagged_vlan)
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
