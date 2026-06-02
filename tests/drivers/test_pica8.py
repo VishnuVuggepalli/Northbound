@@ -17,9 +17,13 @@ from northbound.drivers.base import DriverError
 from northbound.drivers.pica8 import (
     Pica8Driver,
     _build_edit_config_xml,
+    _collapse_logical_units,
     _localname,
     _parse_interfaces_xml,
     _parse_lldp_xml,
+    _parse_mac_table,
+    _parse_protocols_xml,
+    _parse_services_xml,
 )
 from northbound.schemas.driver import (
     ConfigDiff,
@@ -66,6 +70,40 @@ def test_parse_interfaces_no_vlan_model_yields_none() -> None:
     ports = {p.name: p for p in _parse_interfaces_xml(_load("get_interfaces.xml"))}
     assert ports["te-1/1/1"].untagged_vlan is None
     assert ports["te-1/1/1"].tagged_vlans == ()
+
+
+def _port(name: str) -> PortState:
+    return PortState(
+        name=name,
+        admin_up=True,
+        link_up=True,
+        speed_mbps=None,
+        duplex=None,
+        mac=None,
+        mtu=1500,
+        untagged_vlan=None,
+        tagged_vlans=(),
+        description="",
+        host_model="",
+        bmc_ip="",
+        notes="",
+        services={},
+    )
+
+
+def test_collapse_logical_units_drops_subunits_with_present_parent() -> None:
+    # PicOS reports both physical xe-1/1/1 and its logical units xe-1/1/1.N.
+    # For a switchport view we keep the physical and drop the units.
+    ports = [_port("xe-1/1/1"), _port("xe-1/1/1.1"), _port("xe-1/1/1.4"), _port("xe-1/1/2")]
+    names = {p.name for p in _collapse_logical_units(ports)}
+    assert names == {"xe-1/1/1", "xe-1/1/2"}
+
+
+def test_collapse_logical_units_keeps_orphan_units() -> None:
+    # A unit whose physical parent is absent is kept — no data silently lost.
+    ports = [_port("vlan.100"), _port("xe-1/1/9.2")]
+    names = {p.name for p in _collapse_logical_units(ports)}
+    assert names == {"vlan.100", "xe-1/1/9.2"}
 
 
 def test_parse_lldp_xml_returns_neighbors() -> None:
@@ -245,3 +283,56 @@ async def test_apply_change_missing_token_returns_failure() -> None:
     result = await drv.apply_change(diff)
     assert result.success is False
     assert result.error is not None
+
+
+# --------------------------------------------------------------------------- #
+# System info parsers (protocols / services / MAC table)
+# --------------------------------------------------------------------------- #
+_SYS_XML = """<rpc-reply><data>
+  <lldp xmlns="http://pica8.com/xorplus/lldp"><interface><name>te-1/1/1</name></interface></lldp>
+  <ospf xmlns="http://pica8.com/xorplus/ospf"><area>0</area></ospf>
+  <spanning-tree xmlns="http://pica8.com/xorplus/stp"><mode>rstp</mode></spanning-tree>
+  <system xmlns="http://pica8.com/xorplus/system"><services>
+    <ssh><port>22</port><disable>false</disable></ssh>
+    <web><disable>false</disable>
+      <http><port>80</port><disable>false</disable></http>
+      <https><port>443</port><disable>false</disable></https>
+    </web>
+  </services></system>
+</data></rpc-reply>"""
+
+
+def test_parse_protocols_xml_reports_present_sections() -> None:
+    protos = {p.name: p for p in _parse_protocols_xml(_SYS_XML)}
+    assert "LLDP" in protos and "OSPF" in protos and "Spanning Tree" in protos
+    assert protos["Spanning Tree"].detail == "mode rstp"
+    assert all(p.enabled for p in protos.values())
+
+
+def test_parse_services_xml_ssh_and_web() -> None:
+    svcs = {s.name: s for s in _parse_services_xml(_SYS_XML)}
+    assert svcs["SSH"].port == 22 and svcs["SSH"].enabled
+    assert svcs["Web (HTTP)"].port == 80
+    assert svcs["Web (HTTPS)"].port == 443 and svcs["Web (HTTPS)"].enabled
+
+
+_MAC_OUT = """admin@leaf-02>
+.
+Total entries in switching table:   2
+VLAN      MAC address          Type         Age     Interfaces         User
+----      -----------------    ---------    ----    ----------------   ----------
+1         64:9d:99:d9:83:ac    Dynamic      300     xe-1/1/31.1        xorp
+1050      bc:24:11:13:99:3e    Static       -       xe-1/1/24          xorp
+"""
+
+
+def test_parse_mac_table_rows() -> None:
+    rows = _parse_mac_table(_MAC_OUT)
+    assert len(rows) == 2
+    assert rows[0].vlan == 1 and rows[0].mac == "64:9d:99:d9:83:ac"
+    assert rows[0].type == "Dynamic" and rows[0].interface == "xe-1/1/31.1"
+    assert rows[1].vlan == 1050 and rows[1].type == "Static"
+
+
+def test_parse_mac_table_skips_banner_and_junk() -> None:
+    assert _parse_mac_table("Welcome to PICOS\nadmin@leaf-02>\ngarbage line\n") == ()

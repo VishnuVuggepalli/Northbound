@@ -30,6 +30,7 @@ import uuid
 
 from lxml import etree  # type: ignore[attr-defined]  # lxml has no stubs; etree is C-extension
 
+from northbound._lib.transport.asyncssh_client import SshClient, SshParams
 from northbound._lib.transport.netconf_client import NetconfClient, NetconfParams
 from northbound.drivers.base import (
     Driver,
@@ -45,9 +46,13 @@ from northbound.schemas.driver import (
     Credentials,
     DiscoveryResult,
     DriverCapabilities,
+    MacEntry,
+    MgmtService,
     Neighbor,
     PortChange,
     PortState,
+    ProtocolStatus,
+    SystemInfo,
     TestResult,
 )
 
@@ -72,7 +77,7 @@ class Pica8Driver(Driver):
         supports_lldp=True,
         max_concurrency=1,
         auth_methods=[AuthMethod.PASSWORD, AuthMethod.SSH_KEY],
-        web_ui_url_template="https://{mgmt_ip}:8888/",
+        web_ui_url_template="https://{mgmt_ip}/",
     )
 
     def __init__(
@@ -81,9 +86,13 @@ class Pica8Driver(Driver):
         creds: Credentials,
         *,
         netconf: NetconfClient | None = None,
+        ssh: SshClient | None = None,
     ) -> None:
         super().__init__(conn, creds)
         self._netconf = netconf if netconf is not None else self._build_netconf()
+        # SSH is used only for operational reads the NETCONF data model doesn't
+        # expose (the MAC/forwarding table). Built lazily; injectable for tests.
+        self._ssh = ssh if ssh is not None else self._build_ssh()
         # Token currently 'live' on the device — set by apply_change.
         self._pending_token: str | None = None
 
@@ -101,6 +110,20 @@ class Pica8Driver(Driver):
                 port=self._conn.port or 830,
                 timeout_seconds=self._conn.timeout_seconds,
                 hostkey_verify=False,  # lab default
+            )
+        )
+
+    def _build_ssh(self) -> SshClient:
+        # CLI-over-SSH (port 22) for operational reads the NETCONF data model
+        # doesn't expose. NOT the NETCONF port (self._conn.port may be 830).
+        return SshClient(
+            SshParams(
+                host=self._conn.host,
+                username=self._creds.username or "",
+                password=self._creds.password,
+                private_key=self._creds.ssh_private_key,
+                port=22,
+                timeout_seconds=self._conn.timeout_seconds,
             )
         )
 
@@ -180,6 +203,33 @@ class Pica8Driver(Driver):
         if port is None:
             return neighbors
         return [n for n in neighbors if n.port_id == port]
+
+    async def get_system_info(self) -> SystemInfo:
+        """Protocols + mgmt services (NETCONF get-config) and the MAC table
+        (SSH CLI — the xorplus NETCONF model doesn't expose forwarding state)."""
+        protocols: tuple[ProtocolStatus, ...] = ()
+        services: tuple[MgmtService, ...] = ()
+        try:
+            cfg = await self._netconf.get_config(source="running")
+            protocols = _parse_protocols_xml(cfg)
+            services = _parse_services_xml(cfg)
+        except Exception:
+            pass
+
+        mac_table: tuple[MacEntry, ...] = ()
+        mac_supported = True
+        try:
+            out = await self._ssh.run('cli -c "show ethernet-switching table"')
+            mac_table = _parse_mac_table(out)
+        except Exception:
+            mac_supported = False
+
+        return SystemInfo(
+            protocols=protocols,
+            services=services,
+            mac_table=mac_table,
+            mac_supported=mac_supported,
+        )
 
     # ---------- write ----------
 
@@ -381,7 +431,20 @@ def _parse_interfaces_xml(xml: str) -> list[PortState]:
                 services={},
             )
         )
-    return out
+    return _collapse_logical_units(out)
+
+
+def _collapse_logical_units(ports: list[PortState]) -> list[PortState]:
+    """Drop Junos/xorplus logical sub-units (``xe-1/1/1.4``) when their parent
+    physical interface (``xe-1/1/1``) is also present.
+
+    PicOS reports both the physical port and its logical units; for a
+    switchport view the physical port is the managed entity (it carries the
+    access/trunk VLAN + description). A unit whose parent is absent is kept, so
+    no data is silently lost on configs that only define units.
+    """
+    physical = {p.name for p in ports if "." not in p.name}
+    return [p for p in ports if p.name.rpartition(".")[0] not in physical]
 
 
 def _has_ancestor(el: etree._Element, ancestor_localname: str) -> bool:
@@ -462,6 +525,107 @@ def _parse_lldp_xml(xml: str) -> list[Neighbor]:
             )
         )
     return out
+
+
+# Top-level xorplus config sections that represent control-plane protocols.
+# (slug -> human label). Presence in get-config ⇒ configured/enabled.
+_PROTOCOL_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("lldp", "LLDP"),
+    ("ospf", "OSPF"),
+    ("spanning-tree", "Spanning Tree"),
+    ("lacp", "LACP"),
+    ("loopback-detection", "Loopback Detection"),
+    ("dhcp", "DHCP"),
+    ("firewall", "Firewall"),
+)
+
+
+def _parse_protocols_xml(xml: str) -> tuple[ProtocolStatus, ...]:
+    """Report which control-plane protocols are configured (top-level xorplus
+    sections). A section's presence ⇒ enabled; absence ⇒ not reported."""
+    root = _safe_parse(xml)
+    if root is None:
+        return ()
+    present = {_localname(el.tag) for el in root.iter()}
+    out: list[ProtocolStatus] = []
+    for slug, label in _PROTOCOL_SECTIONS:
+        if slug in present:
+            detail = ""
+            if slug == "spanning-tree":
+                sec = _find_first(root, "spanning-tree")
+                mode = _child_text(sec, "mode") if sec is not None else None
+                detail = f"mode {mode}" if mode else ""
+            out.append(ProtocolStatus(name=label, enabled=True, detail=detail))
+    return tuple(out)
+
+
+def _parse_services_xml(xml: str) -> tuple[MgmtService, ...]:
+    """Parse the ``<system><services>`` block: ssh / web (http+https) / netconf.
+
+    ``<disable>true</disable>`` is the xorplus boolean-value leaf (not presence).
+    """
+    root = _safe_parse(xml)
+    if root is None:
+        return ()
+    services_el = _find_first(root, "services")
+    if services_el is None:
+        return ()
+
+    def _enabled(el: etree._Element) -> bool:
+        return (_child_text(el, "disable") or "").strip().lower() != "true"
+
+    def _port(el: etree._Element) -> int | None:
+        txt = _child_text(el, "port")
+        return int(txt) if txt and txt.isdigit() else None
+
+    out: list[MgmtService] = []
+    ssh_el = _find_first(services_el, "ssh")
+    if ssh_el is not None:
+        out.append(MgmtService(name="SSH", enabled=_enabled(ssh_el), port=_port(ssh_el)))
+    web_el = _find_first(services_el, "web")
+    if web_el is not None:
+        web_on = _enabled(web_el)
+        for proto in ("http", "https"):
+            sub = _find_first(web_el, proto)
+            if sub is not None:
+                out.append(
+                    MgmtService(
+                        name=f"Web ({proto.upper()})",
+                        enabled=web_on and _enabled(sub),
+                        port=_port(sub),
+                    )
+                )
+    netconf_el = _find_first(services_el, "netconf")
+    if netconf_el is not None:
+        out.append(MgmtService(name="NETCONF", enabled=_enabled(netconf_el), port=830))
+    return tuple(out)
+
+
+def _parse_mac_table(text: str) -> tuple[MacEntry, ...]:
+    """Parse ``show ethernet-switching table`` rows.
+
+    Columns: VLAN  MAC address  Type  Age  Interfaces  User. Header/banner and
+    summary lines are skipped; a row must start with a VLAN id and carry a
+    colon-separated MAC.
+    """
+    out: list[MacEntry] = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        vlan_tok, mac_tok, type_tok, age_tok, iface_tok = parts[:5]
+        if not vlan_tok.isdigit() or mac_tok.count(":") != 5:
+            continue
+        out.append(
+            MacEntry(
+                vlan=int(vlan_tok),
+                mac=mac_tok.lower(),
+                type=type_tok,
+                age=age_tok,
+                interface=iface_tok,
+            )
+        )
+    return tuple(out)
 
 
 def _build_edit_config_xml(port: str, change: PortChange) -> str:

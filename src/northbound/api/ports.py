@@ -33,9 +33,13 @@ from northbound.schemas.port import (
     BackupDiffOut,
     BackupOut,
     ConfigOut,
+    MacEntryOut,
+    MgmtServiceOut,
     PortDetailOut,
     PortMetadataPatchIn,
     PortStateOut,
+    ProtocolStatusOut,
+    SystemInfoOut,
 )
 from northbound.services import audit, port_state
 from northbound.services.credvault import FernetCredVault, deserialize_credentials
@@ -199,6 +203,45 @@ async def get_config(
         await driver.aclose()
     _config_cache[device_id] = text
     return ConfigOut(config_text=text, cached=False)
+
+
+@router.get("/{device_id}/system", response_model=SystemInfoOut)
+async def get_system_info(
+    device_id: str,
+    _user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SystemInfoOut:
+    """Live system snapshot: control-plane protocols, mgmt services, MAC table.
+
+    Sections a driver can't reach come back empty (``mac_supported=false``
+    distinguishes an unreadable MAC table from a genuinely empty one).
+    """
+    device = await _load_device(session, device_id)
+    creds = _credentials_for(device)
+    driver = driver_for(device, creds)
+    try:
+        info = await driver.get_system_info()
+    except DriverError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"System info fetch failed: {exc}"
+        ) from exc
+    finally:
+        await driver.aclose()
+    return SystemInfoOut(
+        protocols=[
+            ProtocolStatusOut(name=p.name, enabled=p.enabled, detail=p.detail)
+            for p in info.protocols
+        ],
+        services=[
+            MgmtServiceOut(name=s.name, enabled=s.enabled, port=s.port, detail=s.detail)
+            for s in info.services
+        ],
+        mac_table=[
+            MacEntryOut(vlan=m.vlan, mac=m.mac, interface=m.interface, type=m.type, age=m.age)
+            for m in info.mac_table
+        ],
+        mac_supported=info.mac_supported,
+    )
 
 
 @router.post(

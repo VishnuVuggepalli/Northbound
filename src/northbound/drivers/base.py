@@ -20,6 +20,7 @@ from northbound.schemas.driver import (
     Neighbor,
     PortChange,
     PortState,
+    SystemInfo,
     TestResult,
 )
 
@@ -104,6 +105,14 @@ class Driver(ABC):
     async def get_neighbors(self, port: str | None = None) -> list[Neighbor]:
         """LLDP neighbors. Default: none. Override per platform."""
         return []
+
+    async def get_system_info(self) -> SystemInfo:
+        """Live system snapshot: protocols, mgmt services, MAC table.
+
+        Default: empty (no sections, MAC unsupported). Override per platform
+        to fill what the driver's transport can reach.
+        """
+        return SystemInfo()
 
     # ---------- write (NotSupported if writable=False) ----------
 

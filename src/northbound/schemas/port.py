@@ -91,6 +91,36 @@ class ConfigOut(BaseModel):
     cached: bool
 
 
+class MacEntryOut(BaseModel):
+    vlan: int | None = None
+    mac: str
+    interface: str
+    type: str
+    age: str | None = None
+
+
+class ProtocolStatusOut(BaseModel):
+    name: str
+    enabled: bool
+    detail: str = ""
+
+
+class MgmtServiceOut(BaseModel):
+    name: str
+    enabled: bool
+    port: int | None = None
+    detail: str = ""
+
+
+class SystemInfoOut(BaseModel):
+    """Live system snapshot: protocols, mgmt services, MAC table."""
+
+    protocols: list[ProtocolStatusOut] = Field(default_factory=list)
+    services: list[MgmtServiceOut] = Field(default_factory=list)
+    mac_table: list[MacEntryOut] = Field(default_factory=list)
+    mac_supported: bool = False
+
+
 class BackupOut(BaseModel):
     """A stored config backup row."""
 

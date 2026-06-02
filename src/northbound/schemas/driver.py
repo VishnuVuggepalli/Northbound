@@ -62,6 +62,51 @@ class Neighbor:
 
 
 @dataclass(frozen=True)
+class MacEntry:
+    """One row of the L2 forwarding (MAC address) table."""
+
+    vlan: int | None
+    mac: str
+    interface: str
+    type: str  # "Dynamic" / "Static" / etc.
+    age: str | None = None
+
+
+@dataclass(frozen=True)
+class ProtocolStatus:
+    """A control-plane protocol the device has configured (live, from config)."""
+
+    name: str  # e.g. "lldp", "ospf", "spanning-tree"
+    enabled: bool
+    detail: str = ""  # short human note (e.g. "stp mode rstp", "2 areas")
+
+
+@dataclass(frozen=True)
+class MgmtService:
+    """A management-plane service the device exposes (ssh/web/netconf/...)."""
+
+    name: str
+    enabled: bool
+    port: int | None = None
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class SystemInfo:
+    """Live operational snapshot beyond ports: protocols, mgmt services, MAC table.
+
+    Each section is independently optional — a driver fills what its transport
+    can reach. ``mac_supported`` distinguishes "looked, table empty" from
+    "this driver can't read the MAC table at all".
+    """
+
+    protocols: tuple[ProtocolStatus, ...] = ()
+    services: tuple[MgmtService, ...] = ()
+    mac_table: tuple[MacEntry, ...] = ()
+    mac_supported: bool = False
+
+
+@dataclass(frozen=True)
 class ConfigDiff:
     """A rendered, not-yet-applied configuration change.
 
