@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Cpu, Layers, Loader2, Network, ShieldCheck, Table2 } from 'lucide-react';
+import { Activity, ChevronDown, ChevronRight, Cpu, Layers, Loader2, Network, ShieldCheck, Table2 } from 'lucide-react';
 import { useProtocolDetail, useSystemInfo, useVlans } from '@/api/queries';
 import { Section } from '@/components/ui/Section';
 import { KV } from '@/components/ui/KV';
@@ -232,12 +232,33 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
           </div>
         )}
       </Section>
+
+      <Section
+        title={
+          <SectionTitle icon={<Activity size={13} className="text-accent" />}>
+            Diagnostics &amp; tables
+          </SectionTitle>
+        }
+      >
+        <div className="space-y-1 px-1">
+          <ProtocolGets deviceId={device.id} slug="Optics" label="Transceivers / optics (DOM)" />
+          <ProtocolGets deviceId={device.id} slug="ARP" label="ARP table" />
+        </div>
+      </Section>
     </div>
   );
 }
 
 /** Lazy-loaded operational tables for a protocol (OSPF neighbors, etc.). */
-function ProtocolGets({ deviceId, slug }: { deviceId: string; slug: string }) {
+function ProtocolGets({
+  deviceId,
+  slug,
+  label = 'Operational detail',
+}: {
+  deviceId: string;
+  slug: string;
+  label?: string;
+}) {
   const [open, setOpen] = useState(false);
   const { data, isLoading, isError } = useProtocolDetail(deviceId, slug, open);
   return (
@@ -248,7 +269,7 @@ function ProtocolGets({ deviceId, slug }: { deviceId: string; slug: string }) {
         className="flex items-center gap-1 text-xs text-accent hover:underline"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        Operational detail
+        {label}
       </button>
       {open && (
         <div className="mt-2 space-y-3">

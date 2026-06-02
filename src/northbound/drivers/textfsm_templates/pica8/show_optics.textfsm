@@ -1,0 +1,16 @@
+Value INTERFACE ([a-z]{2,4}-\d+/\d+/\d+(?:\.\d+)?)
+Value TEMP (\S+)
+Value VOLTAGE (\S+)
+Value TX_POWER (\S+)
+Value RX_POWER (\S+)
+Value MODULE (\S+)
+
+Start
+  # Primary per-interface row (starts with the interface name). Per-channel
+  # continuation lines start with whitespace and are skipped. [C1]/[C2] channel
+  # tags are tolerated. N/A appears when no module / no DOM support.
+  ^${INTERFACE}\s+${TEMP}\s+${VOLTAGE}\s+\S+(?:\s+\[C\d+\])?\s+${TX_POWER}(?:\s+\[C\d+\])?\s+${RX_POWER}(?:\s+\[C\d+\])?\s+${MODULE}\s*$$ -> Record
+  ^Interface\s+Temp
+  ^[-\s]+$$
+  ^\s*$$
+  ^\.\s*$$

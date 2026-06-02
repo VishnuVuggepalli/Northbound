@@ -519,6 +519,10 @@ _PORT_ELEMENTS = frozenset(
         "hundred-gigabit-ethernet",
         "fortygig-ethernet",
         "hundredgig-ethernet",
+        # Aggregated-ethernet bundles (LAGs) are switchport-like — include them
+        # so they show with their VLAN membership. (management-ethernet is
+        # IP-based, not a switchport; surfaced via device mgmt_ip, not here.)
+        "aggregated-ethernet",
     }
 )
 
