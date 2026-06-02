@@ -1,0 +1,18 @@
+Value FLAGS ([A-Z][>*\s]{0,3})
+Value PREFIX (\d+\.\d+\.\d+\.\d+/\d+)
+Value VIA (\d+\.\d+\.\d+\.\d+)
+Value INTERFACE ([\w/.-]+)
+Value AGE (\S+)
+
+Start
+  # FRR `show ip route`: code flags, prefix, then either "via NH, iface" or
+  # "is directly connected, iface", trailing "weight N, <age>". ECMP
+  # continuation lines start with whitespace and are skipped.
+  ^${FLAGS}\s+${PREFIX}\s+.*?via\s+${VIA},\s+${INTERFACE},.*,\s+${AGE}\s*$$ -> Record
+  ^${FLAGS}\s+${PREFIX}\s+(?:\[\S+\]\s+)?is directly connected,\s+${INTERFACE},.*,\s+${AGE}\s*$$ -> Record
+  ^Codes:
+  ^\s
+  ^show\s+ip\s+route
+  ^=+\s*$$
+  ^\s*$$
+  ^\.\s*$$

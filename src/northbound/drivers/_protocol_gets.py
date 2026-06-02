@@ -70,6 +70,7 @@ PROTOCOL_GETS: dict[str, tuple[ProtocolGet, ...]] = {
 # as their own pseudo-protocols so the framework stays uniform.
 STANDALONE_GETS: dict[str, tuple[ProtocolGet, ...]] = {
     "ARP": (ProtocolGet("ARP table", "show arp", "show_arp.textfsm"),),
+    "Routing": (ProtocolGet("IP routes", "show route", "show_route.textfsm"),),
     "Optics": (
         ProtocolGet(
             "Transceivers",
