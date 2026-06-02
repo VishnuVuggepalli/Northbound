@@ -18,6 +18,7 @@ const PLATFORM_COLOR: Record<Device['platform'], number> = {
   mock: 0x5a6472,
   arista: 0x1a4cb8,
   pica8: 0x9a4a1a,
+  mikrotik: 0xc4421a,
   freebsd: 0x6b4ea8,
 };
 

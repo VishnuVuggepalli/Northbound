@@ -194,6 +194,42 @@ def _build_pica8_netconf_client() -> NetconfClient:
 
 
 # ---------------------------------------------------------------------------
+# MikroTik — fake the RouterOS REST transport: GET /rest/<menu> serves the
+# matching fixture; PATCH/POST echo a 200. Mirrors HttpxClient's get/request.
+# ---------------------------------------------------------------------------
+class _FakeMikrotikClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+        self._dir = _FIXTURE_DIR / "mikrotik"
+
+    def _load(self, menu: str) -> Any:
+        import json
+
+        path = self._dir / (menu.replace("/", "_") + ".json")
+        return json.loads(path.read_text()) if path.exists() else []
+
+    async def get(self, url: str, *, headers: Any = None, params: Any = None) -> Any:
+        import httpx
+
+        self.calls.append(("GET", url))
+        menu = url.removeprefix("/rest/")
+        return httpx.Response(200, json=self._load(menu))
+
+    async def request(
+        self, method: str, url: str, *, headers: Any = None, json: Any = None, params: Any = None
+    ) -> Any:
+        import httpx
+
+        self.calls.append((method, url, str(json)))
+        if url == "/rest/export":
+            return httpx.Response(200, json=[{"ret": "# exported config\n/interface\n"}])
+        return httpx.Response(200, json=json or {})
+
+    async def aclose(self) -> None:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # The factory the contract suite consumes
 # ---------------------------------------------------------------------------
 
@@ -212,6 +248,8 @@ def driver_factory() -> Callable[[type[Driver]], Driver]:
             return cls(conn, creds, device=_build_cisco_device())  # type: ignore[call-arg]
         if cls.platform_id == "pica8":
             return cls(conn, creds, netconf=_build_pica8_netconf_client())  # type: ignore[call-arg]
+        if cls.platform_id == "mikrotik":
+            return cls(conn, creds, http=_FakeMikrotikClient())  # type: ignore[call-arg]
         return cls(conn, creds)
 
     return factory

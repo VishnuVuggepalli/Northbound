@@ -36,7 +36,14 @@ export function toEpochMs(value: string | number | null | undefined): number | n
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-const KNOWN_PLATFORMS: readonly Platform[] = ['arista', 'cisco', 'pica8', 'freebsd', 'mock'];
+const KNOWN_PLATFORMS: readonly Platform[] = [
+  'arista',
+  'cisco',
+  'pica8',
+  'mikrotik',
+  'freebsd',
+  'mock',
+];
 
 /** Coerce the backend's free-form `platform` string into the UI union. */
 export function toPlatform(raw: string): Platform {

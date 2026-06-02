@@ -26,7 +26,7 @@ export interface Site {
  * `/api/platforms` set: arista, cisco, pica8, freebsd (+ `mock` for testing).
  * MikroTik was dropped when the backend driver set was finalized.
  */
-export type Platform = 'arista' | 'cisco' | 'pica8' | 'freebsd' | 'mock';
+export type Platform = 'arista' | 'cisco' | 'pica8' | 'mikrotik' | 'freebsd' | 'mock';
 export type DeviceRole = 'leaf' | 'spine' | 'router' | 'vpn';
 export type UserRole = 'admin' | 'requester';
 export type PortState = 'up' | 'down' | 'disabled';
@@ -255,7 +255,7 @@ export type AuthMethod =
  * is kept distinct so the contract can grow OS-specific drivers later without
  * a UI-wide rename.
  */
-export type PlatformId = 'arista' | 'cisco' | 'pica8' | 'freebsd' | 'mock';
+export type PlatformId = 'arista' | 'cisco' | 'pica8' | 'mikrotik' | 'freebsd' | 'mock';
 
 export interface PlatformCapabilities {
   writable: boolean;

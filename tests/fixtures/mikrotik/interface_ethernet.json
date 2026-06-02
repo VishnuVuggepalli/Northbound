@@ -1,0 +1,5 @@
+[
+  {".id":"*1","name":"ether1","speed":"1Gbps"},
+  {".id":"*2","name":"ether2","speed":"1Gbps"},
+  {".id":"*9","name":"Ethernet1","speed":"10Gbps"}
+]

@@ -13,6 +13,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 # Order is alphabetical to keep /api/platforms output stable.
 import northbound.drivers.arista
 import northbound.drivers.cisco
+import northbound.drivers.mikrotik
 import northbound.drivers.mock
 import northbound.drivers.pica8  # noqa: F401  (registers)
 from northbound.api import (

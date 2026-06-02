@@ -88,6 +88,16 @@ export function renderConfigSnippet(device: Device, port: Port): string {
         `# vlans on ${port.name}: ${[v, ...tagged].join(',')}`,
         `ifconfig_${port.name}_${v}="inet 10.0.${v}.1/24"`,
       ].join('\n');
+    case 'mikrotik':
+      return [
+        `/interface set [find name=${port.name}] comment="${desc}"`,
+        `/interface ${port.admin_up ? 'enable' : 'disable'} [find name=${port.name}]`,
+        tagged.length
+          ? `# trunk: configure /interface bridge vlan tagged=${port.name} vlan-ids=${tagged.join(',')}`
+          : `/interface bridge port set [find interface=${port.name}] pvid=${v}`,
+      ]
+        .filter(Boolean)
+        .join('\n');
   }
 }
 
@@ -99,11 +109,28 @@ export function renderFullConfig(device: Device, ports: Port[]): string[] {
       return renderIos(device, ports, 'EOS');
     case 'pica8':
       return renderPica8(device, ports);
+    case 'mikrotik':
+      return renderMikrotik(device, ports);
     case 'freebsd':
       return renderFreeBSD(device, ports);
     case 'mock':
       return [`# mock driver · ${device.model}`, `hostname ${device.name}`];
   }
+}
+
+function renderMikrotik(device: Device, ports: Port[]): string[] {
+  const lines: string[] = [
+    `# RouterOS · ${device.model}`,
+    `/system identity set name=${device.name}`,
+  ];
+  for (const p of ports) {
+    lines.push(`/interface set [find name=${p.name}] ${p.admin_up ? 'disabled=no' : 'disabled=yes'}`);
+    if (p.description) lines.push(`/interface set [find name=${p.name}] comment="${p.description}"`);
+    if (p.tagged_vlans.length === 0) {
+      lines.push(`/interface bridge port set [find interface=${p.name}] pvid=${p.untagged_vlan}`);
+    }
+  }
+  return lines;
 }
 
 function renderIos(device: Device, ports: Port[], os: string): string[] {

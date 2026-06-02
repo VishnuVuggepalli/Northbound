@@ -1,0 +1,4 @@
+[
+  {".id":"*30","address":"192.168.88.1/24","interface":"bridge1","disabled":"false"},
+  {".id":"*31","address":"10.0.0.2/30","interface":"vlan100","disabled":"false"}
+]

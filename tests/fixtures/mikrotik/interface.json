@@ -1,0 +1,7 @@
+[
+  {".id":"*1","name":"ether1","type":"ether","disabled":"false","running":"true","mtu":"1500","mac-address":"AA:BB:CC:00:00:01","comment":"uplink"},
+  {".id":"*2","name":"ether2","type":"ether","disabled":"true","running":"false","mtu":"1500","mac-address":"AA:BB:CC:00:00:02","comment":""},
+  {".id":"*3","name":"bridge1","type":"bridge","disabled":"false","running":"true","mtu":"1500","mac-address":"AA:BB:CC:00:00:03","comment":""},
+  {".id":"*4","name":"vlan100","type":"vlan","disabled":"false","running":"true","mtu":"1500","mac-address":"AA:BB:CC:00:00:03","comment":"mgmt-svi"},
+  {".id":"*9","name":"Ethernet1","type":"ether","disabled":"false","running":"true","mtu":"1500","mac-address":"AA:BB:CC:00:00:09","comment":""}
+]
