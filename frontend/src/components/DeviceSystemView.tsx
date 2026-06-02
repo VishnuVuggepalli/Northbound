@@ -6,7 +6,10 @@ import { KV } from '@/components/ui/KV';
 import { DataTable } from '@/components/ui/DataTable';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Input } from '@/components/ui/Input';
+import { cn } from '@/lib/cn';
 import type { Device } from '@/types';
+
+type SubTab = 'overview' | 'interfaces' | 'vlans' | 'mac' | 'diagnostics';
 
 function SectionTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -28,6 +31,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const { data: l3 = [] } = useL3Interfaces(device.id);
   const [macFilter, setMacFilter] = useState('');
   const [vlanFilter, setVlanFilter] = useState('');
+  const [sub, setSub] = useState<SubTab>('overview');
 
   const vlanRows = useMemo(() => {
     const q = vlanFilter.trim().toLowerCase();
@@ -81,8 +85,36 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
     ['Released', f.released],
   ].filter(([, v]) => v) as [string, string][];
 
+  const SUBTABS: { id: SubTab; label: string; icon: React.ReactNode }[] = [
+    { id: 'overview', label: 'Overview', icon: <Cpu size={12} /> },
+    { id: 'interfaces', label: 'Interfaces', icon: <Router size={12} /> },
+    { id: 'vlans', label: 'VLANs', icon: <Layers size={12} /> },
+    { id: 'mac', label: 'MAC', icon: <Table2 size={12} /> },
+    { id: 'diagnostics', label: 'Diagnostics', icon: <Activity size={12} /> },
+  ];
+
   return (
-    <div className="h-full overflow-auto nb-scroll px-4 pb-16">
+    <div className="flex h-full flex-col">
+      <nav className="flex items-center gap-0.5 border-b border-border px-4 py-2">
+        {SUBTABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setSub(t.id)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium',
+              sub === t.id ? 'bg-bg-elev-2 text-fg' : 'text-fg-muted hover:text-fg',
+            )}
+          >
+            {t.icon}
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="min-h-0 flex-1 overflow-auto nb-scroll px-4 pb-16">
+      {sub === 'overview' && (
+        <>
       {factRows.length > 0 && (
         <Section title={<SectionTitle icon={<Cpu size={13} className="text-accent" />}>Device</SectionTitle>}>
           <dl className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1 px-1 text-xs">
@@ -92,31 +124,6 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
               </KV>
             ))}
           </dl>
-        </Section>
-      )}
-      {l3.length > 0 && (
-        <Section
-          title={
-            <SectionTitle icon={<Router size={13} className="text-accent" />}>
-              Interfaces
-              <span className="nb-mono ml-1 text-xs text-fg-subtle">{l3.length}</span>
-            </SectionTitle>
-          }
-        >
-          <div className="px-1">
-            <DataTable
-              columns={['Interface', 'Kind', 'IPv4', 'Gateway', 'MTU', 'Notes']}
-              rows={l3.map((i) => [
-                i.name,
-                i.kind === 'svi' ? 'L3 SVI' : i.kind === 'management' ? 'Management' : 'LAG',
-                i.ipv4,
-                i.gateway,
-                i.mtu != null ? String(i.mtu) : '',
-                i.enabled ? i.detail : `disabled${i.detail ? ' · ' + i.detail : ''}`,
-              ])}
-              cellClass={(j) => (j === 0 ? 'text-fg' : j === 2 ? 'text-link' : 'text-fg-muted')}
-            />
-          </div>
         </Section>
       )}
       <Section title={<SectionTitle icon={<Network size={13} className="text-accent" />}>Control-plane protocols</SectionTitle>}>
@@ -176,7 +183,40 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
           </ul>
         )}
       </Section>
+        </>
+      )}
 
+      {sub === 'interfaces' && (
+        <Section
+          title={
+            <SectionTitle icon={<Router size={13} className="text-accent" />}>
+              Interfaces
+              <span className="nb-mono ml-1 text-xs text-fg-subtle">{l3.length}</span>
+            </SectionTitle>
+          }
+        >
+          {l3.length === 0 ? (
+            <p className="px-1 text-xs text-fg-subtle">No addressed interfaces reported.</p>
+          ) : (
+            <div className="px-1">
+              <DataTable
+                columns={['Interface', 'Kind', 'IPv4', 'Gateway', 'MTU', 'Notes']}
+                rows={l3.map((i) => [
+                  i.name,
+                  i.kind === 'svi' ? 'L3 SVI' : i.kind === 'management' ? 'Management' : 'LAG',
+                  i.ipv4,
+                  i.gateway,
+                  i.mtu != null ? String(i.mtu) : '',
+                  i.enabled ? i.detail : `disabled${i.detail ? ' · ' + i.detail : ''}`,
+                ])}
+                cellClass={(j) => (j === 0 ? 'text-fg' : j === 2 ? 'text-link' : 'text-fg-muted')}
+              />
+            </div>
+          )}
+        </Section>
+      )}
+
+      {sub === 'mac' && (
       <Section
         title={
           <SectionTitle icon={<Table2 size={13} className="text-accent" />}>
@@ -219,7 +259,9 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
           </div>
         )}
       </Section>
+      )}
 
+      {sub === 'vlans' && (
       <Section
         title={
           <SectionTitle icon={<Layers size={13} className="text-accent" />}>
@@ -258,7 +300,9 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
           </div>
         )}
       </Section>
+      )}
 
+      {sub === 'diagnostics' && (
       <Section
         title={
           <SectionTitle icon={<Activity size={13} className="text-accent" />}>
@@ -273,6 +317,8 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
           <ProtocolGets deviceId={device.id} slug="ARP" label="ARP table" />
         </div>
       </Section>
+      )}
+      </div>
     </div>
   );
 }
