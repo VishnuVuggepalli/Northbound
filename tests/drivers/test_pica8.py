@@ -380,3 +380,42 @@ def test_parse_vlans_xml() -> None:
     assert vlans[1010].l3_interface == "vlan1010" and vlans[1010].port_count == 14
     assert vlans[2004].name == "2004" and vlans[2004].description == "prod"
     assert vlans[1].port_count == 0
+
+
+_SHOW_INTERFACE = """Physical interface: xe-1/1/1, Enabled, error-discard False, Physical link is Down
+Port mode: trunk
+Link-level type: Ethernet, MTU: 9220, Speed: Auto, Duplex: Full, FEC Enable: False
+Current address: 64:9d:99:d2:6f:d4, Hardware address: 64:9d:99:d2:6f:d4
+Physical interface: xe-1/1/9, Enabled, error-discard False, Physical link is Up
+Port mode: access
+Link-level type: Ethernet, MTU: 1558, Speed: 40Gb/s, Duplex: Full, FEC Enable: False
+Current address: 64:9d:99:d2:6f:aa, Hardware address: 64:9d:99:d2:6f:aa
+"""
+
+
+def test_speed_to_mbps() -> None:
+    from northbound.drivers.pica8 import _speed_to_mbps
+
+    assert _speed_to_mbps("40Gb/s") == 40000
+    assert _speed_to_mbps("10Gb/s") == 10000
+    assert _speed_to_mbps("1000") == 1000
+    assert _speed_to_mbps("100Mb/s") == 100
+    assert _speed_to_mbps("Auto") is None
+    assert _speed_to_mbps("") is None
+
+
+def test_parse_interface_oper_and_merge() -> None:
+    from northbound.drivers.pica8 import _merge_oper, _parse_interface_oper
+
+    oper = _parse_interface_oper(_SHOW_INTERFACE)
+    assert oper["xe-1/1/9"]["link_up"] is True
+    assert oper["xe-1/1/9"]["speed_mbps"] == 40000
+    assert oper["xe-1/1/9"]["duplex"] == "full"
+    assert oper["xe-1/1/9"]["mac"] == "64:9d:99:d2:6f:aa"
+    assert oper["xe-1/1/1"]["link_up"] is False and oper["xe-1/1/1"]["speed_mbps"] is None
+
+    merged = _merge_oper(_port("xe-1/1/9"), oper["xe-1/1/9"])
+    assert merged.speed_mbps == 40000 and merged.duplex == "full"
+    assert merged.mac == "64:9d:99:d2:6f:aa" and merged.link_up is True
+    # no oper data -> unchanged
+    assert _merge_oper(_port("x"), None).speed_mbps is None

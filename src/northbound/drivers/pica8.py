@@ -200,7 +200,17 @@ class Pica8Driver(Driver):
             cfg = await self._netconf.get_config(source="running")
         except Exception:
             return []
-        return _parse_interfaces_xml(cfg)
+        ports = _parse_interfaces_xml(cfg)
+        # NETCONF get-config carries no operational state, so speed/duplex/MAC/
+        # link come back empty. Enrich from `show interface` over SSH (one call,
+        # all ports). Best-effort: if SSH is unavailable, keep the config view.
+        try:
+            out = await self._ssh.run('cli -c "show interface"')
+            oper = _parse_interface_oper(out)
+            ports = [_merge_oper(p, oper.get(p.name)) for p in ports]
+        except Exception:
+            pass
+        return ports
 
     async def get_neighbors(self, port: str | None = None) -> list[Neighbor]:
         try:
@@ -348,6 +358,60 @@ def _classify_netconf_error(exc: BaseException) -> str:
     if "connect" in msg or "timeout" in msg or "refused" in msg:
         return f"reachability error: {exc}"
     return str(exc)
+
+
+def _speed_to_mbps(raw: str) -> int | None:
+    """'40Gb/s'->40000, '10Gb/s'->10000, '1000'->1000, '100Mb/s'->100, 'Auto'->None."""
+    s = raw.strip().lower().replace("b/s", "").replace("bps", "")
+    if not s or s in ("auto", "unknown", "n/a", "-"):
+        return None
+    try:
+        if s.endswith("g"):
+            return int(float(s[:-1]) * 1000)
+        if s.endswith("m"):
+            return int(float(s[:-1]))
+        return int(float(s))
+    except ValueError:
+        return None
+
+
+def _parse_interface_oper(text: str) -> dict[str, dict[str, object]]:
+    """Parse `show interface` operational blocks -> {iface: {link_up, speed_mbps,
+    duplex, mac, mtu}} via TextFSM (templates/pica8/show_interface.textfsm)."""
+    from northbound.drivers._protocol_gets import parse_table
+
+    table = parse_table("interfaces", "show_interface.textfsm", text)
+    cols = {c: i for i, c in enumerate(table.columns)}
+    out: dict[str, dict[str, object]] = {}
+    for row in table.rows:
+        name = row[cols["Name"]]
+        duplex = row[cols["Duplex"]].strip().lower()
+        mtu_raw = row[cols["Mtu"]]
+        out[name] = {
+            "link_up": row[cols["Link"]] == "Up",
+            "speed_mbps": _speed_to_mbps(row[cols["Speed"]]),
+            "duplex": duplex if duplex in ("full", "half") else None,
+            "mac": (row[cols["Mac"]] or "").lower() or None,
+            "mtu": int(mtu_raw) if mtu_raw.isdigit() else None,
+        }
+    return out
+
+
+def _merge_oper(port: PortState, oper: dict[str, object] | None) -> PortState:
+    """Overlay operational fields (speed/duplex/mac/link/mtu) onto a config-only
+    PortState. Returns a new immutable PortState (no mutation)."""
+    if not oper:
+        return port
+    from dataclasses import replace
+
+    return replace(
+        port,
+        link_up=bool(oper.get("link_up", port.link_up)),
+        speed_mbps=oper.get("speed_mbps") or port.speed_mbps,  # type: ignore[arg-type]
+        duplex=oper.get("duplex") or port.duplex,  # type: ignore[arg-type]
+        mac=oper.get("mac") or port.mac,  # type: ignore[arg-type]
+        mtu=oper.get("mtu") or port.mtu,  # type: ignore[arg-type]
+    )
 
 
 def _localname(tag: object) -> str:
