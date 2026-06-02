@@ -53,6 +53,7 @@ from northbound.schemas.driver import (
     DeviceFacts,
     DiscoveryResult,
     DriverCapabilities,
+    L3Interface,
     MacEntry,
     MgmtService,
     Neighbor,
@@ -289,6 +290,14 @@ class Pica8Driver(Driver):
                 if isinstance(v, int):
                     usage[v] = usage.get(v, 0) + 1
         return _parse_vlans_xml(cfg, usage)
+
+    async def get_l3_interfaces(self) -> list[L3Interface]:
+        """Management port, L3 VLAN SVIs, and aggregated-ethernet from config."""
+        try:
+            cfg = await self._netconf.get_config(source="running")
+        except Exception:
+            return []
+        return _parse_l3_interfaces_xml(cfg)
 
     # ---------- write ----------
 
@@ -615,6 +624,65 @@ def _parse_vlans_xml(xml: str, usage: dict[int, int]) -> list[VlanInfo]:
             )
         )
     out.sort(key=lambda v: v.vlan_id)
+    return out
+
+
+def _parse_l3_interfaces_xml(xml: str) -> list[L3Interface]:
+    """Addressed interfaces from config: management-ethernet (eth0 + gateway),
+    l3-interface vlan SVIs (ip/prefix/mtu), and aggregated-ethernet (LAGs)."""
+    root = _safe_parse(xml)
+    if root is None:
+        return []
+    out: list[L3Interface] = []
+
+    # Management port: <management-ethernet><name>eth0</name>
+    #   <ip-address><IPv4>192.168.85.202/24</IPv4></ip-address>
+    #   <ip-gateway><IPv4>192.168.85.10</IPv4></ip-gateway>
+    mgmt = _find_first(root, "management-ethernet")
+    if mgmt is not None:
+        ip_el = _find_first(mgmt, "ip-address")
+        gw_el = _find_first(mgmt, "ip-gateway")
+        out.append(
+            L3Interface(
+                name=_child_text(mgmt, "name") or "eth0",
+                kind="management",
+                ipv4=(_child_text(ip_el, "IPv4") or "") if ip_el is not None else "",
+                gateway=(_child_text(gw_el, "IPv4") or "") if gw_el is not None else "",
+            )
+        )
+
+    # SVIs: <l3-interface><vlan-interface><name>vlan1010</name>
+    #   <address><ip>10.10.250.2</ip><prefix-length>16</prefix-length></address>
+    for vi in root.iter():
+        if _localname(vi.tag) != "vlan-interface":
+            continue
+        addr = _find_first(vi, "address")
+        ip = _child_text(addr, "ip") if addr is not None else None
+        prefix = _child_text(addr, "prefix-length") if addr is not None else None
+        ipv4 = f"{ip}/{prefix}" if ip and prefix else (ip or "")
+        mtu_text = _child_text(vi, "mtu")
+        out.append(
+            L3Interface(
+                name=_child_text(vi, "name") or "",
+                kind="svi",
+                ipv4=ipv4,
+                mtu=int(mtu_text) if mtu_text and mtu_text.isdigit() else None,
+                enabled=(_child_text(vi, "disable") or "").strip().lower() != "true",
+            )
+        )
+
+    # LAGs: <aggregated-ethernet><name>ae0</name>... (members best-effort)
+    for ae in root.iter():
+        if _localname(ae.tag) != "aggregated-ethernet":
+            continue
+        members = [_child_text(m, "name") or "" for m in ae.iter() if _localname(m.tag) == "member"]
+        out.append(
+            L3Interface(
+                name=_child_text(ae, "name") or "",
+                kind="aggregated",
+                detail=", ".join(m for m in members if m),
+            )
+        )
     return out
 
 

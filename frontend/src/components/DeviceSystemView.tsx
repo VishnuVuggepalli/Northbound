@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Activity, ChevronDown, ChevronRight, Cpu, Layers, Loader2, Network, ShieldCheck, Table2 } from 'lucide-react';
-import { useProtocolDetail, useSystemInfo, useVlans } from '@/api/queries';
+import { Activity, ChevronDown, ChevronRight, Cpu, Layers, Loader2, Network, Router, ShieldCheck, Table2 } from 'lucide-react';
+import { useL3Interfaces, useProtocolDetail, useSystemInfo, useVlans } from '@/api/queries';
 import { Section } from '@/components/ui/Section';
 import { KV } from '@/components/ui/KV';
 import { DataTable } from '@/components/ui/DataTable';
@@ -25,6 +25,7 @@ interface DeviceSystemViewProps {
 export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const { data, isLoading, isError, error } = useSystemInfo(device.id);
   const { data: vlans = [] } = useVlans(device.id);
+  const { data: l3 = [] } = useL3Interfaces(device.id);
   const [macFilter, setMacFilter] = useState('');
   const [vlanFilter, setVlanFilter] = useState('');
 
@@ -91,6 +92,31 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
               </KV>
             ))}
           </dl>
+        </Section>
+      )}
+      {l3.length > 0 && (
+        <Section
+          title={
+            <SectionTitle icon={<Router size={13} className="text-accent" />}>
+              Interfaces
+              <span className="nb-mono ml-1 text-xs text-fg-subtle">{l3.length}</span>
+            </SectionTitle>
+          }
+        >
+          <div className="px-1">
+            <DataTable
+              columns={['Interface', 'Kind', 'IPv4', 'Gateway', 'MTU', 'Notes']}
+              rows={l3.map((i) => [
+                i.name,
+                i.kind === 'svi' ? 'L3 SVI' : i.kind === 'management' ? 'Management' : 'LAG',
+                i.ipv4,
+                i.gateway,
+                i.mtu != null ? String(i.mtu) : '',
+                i.enabled ? i.detail : `disabled${i.detail ? ' · ' + i.detail : ''}`,
+              ])}
+              cellClass={(j) => (j === 0 ? 'text-fg' : j === 2 ? 'text-link' : 'text-fg-muted')}
+            />
+          </div>
         </Section>
       )}
       <Section title={<SectionTitle icon={<Network size={13} className="text-accent" />}>Control-plane protocols</SectionTitle>}>

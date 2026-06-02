@@ -24,6 +24,7 @@ import type {
   OnboardingDraft,
   Port,
   PortListSnapshot,
+  L3Interface,
   PortMap,
   ProtocolDetail,
   Site,
@@ -242,6 +243,10 @@ export async function getProtocolDetail(id: string, slug: string): Promise<Proto
 
 export async function getVlans(id: string): Promise<VlanInfo[]> {
   return request<VlanInfo[]>(`/api/devices/${encodeURIComponent(id)}/vlans`);
+}
+
+export async function getL3Interfaces(id: string): Promise<L3Interface[]> {
+  return request<L3Interface[]>(`/api/devices/${encodeURIComponent(id)}/l3-interfaces`);
 }
 
 export async function listLinks(_env?: Environment): Promise<readonly TopologyLink[]> {

@@ -111,6 +111,19 @@ class VlanInfo:
 
 
 @dataclass(frozen=True)
+class L3Interface:
+    """A non-switchport / addressed interface: management, SVI, or LAG."""
+
+    name: str
+    kind: str  # "management" | "svi" | "aggregated"
+    ipv4: str = ""  # e.g. "10.10.250.2/16"
+    gateway: str = ""
+    mtu: int | None = None
+    enabled: bool = True
+    detail: str = ""  # free-form (e.g. LAG members)
+
+
+@dataclass(frozen=True)
 class ProtocolTable:
     """One operational table (e.g. OSPF neighbors) — column headers + rows."""
 

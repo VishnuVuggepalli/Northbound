@@ -31,6 +31,7 @@ export const queryKeys = {
   protocol: (deviceId: string, slug: string) =>
     ['devices', deviceId, 'protocol', slug] as const,
   vlans: (deviceId: string) => ['devices', deviceId, 'vlans'] as const,
+  l3: (deviceId: string) => ['devices', deviceId, 'l3-interfaces'] as const,
 } as const;
 
 export function useDevices(env?: Environment) {
@@ -107,6 +108,14 @@ export function useVlans(deviceId: string | null | undefined) {
   return useQuery({
     queryKey: queryKeys.vlans(deviceId ?? ''),
     queryFn: () => api.getVlans(deviceId!),
+    enabled: !!deviceId,
+  });
+}
+
+export function useL3Interfaces(deviceId: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.l3(deviceId ?? ''),
+    queryFn: () => api.getL3Interfaces(deviceId!),
     enabled: !!deviceId,
   });
 }

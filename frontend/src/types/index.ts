@@ -201,6 +201,16 @@ export interface VlanInfo {
   port_count: number;
 }
 
+export interface L3Interface {
+  name: string;
+  kind: string; // "management" | "svi" | "aggregated"
+  ipv4: string;
+  gateway: string;
+  mtu: number | null;
+  enabled: boolean;
+  detail: string;
+}
+
 export interface MgmtService {
   name: string;
   enabled: boolean;

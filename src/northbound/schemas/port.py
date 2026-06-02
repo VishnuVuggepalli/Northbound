@@ -115,6 +115,16 @@ class VlanInfoOut(BaseModel):
     port_count: int = 0
 
 
+class L3InterfaceOut(BaseModel):
+    name: str
+    kind: str
+    ipv4: str = ""
+    gateway: str = ""
+    mtu: int | None = None
+    enabled: bool = True
+    detail: str = ""
+
+
 class ProtocolTableOut(BaseModel):
     title: str
     columns: list[str] = Field(default_factory=list)

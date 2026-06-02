@@ -17,6 +17,7 @@ from northbound.schemas.driver import (
     Credentials,
     DiscoveryResult,
     DriverCapabilities,
+    L3Interface,
     Neighbor,
     PortChange,
     PortState,
@@ -122,6 +123,10 @@ class Driver(ABC):
 
     async def get_vlans(self) -> list[VlanInfo]:
         """The device's VLAN database (id/name/description/SVI/usage). Default: none."""
+        return []
+
+    async def get_l3_interfaces(self) -> list[L3Interface]:
+        """Addressed/non-switchport interfaces: management, SVIs, LAGs. Default: none."""
         return []
 
     # ---------- write (NotSupported if writable=False) ----------

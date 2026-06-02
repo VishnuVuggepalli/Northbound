@@ -34,6 +34,7 @@ from northbound.schemas.port import (
     BackupOut,
     ConfigOut,
     DeviceFactsOut,
+    L3InterfaceOut,
     MacEntryOut,
     MgmtServiceOut,
     PortDetailOut,
@@ -327,6 +328,38 @@ async def get_vlans(
             port_count=v.port_count,
         )
         for v in vlans
+    ]
+
+
+@router.get("/{device_id}/l3-interfaces", response_model=list[L3InterfaceOut])
+async def get_l3_interfaces(
+    device_id: str,
+    _user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[L3InterfaceOut]:
+    """Addressed/non-switchport interfaces: management port, L3 VLAN SVIs, LAGs."""
+    device = await _load_device(session, device_id)
+    creds = _credentials_for(device)
+    driver = driver_for(device, creds)
+    try:
+        ifaces = await driver.get_l3_interfaces()
+    except DriverError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Interface fetch failed: {exc}"
+        ) from exc
+    finally:
+        await driver.aclose()
+    return [
+        L3InterfaceOut(
+            name=i.name,
+            kind=i.kind,
+            ipv4=i.ipv4,
+            gateway=i.gateway,
+            mtu=i.mtu,
+            enabled=i.enabled,
+            detail=i.detail,
+        )
+        for i in ifaces
     ]
 
 
