@@ -26,6 +26,8 @@ export const queryKeys = {
   audit: (deviceId?: string, port?: string) =>
     ['audit', deviceId ?? 'all', port ?? 'all'] as const,
   users: () => ['users'] as const,
+  sites: () => ['sites'] as const,
+  system: (deviceId: string) => ['devices', deviceId, 'system'] as const,
 } as const;
 
 export function useDevices(env?: Environment) {
@@ -78,7 +80,27 @@ export function usePlatforms() {
   return useQuery({ queryKey: queryKeys.platforms(), queryFn: () => api.listPlatforms() });
 }
 
+export function useSites() {
+  return useQuery({ queryKey: queryKeys.sites(), queryFn: () => api.listSites() });
+}
+
+export function useSystemInfo(deviceId: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.system(deviceId ?? ''),
+    queryFn: () => api.getSystemInfo(deviceId!),
+    enabled: !!deviceId,
+  });
+}
+
 /* ------------------------------------ mutations ------------------------------------ */
+
+export function useCreateSite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { slug: string; name: string }) => api.createSite(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.sites() }),
+  });
+}
 
 function invalidateRequestsAndPorts(qc: QueryClient, deviceId: string) {
   qc.invalidateQueries({ queryKey: ['requests'] });

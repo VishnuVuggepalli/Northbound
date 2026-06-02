@@ -7,7 +7,20 @@
  * unchanged.
  */
 
-export type Environment = 'lab' | 'dc';
+/**
+ * A site slug — the URL-safe identifier of a runtime-managed site (formerly the
+ * fixed `'lab' | 'dc'` enum). Now a free-form string backed by the sites
+ * catalog; see {@link Site} and `GET /api/sites`.
+ */
+export type Environment = string;
+
+/** A site in the catalog (location/environment a device lives in). */
+export interface Site {
+  id: string;
+  slug: string;
+  name: string;
+  deviceCount: number;
+}
 /**
  * Broad device-facing platform category. Matches the real backend's
  * `/api/platforms` set: arista, cisco, pica8, freebsd (+ `mock` for testing).
@@ -44,7 +57,8 @@ export interface Device {
   model: string;
   portCount: number;
   portKind: PortKind;
-  reachable: boolean;
+  /** true=reachable, false=unreachable, null=not yet polled (unknown). */
+  reachable: boolean | null;
   /**
    * SSH login user (FreeBSD copy-chip). Optional; the UI defaults to `root`
    * when absent.
@@ -151,6 +165,35 @@ export interface User {
 
 export interface PortMap {
   [deviceId: string]: Port[];
+}
+
+/** Live system snapshot (protocols / mgmt services / MAC table). */
+export interface MacEntry {
+  vlan: number | null;
+  mac: string;
+  interface: string;
+  type: string;
+  age: string | null;
+}
+
+export interface ProtocolStatus {
+  name: string;
+  enabled: boolean;
+  detail: string;
+}
+
+export interface MgmtService {
+  name: string;
+  enabled: boolean;
+  port: number | null;
+  detail: string;
+}
+
+export interface SystemInfo {
+  protocols: ProtocolStatus[];
+  services: MgmtService[];
+  mac_table: MacEntry[];
+  mac_supported: boolean;
 }
 
 /**

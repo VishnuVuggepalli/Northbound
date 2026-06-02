@@ -165,7 +165,8 @@ function InstancedPortGrid({ ports, positions, type, selected, onPick }: Instanc
     const ledColor = new THREE.Color();
     const stripe = new THREE.Color();
     ports.forEach((port, i) => {
-      const pos = positions[i]!;
+      const pos = positions[i];
+      if (!pos) return; // never index past the positions array
       dummy.position.copy(pos);
       dummy.updateMatrix();
       meshRef.current!.setMatrixAt(i, dummy.matrix);
@@ -309,7 +310,8 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
         />
       ) : (
         ports.map((port, i) => {
-          const p = positions[i]!;
+          const p = positions[i];
+          if (!p) return null; // guard against a short positions array
           return (
             <PortMesh
               key={port.name}
@@ -345,27 +347,24 @@ export function Switch3D({ device, ports, selectedPort, onPick, theme }: Switch3
       }
       return out;
     }
-    const colsW = layout.cols * 0.55;
-    const rowsH = layout.rows * 0.65;
+    // Lay EVERY port out in a `layout.cols`-wide grid, flowing into as many
+    // rows as needed. The faceplate's nominal row count is a hint for sizing,
+    // but real devices can report more ports than rows*cols (e.g. PicOS
+    // breakout sub-interfaces). Capping positions at the faceplate size left
+    // positions[i] === undefined for the overflow and crashed the instanced
+    // renderer — so we never cap: one position per port, always.
+    const cols = Math.max(1, layout.cols);
+    const rowCount = Math.max(layout.rows, Math.ceil(ports.length / cols));
+    const colsW = cols * 0.55;
+    const rowsH = rowCount * 0.65;
     const startX = -colsW / 2 + 0.275 + 0.7;
     const startY = rowsH / 2 - 0.325 - 0.05;
-    let idx = 0;
-    for (let r = 0; r < layout.rows; r++) {
-      for (let c = 0; c < layout.cols; c++) {
-        if (idx >= ports.length) break;
-        const x = startX + c * 0.55;
-        const y = startY - r * 0.65;
-        out.push(new THREE.Vector3(x, y, chassisD / 2 + 0.15));
-        idx++;
-      }
-    }
-    if (layout.extra?.kind === 'sfp') {
-      for (let i = 0; i < layout.extra.count; i++) {
-        if (idx >= ports.length) break;
-        const x = startX + layout.cols * 0.55 + 0.2 + i * 0.55;
-        out.push(new THREE.Vector3(x, 0, chassisD / 2 + 0.15));
-        idx++;
-      }
+    for (let i = 0; i < ports.length; i++) {
+      const r = Math.floor(i / cols);
+      const c = i % cols;
+      const x = startX + c * 0.55;
+      const y = startY - r * 0.65;
+      out.push(new THREE.Vector3(x, y, chassisD / 2 + 0.15));
     }
     return out;
   }, [layout, ports.length, isFreebsd]);

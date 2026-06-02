@@ -51,6 +51,10 @@ export function RequestRow({
   const [rejecting, setRejecting] = useState(false);
   const [comment, setComment] = useState('');
   const [confirmingApply, setConfirmingApply] = useState(false);
+  // Called unconditionally (before the early return) to keep hook order stable
+  // across renders — react-hooks/rules-of-hooks. A conditional hook crashes the
+  // row to blank once data loads.
+  const { data: platforms } = usePlatforms();
   const isAdmin = user.role === 'admin';
   if (!device || !port) return null;
   const after = applyChangeToPort(port, request.requested_changes);
@@ -58,7 +62,6 @@ export function RequestRow({
   // (router/vpn) with platform capability (writable=false on SwOS+FreeBSD).
   // Approve-only stays available so admins can still triage the queue; the
   // apply path is a hard block.
-  const { data: platforms } = usePlatforms();
   const platform = findPlatformForDevice(device, platforms ?? []);
   const writeLocked = isWriteLocked(device, platform);
 

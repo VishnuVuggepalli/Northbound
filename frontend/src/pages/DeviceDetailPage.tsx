@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, FileText } from 'lucide-react';
+import { ChevronRight, Cpu, FileText } from 'lucide-react';
 import { Switch3D } from '@/components/three/Switch3D';
 import { PortStrip } from '@/components/PortStrip';
 import { PortPanel } from '@/components/PortPanel';
 import { DeviceConfigView } from '@/components/DeviceConfigView';
+import { DeviceSystemView } from '@/components/DeviceSystemView';
 import { VendorActions } from '@/components/VendorActions';
 import { PlatformIcon } from '@/components/ui/PlatformIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
@@ -24,7 +25,7 @@ import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
 import type { Environment } from '@/types';
 
-type Tab = 'ports' | 'config';
+type Tab = 'ports' | 'config' | 'system';
 
 export function DeviceDetailPage() {
   const { env, deviceId } = useParams<{ env: Environment; deviceId: string }>();
@@ -43,6 +44,10 @@ export function DeviceDetailPage() {
   const ports = portSnapshot?.ports ?? [];
   const { data: requests = [] } = useRequests();
   const { data: audit = [] } = useAudit();
+  // Must be called unconditionally (before any early return) so the hook order
+  // is stable across renders — otherwise React crashes the page to blank once
+  // `device` loads and an extra hook appears. (react-hooks/rules-of-hooks)
+  const { data: platforms } = usePlatforms();
 
   // Sync the route's device id into the UI store so global hotkeys (j/k/r)
   // know which device's ports to navigate. Reaching this page via URL (no
@@ -66,7 +71,6 @@ export function DeviceDetailPage() {
   }
 
   const selectedPortObj = selectedPort ? ports.find((p) => p.name === selectedPort) : null;
-  const { data: platforms } = usePlatforms();
   const platform = findPlatformForDevice(device, platforms ?? []);
   const readOnly = isWriteLocked(device, platform);
 
@@ -98,8 +102,17 @@ export function DeviceDetailPage() {
               <span className="nb-mono">{device.mgmt_ip}</span>
               <span>·</span>
               <span className="flex items-center gap-1">
-                <StatusDot state={device.reachable ? 'up' : 'down'} size={6} />
-                {device.reachable ? 'reachable' : 'unreachable'}
+                <StatusDot
+                  state={
+                    device.reachable == null ? 'pending' : device.reachable ? 'up' : 'down'
+                  }
+                  size={6}
+                />
+                {device.reachable == null
+                  ? 'checking…'
+                  : device.reachable
+                    ? 'reachable'
+                    : 'unreachable'}
               </span>
               {readOnly && <Badge variant="warn">Read-only</Badge>}
             </div>
@@ -129,38 +142,51 @@ export function DeviceDetailPage() {
             <FileText size={11} />
             Config
           </button>
+          <button
+            type="button"
+            onClick={() => setTab('system')}
+            className={cn(
+              'flex items-center gap-1 rounded-[4px] px-3 py-1.5 font-medium',
+              tab === 'system' ? 'bg-bg-elev-2 text-fg' : 'text-fg-muted hover:text-fg',
+            )}
+          >
+            <Cpu size={11} />
+            System
+          </button>
           </nav>
         </div>
       </header>
 
-      {tab === 'ports' ? (
-        <div className="grid h-[calc(100%-3.5rem)] grid-rows-[1.6fr_1fr]">
-          <div
-            className="nb-reveal overflow-hidden p-4"
-            style={{ '--nb-reveal-i': 1 } as React.CSSProperties}
-          >
-            <Switch3D
-              device={device}
-              ports={ports}
-              theme={theme}
-              selectedPort={selectedPort}
-              onPick={(p) => selectPort(p.name)}
-            />
+      <div className="min-h-0 flex-1">
+        {tab === 'ports' && (
+          <div className="grid h-full grid-rows-[1.6fr_1fr]">
+            <div
+              className="nb-reveal overflow-hidden p-4"
+              style={{ '--nb-reveal-i': 1 } as React.CSSProperties}
+            >
+              <Switch3D
+                device={device}
+                ports={ports}
+                theme={theme}
+                selectedPort={selectedPort}
+                onPick={(p) => selectPort(p.name)}
+              />
+            </div>
+            <div className="overflow-hidden border-t border-border bg-bg-elev-1/40">
+              <PortStrip
+                device={device}
+                ports={ports}
+                requests={requests}
+                selected={selectedPort}
+                theme={theme}
+                onSelect={(name) => selectPort(name)}
+              />
+            </div>
           </div>
-          <div className="overflow-hidden border-t border-border bg-bg-elev-1/40">
-            <PortStrip
-              device={device}
-              ports={ports}
-              requests={requests}
-              selected={selectedPort}
-              theme={theme}
-              onSelect={(name) => selectPort(name)}
-            />
-          </div>
-        </div>
-      ) : (
-        <DeviceConfigView device={device} ports={ports} user={user!} />
-      )}
+        )}
+        {tab === 'config' && <DeviceConfigView device={device} ports={ports} user={user!} />}
+        {tab === 'system' && <DeviceSystemView device={device} />}
+      </div>
 
       {selectedPortObj && (
         <PortPanel

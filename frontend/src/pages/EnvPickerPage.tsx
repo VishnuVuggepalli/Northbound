@@ -6,7 +6,7 @@ import { Wordmark } from '@/components/ui/Wordmark';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
-import { useAllPorts, useDevices, useLinks, useRequests } from '@/api/queries';
+import { useAllPorts, useDevices, useLinks, useRequests, useSites } from '@/api/queries';
 import { timeAgo } from '@/lib/format';
 import type { Environment } from '@/types';
 
@@ -15,31 +15,25 @@ export function EnvPickerPage() {
   const user = useAuthStore((s) => s.user);
   const theme = useThemeStore((s) => s.theme);
   const setEnv = useUIStore((s) => s.setEnv);
+  const { data: sites = [] } = useSites();
   const { data: devices = [] } = useDevices();
   const { data: ports = {} } = useAllPorts();
   const { data: links = [] } = useLinks();
   const { data: requests = [] } = useRequests();
 
-  const envs = useMemo<Environment[]>(() => ['lab', 'dc'], []);
-
+  // Per-site stats, keyed by slug, computed from live devices/ports/requests.
   const stats = useMemo(() => {
-    const out: Record<Environment, {
-      devices: number;
-      ports: number;
-      up: number;
-      pending: number;
-      updated: number;
-    }> = {
-      lab: { devices: 0, ports: 0, up: 0, pending: 0, updated: 0 },
-      dc: { devices: 0, ports: 0, up: 0, pending: 0, updated: 0 },
-    };
-    for (const env of envs) {
-      const ds = devices.filter((d) => d.env === env);
+    const out: Record<
+      string,
+      { devices: number; ports: number; up: number; pending: number; updated: number }
+    > = {};
+    for (const site of sites) {
+      const ds = devices.filter((d) => d.env === site.slug);
       const ps = ds.flatMap((d) => ports[d.id] ?? []);
       const rq = requests.filter(
         (r) => ds.some((d) => d.id === r.device_id) && r.status === 'pending',
       );
-      out[env] = {
+      out[site.slug] = {
         devices: ds.length,
         ports: ps.length,
         up: ps.filter((p) => p.state === 'up').length,
@@ -48,7 +42,7 @@ export function EnvPickerPage() {
       };
     }
     return out;
-  }, [devices, ports, requests, envs]);
+  }, [sites, devices, ports, requests]);
 
   const handlePick = (env: Environment) => {
     setEnv(env);
@@ -84,15 +78,16 @@ export function EnvPickerPage() {
 
       <div className="flex-1 px-6 py-8">
         <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-2">
-          {envs.map((env, i) => {
+          {sites.map((site, i) => {
+            const env = site.slug;
             const ds = devices.filter((d) => d.env === env);
             const envLinks = links.filter(
               ([a]) => devices.find((d) => d.id === a)?.env === env,
             );
-            const s = stats[env];
+            const s = stats[env] ?? { devices: 0, ports: 0, up: 0, pending: 0, updated: Date.now() };
             return (
               <button
-                key={env}
+                key={site.id}
                 type="button"
                 onClick={() => handlePick(env)}
                 style={{ '--nb-reveal-i': 3 + i } as React.CSSProperties}
@@ -103,9 +98,7 @@ export function EnvPickerPage() {
                 </div>
                 <div className="border-t border-border p-5">
                   <div className="flex items-baseline justify-between">
-                    <h2 className="text-xl font-semibold text-fg">
-                      {env === 'lab' ? 'Lab' : 'Datacenter'}
-                    </h2>
+                    <h2 className="text-xl font-semibold text-fg">{site.name}</h2>
                     <span className="text-xs text-fg-subtle">updated {timeAgo(s.updated)}</span>
                   </div>
                   <dl className="mt-4 grid grid-cols-4 gap-3">

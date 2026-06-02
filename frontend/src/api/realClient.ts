@@ -25,6 +25,8 @@ import type {
   Port,
   PortListSnapshot,
   PortMap,
+  Site,
+  SystemInfo,
   TopologyLink,
   PlatformRegistryEntry,
   User,
@@ -165,6 +167,43 @@ export async function listUsers(): Promise<User[]> {
 }
 
 /* -------------------------------------------------------------------------
+ * Sites (the runtime-managed location/environment catalog)
+ * ------------------------------------------------------------------------- */
+
+interface SiteOut {
+  id: string;
+  slug: string;
+  name: string;
+  device_count: number;
+}
+
+function mapSite(s: SiteOut): Site {
+  return { id: s.id, slug: s.slug, name: s.name, deviceCount: s.device_count };
+}
+
+export async function listSites(): Promise<Site[]> {
+  const sites = await request<SiteOut[]>('/api/sites');
+  return sites.map(mapSite);
+}
+
+export async function createSite(input: { slug: string; name: string }): Promise<Site> {
+  const site = await request<SiteOut>('/api/sites', { method: 'POST', body: input });
+  return mapSite(site);
+}
+
+export async function renameSite(id: string, name: string): Promise<Site> {
+  const site = await request<SiteOut>(`/api/sites/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: { name },
+  });
+  return mapSite(site);
+}
+
+export async function deleteSite(id: string): Promise<void> {
+  await request<void>(`/api/sites/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/* -------------------------------------------------------------------------
  * Platforms
  * ------------------------------------------------------------------------- */
 
@@ -187,6 +226,10 @@ export async function listDevices(env?: Environment): Promise<Device[]> {
 export async function getDevice(id: string): Promise<Device> {
   const d = await request<DeviceOut>(`/api/devices/${encodeURIComponent(id)}`);
   return mapDevice(d);
+}
+
+export async function getSystemInfo(id: string): Promise<SystemInfo> {
+  return request<SystemInfo>(`/api/devices/${encodeURIComponent(id)}/system`);
 }
 
 export async function listLinks(_env?: Environment): Promise<readonly TopologyLink[]> {

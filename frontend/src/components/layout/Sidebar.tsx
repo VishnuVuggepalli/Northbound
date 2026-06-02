@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
-import { useDevices, useRequests } from '@/api/queries';
+import { useDevices, useRequests, useSites } from '@/api/queries';
 import { useUIStore } from '@/store/ui';
 import { PlatformIcon } from '@/components/ui/PlatformIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
@@ -26,6 +26,8 @@ export function Sidebar({ env }: SidebarProps) {
   const params = useParams();
   const { data: devices = [] } = useDevices(env);
   const { data: requests = [] } = useRequests();
+  const { data: sites = [] } = useSites();
+  const siteName = sites.find((s) => s.slug === env)?.name ?? env;
   const width = useUIStore((s) => s.sidebarWidth);
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth);
   const selectDevice = useUIStore((s) => s.selectDevice);
@@ -70,9 +72,7 @@ export function Sidebar({ env }: SidebarProps) {
         <div className="border-b border-border px-4 py-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-xs uppercase tracking-wider text-fg-subtle">
-                {env === 'lab' ? 'Lab environment' : 'Datacenter'}
-              </div>
+              <div className="text-xs uppercase tracking-wider text-fg-subtle">{siteName}</div>
               <div className="text-sm font-semibold text-fg">
                 {devices.length} devices
               </div>
@@ -125,7 +125,9 @@ export function Sidebar({ env }: SidebarProps) {
                               {pendingCount}
                             </Badge>
                           )}
-                          <StatusDot state={d.reachable ? 'up' : 'down'} />
+                          <StatusDot
+                            state={d.reachable == null ? 'pending' : d.reachable ? 'up' : 'down'}
+                          />
                         </span>
                       </button>
                     </li>

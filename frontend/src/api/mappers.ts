@@ -103,7 +103,7 @@ export function mapDevice(d: DeviceOut, portCount = 0): Device {
     model: d.platform,
     portCount,
     portKind: portKindFor(platform),
-    reachable: d.reachable ?? false,
+    reachable: d.reachable ?? null,
     ...(d.ssh_user ? { ssh_user: d.ssh_user } : {}),
   };
 }
