@@ -57,7 +57,10 @@
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --nb-bg: oklch(0.98 var(--nb-bg-chroma) var(--nb-bg-hue));
+  /* Default light theme canvas = lightest hue of blue (raised chroma from
+     shared --nb-bg-chroma so the page reads as palest blue, not flat white).
+     Elev surfaces stay on the neutral shared chroma so cards read crisp. */
+  --nb-bg: oklch(0.985 0.025 var(--nb-bg-hue));
   --nb-bg-elev-1: oklch(0.96 var(--nb-bg-chroma) var(--nb-bg-hue));
   --nb-bg-elev-2: oklch(0.94 var(--nb-bg-chroma) var(--nb-bg-hue));
   --nb-bg-sunken: oklch(0.91 var(--nb-bg-chroma) var(--nb-bg-hue));

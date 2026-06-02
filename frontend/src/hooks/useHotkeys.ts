@@ -28,6 +28,10 @@ export function useHotkeys(map: Record<string, HotkeyHandler>): void {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Never shadow browser/OS shortcuts: a bare 'r' is "request", but Ctrl/Cmd+R
+      // is reload — without this guard the handler ran and preventDefault() blocked
+      // the page refresh. Let any modified chord through to the browser.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (isFormElement(e.target) && e.key !== 'Escape') return;
       const handler =
         mapRef.current[e.key.toLowerCase()] ?? mapRef.current[e.key];

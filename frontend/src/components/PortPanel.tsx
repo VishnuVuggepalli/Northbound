@@ -134,7 +134,7 @@ export function PortPanel({
   return (
     <aside
       key={`${device.id}:${port.name}`}
-      className="absolute right-0 top-0 z-30 flex h-full w-[480px] max-w-[95vw] flex-col border-l border-border bg-bg/95 shadow-2xl backdrop-blur-md animate-slide-in-right"
+      className="absolute right-0 top-0 z-30 flex h-full w-[480px] max-w-[95vw] flex-col border-l border-border bg-bg-elev-1 shadow-2xl animate-slide-in-right"
     >
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
