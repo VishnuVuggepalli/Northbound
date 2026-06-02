@@ -2,6 +2,12 @@
  * Time and unit formatters used across the UI.
  */
 
+/** "1 device", "32 ports" — count + singular/plural noun. */
+export function plural(count: number, noun: string, pluralForm?: string): string {
+  const word = count === 1 ? noun : (pluralForm ?? `${noun}s`);
+  return `${count} ${word}`;
+}
+
 export function timeAgo(epochMs: number, now: number = Date.now()): string {
   const diff = now - epochMs;
   const minutes = Math.floor(diff / 60_000);

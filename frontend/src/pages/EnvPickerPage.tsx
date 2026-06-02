@@ -7,7 +7,6 @@ import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
 import { useAllPorts, useDevices, useLinks, useRequests, useSites } from '@/api/queries';
-import { timeAgo } from '@/lib/format';
 import type { Environment } from '@/types';
 
 export function EnvPickerPage() {
@@ -25,7 +24,7 @@ export function EnvPickerPage() {
   const stats = useMemo(() => {
     const out: Record<
       string,
-      { devices: number; ports: number; up: number; pending: number; updated: number }
+      { devices: number; ports: number; up: number; pending: number }
     > = {};
     for (const site of sites) {
       const ds = devices.filter((d) => d.env === site.slug);
@@ -38,7 +37,6 @@ export function EnvPickerPage() {
         ports: ps.length,
         up: ps.filter((p) => p.state === 'up').length,
         pending: rq.length,
-        updated: Date.now() - 1000 * 60 * 2,
       };
     }
     return out;
@@ -84,7 +82,7 @@ export function EnvPickerPage() {
             const envLinks = links.filter(
               ([a]) => devices.find((d) => d.id === a)?.env === env,
             );
-            const s = stats[env] ?? { devices: 0, ports: 0, up: 0, pending: 0, updated: Date.now() };
+            const s = stats[env] ?? { devices: 0, ports: 0, up: 0, pending: 0 };
             return (
               <button
                 key={site.id}
@@ -99,7 +97,7 @@ export function EnvPickerPage() {
                 <div className="border-t border-border p-5">
                   <div className="flex items-baseline justify-between">
                     <h2 className="text-xl font-semibold text-fg">{site.name}</h2>
-                    <span className="text-xs text-fg-subtle">updated {timeAgo(s.updated)}</span>
+                    <span className="nb-mono text-xs text-fg-subtle">{site.slug}</span>
                   </div>
                   <dl className="mt-4 grid grid-cols-4 gap-3">
                     <Stat label="devices" value={s.devices} />

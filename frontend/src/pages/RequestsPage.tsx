@@ -53,7 +53,7 @@ export function RequestsPage() {
     <div className="mx-auto max-w-6xl px-6 py-6">
       <header className="mb-4">
         <div className="text-xs uppercase tracking-wider text-fg-subtle">
-          {scope === 'mine' ? 'Filed by you' : 'Across both environments'}
+          {scope === 'mine' ? 'Filed by you' : 'Across all sites'}
         </div>
         <h1 className="text-2xl font-semibold text-fg">
           {scope === 'mine' ? 'My requests' : 'All requests'}

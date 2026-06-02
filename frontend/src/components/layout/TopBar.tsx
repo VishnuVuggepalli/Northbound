@@ -16,7 +16,7 @@ import { Badge } from '@/components/ui/Badge';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
-import { useRequests } from '@/api/queries';
+import { useRequests, useSites } from '@/api/queries';
 import { apiClient } from '@/api';
 import { initials } from '@/lib/format';
 import { PALETTES } from '@/lib/palette';
@@ -48,6 +48,7 @@ export function TopBar() {
   }, []);
 
   const { data: requests = [] } = useRequests();
+  const { data: sites = [] } = useSites();
   const pendingCount = requests.filter((r) => r.status === 'pending').length;
 
   const handleEnvSwitch = (next: Environment) => {
@@ -64,19 +65,20 @@ export function TopBar() {
       </Link>
 
       <nav className="flex items-center gap-1 rounded-md bg-bg-elev-1 p-0.5">
-        {(['lab', 'dc'] as const).map((e) => (
+        {sites.map((s) => (
           <button
-            key={e}
+            key={s.slug}
             type="button"
-            onClick={() => handleEnvSwitch(e)}
+            onClick={() => handleEnvSwitch(s.slug)}
+            title={s.name}
             className={cn(
               'rounded-[4px] px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors',
-              env === e
+              env === s.slug
                 ? 'bg-bg-elev-2 text-fg shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset]'
                 : 'text-fg-muted hover:text-fg',
             )}
           >
-            {e === 'lab' ? 'Lab' : 'DC'}
+            {s.name}
           </button>
         ))}
       </nav>

@@ -18,7 +18,7 @@ export function SearchResultsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!env || (env !== 'lab' && env !== 'dc')) return;
+    if (!env) return;
     let cancelled = false;
     setError(null);
     void apiClient
@@ -39,7 +39,7 @@ export function SearchResultsPage() {
     };
   }, [env, q]);
 
-  if (env !== 'lab' && env !== 'dc') return null;
+  if (!env) return null;
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-6">

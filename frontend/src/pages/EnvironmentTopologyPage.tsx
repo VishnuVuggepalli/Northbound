@@ -1,8 +1,9 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { Topology3D } from '@/components/three/Topology3D';
 import { NocRibbon } from '@/components/layout/NocRibbon';
-import { useAllPorts, useDevices, useLinks, useRequests } from '@/api/queries';
+import { useAllPorts, useDevices, useLinks, useRequests, useSites } from '@/api/queries';
 import { useThemeStore } from '@/store/theme';
+import { plural } from '@/lib/format';
 import type { Environment } from '@/types';
 
 export function EnvironmentTopologyPage() {
@@ -13,8 +14,12 @@ export function EnvironmentTopologyPage() {
   const { data: ports = {} } = useAllPorts();
   const { data: links = [] } = useLinks(env);
   const { data: requests = [] } = useRequests();
+  const { data: sites = [] } = useSites();
 
-  if (env !== 'lab' && env !== 'dc') return null;
+  if (!env) return null;
+  const siteName = sites.find((s) => s.slug === env)?.name ?? env;
+  // Port count from the live ports map (the device summary carries no count).
+  const portCount = devices.reduce((a, d) => a + (ports[d.id]?.length ?? 0), 0);
 
   return (
     <div className="flex h-full flex-col">
@@ -22,10 +27,10 @@ export function EnvironmentTopologyPage() {
       <div className="flex items-center justify-between border-b border-border bg-bg-elev-1/40 px-6 py-3">
         <div>
           <div className="text-xs uppercase tracking-wider text-fg-subtle">
-            {env === 'lab' ? 'Lab environment' : 'Datacenter'} · live topology
+            {siteName} · live topology
           </div>
           <h1 className="text-lg font-semibold text-fg">
-            {devices.length} devices · {devices.reduce((a, d) => a + d.portCount, 0)} ports
+            {plural(devices.length, 'device')} · {plural(portCount, 'port')}
           </h1>
         </div>
         <span className="nb-mono text-xs text-fg-muted">click a device to inspect</span>

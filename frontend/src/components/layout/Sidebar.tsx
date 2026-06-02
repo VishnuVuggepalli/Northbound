@@ -7,6 +7,7 @@ import { PlatformIcon } from '@/components/ui/PlatformIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
+import { plural } from '@/lib/format';
 import type { Device, DeviceRole, Environment } from '@/types';
 
 const ROLE_ORDER: DeviceRole[] = ['spine', 'leaf', 'router', 'vpn'];
@@ -73,9 +74,7 @@ export function Sidebar({ env }: SidebarProps) {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs uppercase tracking-wider text-fg-subtle">{siteName}</div>
-              <div className="text-sm font-semibold text-fg">
-                {devices.length} devices
-              </div>
+              <div className="text-sm font-semibold text-fg">{plural(devices.length, 'device')}</div>
             </div>
             <button
               type="button"

@@ -9,18 +9,15 @@ export function EnvironmentPage() {
   const setEnv = useUIStore((s) => s.setEnv);
 
   useEffect(() => {
-    if (env === 'lab' || env === 'dc') setEnv(env);
+    if (env) setEnv(env);
   }, [env, setEnv]);
 
-  if (env !== 'lab' && env !== 'dc') return null;
+  if (!env) return null;
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)]">
       <Sidebar env={env} />
-      <section
-        aria-label={env === 'lab' ? 'Lab environment' : 'Datacenter environment'}
-        className="relative flex-1 overflow-hidden"
-      >
+      <section aria-label={`${env} site`} className="relative flex-1 overflow-hidden">
         <Outlet />
       </section>
     </div>
