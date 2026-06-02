@@ -20,6 +20,7 @@ from northbound.schemas.driver import (
     Neighbor,
     PortChange,
     PortState,
+    ProtocolDetail,
     SystemInfo,
     TestResult,
 )
@@ -113,6 +114,10 @@ class Driver(ABC):
         to fill what the driver's transport can reach.
         """
         return SystemInfo()
+
+    async def get_protocol_detail(self, slug: str) -> ProtocolDetail:
+        """Operational detail (named tables) for one protocol. Default: empty."""
+        return ProtocolDetail(slug=slug)
 
     # ---------- write (NotSupported if writable=False) ----------
 

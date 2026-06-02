@@ -32,6 +32,11 @@ from lxml import etree  # type: ignore[attr-defined]  # lxml has no stubs; etree
 
 from northbound._lib.transport.asyncssh_client import SshClient, SshParams
 from northbound._lib.transport.netconf_client import NetconfClient, NetconfParams
+from northbound.drivers._protocol_gets import (
+    PROTOCOL_GETS,
+    STANDALONE_GETS,
+    parse_table,
+)
 from northbound.drivers.base import (
     Driver,
     DriverError,
@@ -51,7 +56,9 @@ from northbound.schemas.driver import (
     Neighbor,
     PortChange,
     PortState,
+    ProtocolDetail,
     ProtocolStatus,
+    ProtocolTable,
     SystemInfo,
     TestResult,
 )
@@ -230,6 +237,22 @@ class Pica8Driver(Driver):
             mac_table=mac_table,
             mac_supported=mac_supported,
         )
+
+    async def get_protocol_detail(self, slug: str) -> ProtocolDetail:
+        """Run a protocol's operational ``show`` gets over SSH and parse each
+        with its TextFSM template. ``slug`` is the System-tab protocol label."""
+        gets = PROTOCOL_GETS.get(slug) or STANDALONE_GETS.get(slug)
+        if not gets:
+            return ProtocolDetail(slug=slug)
+        tables: list[ProtocolTable] = []
+        error: str | None = None
+        for get in gets:
+            try:
+                out = await self._ssh.run(f'cli -c "{get.command}"')
+                tables.append(parse_table(get.title, get.template, out))
+            except Exception as exc:
+                error = error if error else f"{get.command}: {exc}"
+        return ProtocolDetail(slug=slug, tables=tuple(tables), error=error)
 
     # ---------- write ----------
 
@@ -643,7 +666,13 @@ def _parse_protocols_xml(xml: str) -> tuple[ProtocolStatus, ...]:
         enabled = _section_enabled(el)
         params, summary = _protocol_params(slug, el) if enabled else ([], "disabled")
         out.append(
-            ProtocolStatus(name=label, enabled=enabled, detail=summary, params=tuple(params))
+            ProtocolStatus(
+                name=label,
+                enabled=enabled,
+                detail=summary,
+                params=tuple(params),
+                has_detail=enabled and label in PROTOCOL_GETS,
+            )
         )
     return tuple(out)
 

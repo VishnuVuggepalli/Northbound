@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Loader2, Network, ShieldCheck, Table2 } from 'lucide-react';
-import { useSystemInfo } from '@/api/queries';
+import { ChevronDown, ChevronRight, Loader2, Network, ShieldCheck, Table2 } from 'lucide-react';
+import { useProtocolDetail, useSystemInfo } from '@/api/queries';
 import { Section } from '@/components/ui/Section';
 import { KV } from '@/components/ui/KV';
+import { DataTable } from '@/components/ui/DataTable';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Input } from '@/components/ui/Input';
 import type { Device } from '@/types';
@@ -80,6 +81,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                     ))}
                   </dl>
                 )}
+                {p.has_detail && <ProtocolGets deviceId={device.id} slug={p.name} />}
               </li>
             ))}
           </ul>
@@ -139,32 +141,62 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
         ) : macRows.length === 0 ? (
           <p className="px-1 text-xs text-fg-subtle">No matching entries.</p>
         ) : (
-          <div className="overflow-x-auto px-1">
-            <table className="w-full border-collapse text-left text-xs">
-              <thead>
-                <tr className="border-b border-border text-fg-subtle">
-                  <th className="py-1.5 pr-4 font-medium">VLAN</th>
-                  <th className="py-1.5 pr-4 font-medium">MAC address</th>
-                  <th className="py-1.5 pr-4 font-medium">Type</th>
-                  <th className="py-1.5 pr-4 font-medium">Age</th>
-                  <th className="py-1.5 font-medium">Interface</th>
-                </tr>
-              </thead>
-              <tbody className="nb-mono">
-                {macRows.map((r, i) => (
-                  <tr key={`${r.mac}-${r.interface}-${i}`} className="border-b border-border/40">
-                    <td className="py-1 pr-4 text-fg-muted">{r.vlan ?? '—'}</td>
-                    <td className="py-1 pr-4 text-fg">{r.mac}</td>
-                    <td className="py-1 pr-4 text-fg-muted">{r.type}</td>
-                    <td className="py-1 pr-4 text-fg-subtle">{r.age ?? '—'}</td>
-                    <td className="py-1 text-link">{r.interface}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="px-1">
+            <DataTable
+              columns={['VLAN', 'MAC address', 'Type', 'Age', 'Interface']}
+              rows={macRows.map((r) => [
+                String(r.vlan ?? '—'),
+                r.mac,
+                r.type,
+                r.age ?? '—',
+                r.interface,
+              ])}
+              cellClass={(j) => (j === 4 ? 'text-link' : j === 1 ? 'text-fg' : 'text-fg-muted')}
+            />
           </div>
         )}
       </Section>
+    </div>
+  );
+}
+
+/** Lazy-loaded operational tables for a protocol (OSPF neighbors, etc.). */
+function ProtocolGets({ deviceId, slug }: { deviceId: string; slug: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading, isError } = useProtocolDetail(deviceId, slug, open);
+  return (
+    <div className="ml-4 mt-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 text-xs text-accent hover:underline"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        Operational detail
+      </button>
+      {open && (
+        <div className="mt-2 space-y-3">
+          {isLoading && (
+            <div className="flex items-center gap-2 text-xs text-fg-muted">
+              <Loader2 className="animate-spin" size={12} /> Reading from device…
+            </div>
+          )}
+          {isError && <p className="text-xs text-danger">Failed to read operational state.</p>}
+          {data?.error && <p className="text-xs text-warn">{data.error}</p>}
+          {data?.tables.map((t) => (
+            <div key={t.title}>
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-subtle">
+                {t.title} · {t.rows.length}
+              </div>
+              {t.rows.length === 0 ? (
+                <p className="text-xs text-fg-subtle">No entries.</p>
+              ) : (
+                <DataTable columns={t.columns} rows={t.rows} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

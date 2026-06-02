@@ -104,6 +104,21 @@ class ProtocolStatusOut(BaseModel):
     enabled: bool
     detail: str = ""
     params: list[tuple[str, str]] = Field(default_factory=list)
+    has_detail: bool = False
+
+
+class ProtocolTableOut(BaseModel):
+    title: str
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+
+
+class ProtocolDetailOut(BaseModel):
+    """Operational detail for one protocol — named tables from CLI gets."""
+
+    slug: str
+    tables: list[ProtocolTableOut] = Field(default_factory=list)
+    error: str | None = None
 
 
 class MgmtServiceOut(BaseModel):

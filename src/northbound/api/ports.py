@@ -38,7 +38,9 @@ from northbound.schemas.port import (
     PortDetailOut,
     PortMetadataPatchIn,
     PortStateOut,
+    ProtocolDetailOut,
     ProtocolStatusOut,
+    ProtocolTableOut,
     SystemInfoOut,
 )
 from northbound.services import audit, port_state
@@ -234,6 +236,7 @@ async def get_system_info(
                 enabled=p.enabled,
                 detail=p.detail,
                 params=list(p.params),
+                has_detail=p.has_detail,
             )
             for p in info.protocols
         ],
@@ -252,6 +255,36 @@ async def get_system_info(
             for m in info.mac_table
         ],
         mac_supported=info.mac_supported,
+    )
+
+
+@router.get("/{device_id}/protocols/{slug}", response_model=ProtocolDetailOut)
+async def get_protocol_detail(
+    device_id: str,
+    slug: str,
+    _user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ProtocolDetailOut:
+    """Operational detail (named tables) for one protocol — e.g. OSPF neighbors
+    + link-state database. Parsed from device CLI gets via TextFSM."""
+    device = await _load_device(session, device_id)
+    creds = _credentials_for(device)
+    driver = driver_for(device, creds)
+    try:
+        detail = await driver.get_protocol_detail(slug)
+    except DriverError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Protocol detail failed: {exc}"
+        ) from exc
+    finally:
+        await driver.aclose()
+    return ProtocolDetailOut(
+        slug=detail.slug,
+        tables=[
+            ProtocolTableOut(title=t.title, columns=list(t.columns), rows=[list(r) for r in t.rows])
+            for t in detail.tables
+        ],
+        error=detail.error,
     )
 
 

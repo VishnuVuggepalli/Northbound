@@ -80,6 +80,7 @@ class ProtocolStatus:
     enabled: bool
     detail: str = ""  # one-line summary (e.g. "router-id 10.10.250.2 · 6 areas")
     params: tuple[tuple[str, str], ...] = ()  # key/value detail rows for expansion
+    has_detail: bool = False  # operational gets available (get_protocol_detail)
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,28 @@ class MgmtService:
     port: int | None = None
     detail: str = ""
     configured: bool = True
+
+
+@dataclass(frozen=True)
+class ProtocolTable:
+    """One operational table (e.g. OSPF neighbors) — column headers + rows."""
+
+    title: str
+    columns: tuple[str, ...]
+    rows: tuple[tuple[str, ...], ...]
+
+
+@dataclass(frozen=True)
+class ProtocolDetail:
+    """Operational detail for one protocol — several named tables ("gets").
+
+    ``error`` is set when the device couldn't be read (e.g. SSH timeout); the
+    UI distinguishes that from a genuinely empty result.
+    """
+
+    slug: str
+    tables: tuple[ProtocolTable, ...] = ()
+    error: str | None = None
 
 
 @dataclass(frozen=True)

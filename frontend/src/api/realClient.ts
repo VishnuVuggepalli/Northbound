@@ -25,6 +25,7 @@ import type {
   Port,
   PortListSnapshot,
   PortMap,
+  ProtocolDetail,
   Site,
   SystemInfo,
   TopologyLink,
@@ -230,6 +231,12 @@ export async function getDevice(id: string): Promise<Device> {
 
 export async function getSystemInfo(id: string): Promise<SystemInfo> {
   return request<SystemInfo>(`/api/devices/${encodeURIComponent(id)}/system`);
+}
+
+export async function getProtocolDetail(id: string, slug: string): Promise<ProtocolDetail> {
+  return request<ProtocolDetail>(
+    `/api/devices/${encodeURIComponent(id)}/protocols/${encodeURIComponent(slug)}`,
+  );
 }
 
 export async function listLinks(_env?: Environment): Promise<readonly TopologyLink[]> {

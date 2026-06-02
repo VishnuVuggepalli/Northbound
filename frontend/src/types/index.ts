@@ -178,6 +178,19 @@ export interface ProtocolStatus {
   enabled: boolean;
   detail: string;
   params: [string, string][];
+  has_detail: boolean;
+}
+
+export interface ProtocolTable {
+  title: string;
+  columns: string[];
+  rows: string[][];
+}
+
+export interface ProtocolDetail {
+  slug: string;
+  tables: ProtocolTable[];
+  error: string | null;
 }
 
 export interface MgmtService {

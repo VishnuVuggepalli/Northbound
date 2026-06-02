@@ -28,6 +28,8 @@ export const queryKeys = {
   users: () => ['users'] as const,
   sites: () => ['sites'] as const,
   system: (deviceId: string) => ['devices', deviceId, 'system'] as const,
+  protocol: (deviceId: string, slug: string) =>
+    ['devices', deviceId, 'protocol', slug] as const,
 } as const;
 
 export function useDevices(env?: Environment) {
@@ -89,6 +91,14 @@ export function useSystemInfo(deviceId: string | null | undefined) {
     queryKey: queryKeys.system(deviceId ?? ''),
     queryFn: () => api.getSystemInfo(deviceId!),
     enabled: !!deviceId,
+  });
+}
+
+export function useProtocolDetail(deviceId: string, slug: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.protocol(deviceId, slug),
+    queryFn: () => api.getProtocolDetail(deviceId, slug),
+    enabled,
   });
 }
 
