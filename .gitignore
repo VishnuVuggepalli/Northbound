@@ -74,3 +74,4 @@ frontend/test-results/
 frontend/playwright/.cache/
 frontend/playwright/reports/
 frontend/playwright/test-results/
+northbound.db.bak-*
