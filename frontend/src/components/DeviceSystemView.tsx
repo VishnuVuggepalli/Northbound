@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Layers, Loader2, Network, ShieldCheck, Table2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Cpu, Layers, Loader2, Network, ShieldCheck, Table2 } from 'lucide-react';
 import { useProtocolDetail, useSystemInfo, useVlans } from '@/api/queries';
 import { Section } from '@/components/ui/Section';
 import { KV } from '@/components/ui/KV';
@@ -69,8 +69,30 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
     );
   }
 
+  const f = data.facts;
+  const factRows: [string, string][] = [
+    ['Model', f.model],
+    ['OS version', f.os_version],
+    ['Serial', f.serial],
+    ['Uptime', f.uptime],
+    ['License', f.license],
+    ['Base MAC', f.base_mac],
+    ['Released', f.released],
+  ].filter(([, v]) => v) as [string, string][];
+
   return (
     <div className="h-full overflow-auto nb-scroll px-4 pb-16">
+      {factRows.length > 0 && (
+        <Section title={<SectionTitle icon={<Cpu size={13} className="text-accent" />}>Device</SectionTitle>}>
+          <dl className="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1 px-1 text-xs">
+            {factRows.map(([k, v]) => (
+              <KV key={k} label={k}>
+                <span className="nb-mono text-fg">{v}</span>
+              </KV>
+            ))}
+          </dl>
+        </Section>
+      )}
       <Section title={<SectionTitle icon={<Network size={13} className="text-accent" />}>Control-plane protocols</SectionTitle>}>
         {data.protocols.length === 0 ? (
           <p className="px-1 text-xs text-fg-subtle">None configured.</p>

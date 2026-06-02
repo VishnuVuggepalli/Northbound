@@ -33,6 +33,7 @@ from northbound.schemas.port import (
     BackupDiffOut,
     BackupOut,
     ConfigOut,
+    DeviceFactsOut,
     MacEntryOut,
     MgmtServiceOut,
     PortDetailOut,
@@ -231,6 +232,15 @@ async def get_system_info(
     finally:
         await driver.aclose()
     return SystemInfoOut(
+        facts=DeviceFactsOut(
+            model=info.facts.model,
+            os_version=info.facts.os_version,
+            serial=info.facts.serial,
+            uptime=info.facts.uptime,
+            license=info.facts.license,
+            base_mac=info.facts.base_mac,
+            released=info.facts.released,
+        ),
         protocols=[
             ProtocolStatusOut(
                 name=p.name,

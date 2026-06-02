@@ -419,3 +419,34 @@ def test_parse_interface_oper_and_merge() -> None:
     assert merged.mac == "64:9d:99:d2:6f:aa" and merged.link_up is True
     # no oper data -> unchanged
     assert _merge_oper(_port("x"), None).speed_mbps is None
+
+
+_TRUNK_IFACE = """<rpc-reply><data>
+  <interface xmlns="http://pica8.com/xorplus/interface">
+    <gigabit-ethernet>
+      <name>xe-1/1/9</name><mtu>1554</mtu><disable>false</disable>
+      <family><ethernet-switching>
+        <native-vlan-id>1065</native-vlan-id>
+        <port-mode>trunk</port-mode>
+        <vlan><members><id>1000-1002,1065,1070</id></members></vlan>
+      </ethernet-switching></family>
+    </gigabit-ethernet>
+  </interface>
+</data></rpc-reply>"""
+
+
+def test_expand_vlan_range() -> None:
+    from northbound.drivers.pica8 import _expand_vlan_range
+
+    assert _expand_vlan_range("1000-1002,1010,1050-1051") == [1000, 1001, 1002, 1010, 1050, 1051]
+    assert _expand_vlan_range("") == []
+    assert _expand_vlan_range("42") == [42]
+
+
+def test_parse_interfaces_trunk_members_range() -> None:
+    # The NETCONF way: <family><ethernet-switching><vlan><members><id>RANGE.
+    ports = {p.name: p for p in _parse_interfaces_xml(_TRUNK_IFACE)}
+    p = ports["xe-1/1/9"]
+    assert p.untagged_vlan == 1065  # native
+    # native excluded from tagged; range expanded
+    assert p.tagged_vlans == (1000, 1001, 1002, 1070)

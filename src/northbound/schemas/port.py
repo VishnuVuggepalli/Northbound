@@ -137,9 +137,20 @@ class MgmtServiceOut(BaseModel):
     configured: bool = True
 
 
-class SystemInfoOut(BaseModel):
-    """Live system snapshot: protocols, mgmt services, MAC table."""
+class DeviceFactsOut(BaseModel):
+    model: str = ""
+    os_version: str = ""
+    serial: str = ""
+    uptime: str = ""
+    license: str = ""
+    base_mac: str = ""
+    released: str = ""
 
+
+class SystemInfoOut(BaseModel):
+    """Live system snapshot: device facts, protocols, mgmt services, MAC table."""
+
+    facts: DeviceFactsOut = Field(default_factory=DeviceFactsOut)
     protocols: list[ProtocolStatusOut] = Field(default_factory=list)
     services: list[MgmtServiceOut] = Field(default_factory=list)
     mac_table: list[MacEntryOut] = Field(default_factory=list)

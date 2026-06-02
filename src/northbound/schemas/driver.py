@@ -133,6 +133,19 @@ class ProtocolDetail:
 
 
 @dataclass(frozen=True)
+class DeviceFacts:
+    """Hardware/software facts from the device (e.g. PicOS ``show version``)."""
+
+    model: str = ""
+    os_version: str = ""
+    serial: str = ""
+    uptime: str = ""
+    license: str = ""
+    base_mac: str = ""
+    released: str = ""
+
+
+@dataclass(frozen=True)
 class SystemInfo:
     """Live operational snapshot beyond ports: protocols, mgmt services, MAC table.
 
@@ -145,6 +158,7 @@ class SystemInfo:
     services: tuple[MgmtService, ...] = ()
     mac_table: tuple[MacEntry, ...] = ()
     mac_supported: bool = False
+    facts: DeviceFacts = field(default_factory=DeviceFacts)
 
 
 @dataclass(frozen=True)

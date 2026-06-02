@@ -210,7 +210,18 @@ export interface MgmtService {
   configured: boolean;
 }
 
+export interface DeviceFacts {
+  model: string;
+  os_version: string;
+  serial: string;
+  uptime: string;
+  license: string;
+  base_mac: string;
+  released: string;
+}
+
 export interface SystemInfo {
+  facts: DeviceFacts;
   protocols: ProtocolStatus[];
   services: MgmtService[];
   mac_table: MacEntry[];

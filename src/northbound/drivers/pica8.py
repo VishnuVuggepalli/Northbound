@@ -25,6 +25,7 @@ PicOS's xorplus XML and our PortState (no library does that).
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 
@@ -49,6 +50,7 @@ from northbound.schemas.driver import (
     ConfigDiff,
     ConnectionParams,
     Credentials,
+    DeviceFacts,
     DiscoveryResult,
     DriverCapabilities,
     MacEntry,
@@ -242,11 +244,19 @@ class Pica8Driver(Driver):
         except Exception:
             mac_supported = False
 
+        facts = DeviceFacts()
+        try:
+            ver = await self._ssh.run('cli -c "show version"')
+            facts = _parse_show_version(ver)
+        except Exception:
+            pass
+
         return SystemInfo(
             protocols=protocols,
             services=services,
             mac_table=mac_table,
             mac_supported=mac_supported,
+            facts=facts,
         )
 
     async def get_protocol_detail(self, slug: str) -> ProtocolDetail:
@@ -411,6 +421,32 @@ def _merge_oper(port: PortState, oper: dict[str, object] | None) -> PortState:
         duplex=oper.get("duplex") or port.duplex,  # type: ignore[arg-type]
         mac=oper.get("mac") or port.mac,  # type: ignore[arg-type]
         mtu=oper.get("mtu") or port.mtu,  # type: ignore[arg-type]
+    )
+
+
+def _parse_show_version(text: str) -> DeviceFacts:
+    """Parse PicOS ``show version`` (``Key : Value`` lines) into DeviceFacts.
+
+    Some PicOS builds merge the Hardware ID + Device MAC lines, so the base MAC
+    is extracted by pattern over the whole text rather than a clean key.
+    """
+    kv: dict[str, str] = {}
+    for line in text.splitlines():
+        if ":" in line:
+            k, _, v = line.partition(":")
+            kv[k.strip().lower()] = v.strip()
+    mac = ""
+    m = re.search(r"Device MAC Address\s*:\s*([0-9A-Fa-f:]{17})", text)
+    if m:
+        mac = m.group(1).lower()
+    return DeviceFacts(
+        model=kv.get("model", ""),
+        os_version=kv.get("software version", ""),
+        serial=kv.get("serial number", ""),
+        uptime=kv.get("system uptime", ""),
+        license=kv.get("license type", ""),
+        base_mac=mac,
+        released=kv.get("software released date", ""),
     )
 
 
@@ -587,40 +623,61 @@ def _has_ancestor(el: etree._Element, ancestor_localname: str) -> bool:
     return False
 
 
+def _expand_vlan_range(spec: str) -> list[int]:
+    """Expand a xorplus member spec like '1000-1004,1010,1050-1064' -> [int...]."""
+    out: list[int] = []
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo, _, hi = part.partition("-")
+            if lo.strip().isdigit() and hi.strip().isdigit():
+                out.extend(range(int(lo), int(hi) + 1))
+        elif part.isdigit():
+            out.append(int(part))
+    return out
+
+
 def _parse_vlan_membership(iface_el: etree._Element) -> tuple[int | None, tuple[int, ...]]:
-    """Pull access / trunk vlans from a Pica8 interface block."""
-    untagged: int | None = None
-    tagged: list[int] = []
-    # Pica8 / Junos-style: <unit><family><ethernet-switching><vlan><members>X
-    # The 'port-mode' child is "access" or "trunk".
-    port_mode_el = None
-    for el in iface_el.iter():
-        if _localname(el.tag) == "port-mode":
-            port_mode_el = el
-            break
-    mode = (
-        port_mode_el.text.strip().lower() if port_mode_el is not None and port_mode_el.text else ""
-    )
+    """Pull access / trunk VLANs from a Pica8 interface block.
+
+    Real xorplus structure (the NETCONF way):
+        <family><ethernet-switching>
+          <native-vlan-id>1065</native-vlan-id>
+          <port-mode>trunk</port-mode>
+          <vlan><members><id>1000-1004,1010,1050-1064</id></members></vlan>
+    The member list is a comma/range string inside an ``<id>`` child of
+    ``<members>`` (older configs put it directly as ``<members>`` text).
+    """
+    port_mode_el = next((el for el in iface_el.iter() if _localname(el.tag) == "port-mode"), None)
+    mode = (port_mode_el.text or "").strip().lower() if port_mode_el is not None else ""
+
     members: list[int] = []
     for member_el in iface_el.iter():
         if _localname(member_el.tag) != "members":
             continue
-        if member_el.text and member_el.text.strip().isdigit():
-            members.append(int(member_el.text.strip()))
+        # spec is the <members> text, or an <id> child's text
+        spec = (member_el.text or "").strip()
+        if not spec:
+            id_child = next(
+                (c for c in member_el.iter() if _localname(c.tag) == "id" and c is not member_el),
+                None,
+            )
+            spec = (id_child.text or "").strip() if id_child is not None else ""
+        members.extend(_expand_vlan_range(spec))
+
     native = None
-    for native_el in iface_el.iter():
-        if _localname(native_el.tag) == "native-vlan-id":
-            if native_el.text and native_el.text.strip().isdigit():
-                native = int(native_el.text.strip())
-            break
+    native_el = next((el for el in iface_el.iter() if _localname(el.tag) == "native-vlan-id"), None)
+    if native_el is not None and (native_el.text or "").strip().isdigit():
+        native = int(native_el.text.strip())
+
     if mode == "trunk":
-        untagged = native
-        tagged = members
-    else:
-        # access port — first member is the access vlan
-        untagged = members[0] if members else native
-        tagged = []
-    return untagged, tuple(tagged)
+        # native = untagged; tagged = members minus the native (it's carried untagged)
+        tagged = tuple(v for v in members if v != native)
+        return native, tagged
+    # access port — the single member is the access VLAN
+    return (members[0] if members else native), ()
 
 
 def _parse_lldp_xml(xml: str) -> list[Neighbor]:
