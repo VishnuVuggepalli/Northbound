@@ -111,6 +111,8 @@ export function mapDevice(d: DeviceOut, portCount = 0): Device {
     portCount,
     portKind: portKindFor(platform),
     reachable: d.reachable ?? null,
+    writable: d.writable,
+    writes_enabled: d.writes_enabled,
     ...(d.ssh_user ? { ssh_user: d.ssh_user } : {}),
   };
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Cpu, FileText } from 'lucide-react';
+import { ChevronRight, Cpu, FileText, Power } from 'lucide-react';
 import { Switch3D } from '@/components/three/Switch3D';
 import { PortStrip } from '@/components/PortStrip';
 import { PortPanel } from '@/components/PortPanel';
@@ -20,6 +20,7 @@ import {
   usePorts,
   usePlatforms,
   useRequests,
+  useSetDeviceWrites,
 } from '@/api/queries';
 import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
@@ -48,6 +49,8 @@ export function DeviceDetailPage() {
   // is stable across renders — otherwise React crashes the page to blank once
   // `device` loads and an extra hook appears. (react-hooks/rules-of-hooks)
   const { data: platforms } = usePlatforms();
+  const isAdmin = user?.role === 'admin';
+  const setWrites = useSetDeviceWrites(deviceId ?? '');
 
   // Sync the route's device id into the UI store so global hotkeys (j/k/r)
   // know which device's ports to navigate. Reaching this page via URL (no
@@ -115,10 +118,30 @@ export function DeviceDetailPage() {
                     : 'unreachable'}
               </span>
               {readOnly && <Badge variant="warn">Read-only</Badge>}
+              {!readOnly && device.writes_enabled === false && (
+                <Badge variant="warn">Writes disabled</Badge>
+              )}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {isAdmin && !readOnly && (
+            <button
+              type="button"
+              disabled={setWrites.isPending}
+              onClick={() => setWrites.mutate(device.writes_enabled === false)}
+              title="Enable or disable config writes for this device"
+              className={cn(
+                'flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition',
+                device.writes_enabled === false
+                  ? 'border-danger/40 bg-danger/10 text-danger hover:bg-danger/20'
+                  : 'border-success/40 bg-success/10 text-success hover:bg-success/20',
+              )}
+            >
+              <Power size={13} />
+              {device.writes_enabled === false ? 'Writes off' : 'Writes on'}
+            </button>
+          )}
           <VendorActions device={device} platform={platform} />
           <nav className="flex items-center gap-0.5 rounded-md border border-border bg-bg-elev-1 p-0.5 text-xs">
           <button

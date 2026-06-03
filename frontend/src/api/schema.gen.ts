@@ -35,7 +35,9 @@ export interface paths {
         put?: never;
         /**
          * Login
-         * @description Verify credentials and issue a JWT. 401 (generic) on any mismatch.
+         * @description Verify credentials, set session cookies, and return the login body.
+         *
+         *     401 (generic) on any mismatch.
          */
         post: operations["login_api_auth_login_post"];
         delete?: never;
@@ -55,9 +57,32 @@ export interface paths {
         put?: never;
         /**
          * Logout
-         * @description Stateless logout: server-side no-op for v1; client discards the token.
+         * @description Clear the session cookies. (Tokens are stateless, so this is the session
+         *     end for cookie clients; Bearer clients simply drop their token.)
          */
         post: operations["logout_api_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh
+         * @description Rotate the session from the refresh cookie: issue a new access + refresh
+         *     pair (rotation) and re-set both cookies. 401 if the refresh cookie is
+         *     missing/invalid/expired or the user is gone.
+         */
+        post: operations["refresh_api_auth_refresh_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -466,6 +491,30 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/writes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Device Writes
+         * @description Enable/disable config writes for a device (gradual rollout / kill-switch).
+         *
+         *     Does NOT override intrinsic read-only status (router/vpn role or a
+         *     non-writable platform) — ``writable`` in the response reflects the combined
+         *     policy. Audited.
+         */
+        patch: operations["set_device_writes_api_devices__device_id__writes_patch"];
         trace?: never;
     };
     "/api/platforms": {
@@ -960,12 +1009,25 @@ export interface components {
              * @default false
              */
             writable: boolean;
+            /**
+             * Writes Enabled
+             * @default true
+             */
+            writes_enabled: boolean;
         };
         /**
          * DeviceRole
          * @enum {string}
          */
         DeviceRole: "leaf" | "spine" | "router" | "vpn";
+        /**
+         * DeviceWritesIn
+         * @description Body of ``PATCH /api/devices/{id}/writes`` — the per-device write flag.
+         */
+        DeviceWritesIn: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /**
          * DiscoverIn
          * @description Body of ``POST /api/devices/discover`` — same shape as test-connection.
@@ -1673,6 +1735,26 @@ export interface operations {
             };
         };
     };
+    refresh_api_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+        };
+    };
     register_api_auth_register_post: {
         parameters: {
             query?: never;
@@ -2349,6 +2431,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VlanInfoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_device_writes_api_devices__device_id__writes_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceWritesIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceOut"];
                 };
             };
             /** @description Validation Error */

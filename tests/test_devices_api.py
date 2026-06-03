@@ -605,3 +605,52 @@ def test_parse_description_no_vlan_prefix() -> None:
     host_model, bmc_ip = parse_description("Supermicro X11 | 10.0.0.9")
     assert host_model == "Supermicro X11"
     assert bmc_ip == "10.0.0.9"
+
+
+# --------------------------------------------------------------------------- #
+# Per-device write feature flag (F77)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_device_writes_flag_toggles_writable(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    _, admin, _ = seeded
+    created = await client.post("/api/devices", headers=_bearer(admin), json=_onboard_body())
+    assert created.status_code == 201
+    dev = created.json()
+    assert dev["writes_enabled"] is True and dev["writable"] is True
+
+    # Disable writes → writable flips False, flag False.
+    off = await client.patch(
+        f"/api/devices/{dev['id']}/writes", headers=_bearer(admin), json={"enabled": False}
+    )
+    assert off.status_code == 200
+    assert off.json()["writes_enabled"] is False
+    assert off.json()["writable"] is False
+
+    # A config write to the now-disabled device is blocked by the chokepoint (403).
+    blocked = await client.patch(
+        f"/api/devices/{dev['id']}/ports/xe-1%2F1%2F1/config",
+        headers=_bearer(admin),
+        json={"port_mode": "access", "untagged_vlan": 100},
+    )
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"]["code"] == "READ_ONLY_DEVICE"
+
+    # Re-enable → writable again.
+    on = await client.patch(
+        f"/api/devices/{dev['id']}/writes", headers=_bearer(admin), json={"enabled": True}
+    )
+    assert on.status_code == 200 and on.json()["writable"] is True
+
+
+@pytest.mark.asyncio
+async def test_device_writes_flag_requires_admin(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    _, admin, alice = seeded
+    dev = (await client.post("/api/devices", headers=_bearer(admin), json=_onboard_body())).json()
+    resp = await client.patch(
+        f"/api/devices/{dev['id']}/writes", headers=_bearer(alice), json={"enabled": False}
+    )
+    assert resp.status_code == 403

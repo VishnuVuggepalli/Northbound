@@ -63,6 +63,16 @@ export function useDevice(id: string | null | undefined) {
   });
 }
 
+export function useSetDeviceWrites(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => api.setDeviceWrites(deviceId, enabled),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['devices'] });
+    },
+  });
+}
+
 export function usePorts(deviceId: string | null | undefined) {
   return useQuery({
     queryKey: queryKeys.ports(deviceId ?? ''),

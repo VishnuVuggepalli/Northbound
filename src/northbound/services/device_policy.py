@@ -38,6 +38,10 @@ def _read_only_reason(device: Device) -> str | None:
         return f"unknown platform {device.platform!r}"
     if not driver_cls.capabilities.writable:
         return f"platform {device.platform!r} is read-only"
+    # Per-device admin kill-switch / gradual-rollout flag (F77). Only an explicit
+    # False disables; None (a transient, not-yet-persisted row) means default-on.
+    if device.writes_enabled is False:
+        return "writes are disabled for this device"
     return None
 
 

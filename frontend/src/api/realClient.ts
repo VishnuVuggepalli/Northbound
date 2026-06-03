@@ -273,6 +273,15 @@ export async function getDevice(id: string): Promise<Device> {
   return mapDevice(d);
 }
 
+/** Enable/disable config writes for a device (admin; F77 per-device flag). */
+export async function setDeviceWrites(id: string, enabled: boolean): Promise<Device> {
+  const d = await request<DeviceOut>(`/api/devices/${encodeURIComponent(id)}/writes`, {
+    method: 'PATCH',
+    body: { enabled },
+  });
+  return mapDevice(d);
+}
+
 export async function getSystemInfo(id: string): Promise<SystemInfo> {
   return request<SystemInfo>(`/api/devices/${encodeURIComponent(id)}/system`);
 }

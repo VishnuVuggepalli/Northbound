@@ -32,6 +32,7 @@ from northbound.schemas.device import (
     CredentialsRotateIn,
     DeviceCreateIn,
     DeviceOut,
+    DeviceWritesIn,
     DiscoverIn,
     DiscoverOut,
     PortOut,
@@ -110,6 +111,7 @@ def _device_out(device: Device, *, reachable: bool | None = None) -> DeviceOut:
         prefer_native_api=device.prefer_native_api,
         capabilities=capabilities,
         writable=is_writable(device),
+        writes_enabled=device.writes_enabled,
         reachable=reachable,
     )
 
@@ -324,6 +326,41 @@ async def rotate_credentials(
     device.encrypted_credentials = serialize_credentials(new_creds, vault)
     session.add(device)
     await session.flush()
+    return _device_out(device)
+
+
+# --------------------------------------------------------------------------- #
+# per-device write feature flag (F77) — admin enable/disable config writes
+# --------------------------------------------------------------------------- #
+@router.patch("/{device_id}/writes", response_model=DeviceOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def set_device_writes(
+    request: Request,
+    device_id: str,
+    body: DeviceWritesIn,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DeviceOut:
+    """Enable/disable config writes for a device (gradual rollout / kill-switch).
+
+    Does NOT override intrinsic read-only status (router/vpn role or a
+    non-writable platform) — ``writable`` in the response reflects the combined
+    policy. Audited.
+    """
+    device = await _load_device(session, device_id)
+    before = device.writes_enabled
+    device.writes_enabled = body.enabled
+    session.add(device)
+    await session.flush()
+    await audit.append_audit(
+        session,
+        user_id=admin.id,
+        action="device.writes_set",
+        target_device_id=device.id,
+        before={"writes_enabled": before},
+        after={"writes_enabled": body.enabled},
+        result="ok",
+    )
     return _device_out(device)
 
 

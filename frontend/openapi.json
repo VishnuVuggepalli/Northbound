@@ -491,6 +491,11 @@
             "default": false,
             "title": "Writable",
             "type": "boolean"
+          },
+          "writes_enabled": {
+            "default": true,
+            "title": "Writes Enabled",
+            "type": "boolean"
           }
         },
         "required": [
@@ -514,6 +519,20 @@
         ],
         "title": "DeviceRole",
         "type": "string"
+      },
+      "DeviceWritesIn": {
+        "description": "Body of ``PATCH /api/devices/{id}/writes`` \u2014 the per-device write flag.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "DeviceWritesIn",
+        "type": "object"
       },
       "DiscoverIn": {
         "description": "Body of ``POST /api/devices/discover`` \u2014 same shape as test-connection.",
@@ -2153,7 +2172,7 @@
     },
     "/api/auth/login": {
       "post": {
-        "description": "Verify credentials and issue a JWT. 401 (generic) on any mismatch.",
+        "description": "Verify credentials, set session cookies, and return the login body.\n\n401 (generic) on any mismatch.",
         "operationId": "login_api_auth_login_post",
         "requestBody": {
           "content": {
@@ -2195,7 +2214,7 @@
     },
     "/api/auth/logout": {
       "post": {
-        "description": "Stateless logout: server-side no-op for v1; client discards the token.",
+        "description": "Clear the session cookies. (Tokens are stateless, so this is the session\nend for cookie clients; Bearer clients simply drop their token.)",
         "operationId": "logout_api_auth_logout_post",
         "responses": {
           "204": {
@@ -2203,6 +2222,28 @@
           }
         },
         "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "description": "Rotate the session from the refresh cookie: issue a new access + refresh\npair (rotation) and re-set both cookies. 401 if the refresh cookie is\nmissing/invalid/expired or the user is gone.",
+        "operationId": "refresh_api_auth_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Refresh",
         "tags": [
           "auth"
         ]
@@ -3348,6 +3389,64 @@
         "summary": "Get Vlans",
         "tags": [
           "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/writes": {
+      "patch": {
+        "description": "Enable/disable config writes for a device (gradual rollout / kill-switch).\n\nDoes NOT override intrinsic read-only status (router/vpn role or a\nnon-writable platform) \u2014 ``writable`` in the response reflects the combined\npolicy. Audited.",
+        "operationId": "set_device_writes_api_devices__device_id__writes_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceWritesIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Device Writes",
+        "tags": [
+          "devices"
         ]
       }
     },

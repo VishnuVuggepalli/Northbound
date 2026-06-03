@@ -120,5 +120,15 @@ class DeviceOut(BaseModel):
     ssh_user: str | None = None
     prefer_native_api: bool
     capabilities: DriverCapabilities | None = None
+    # ``writable`` is the EFFECTIVE policy result (role + platform + the flag).
+    # ``writes_enabled`` is the per-device admin flag alone, so the UI can show
+    # the toggle state separately from intrinsic (role/platform) read-only.
     writable: bool = False
+    writes_enabled: bool = True
     reachable: bool | None = None
+
+
+class DeviceWritesIn(BaseModel):
+    """Body of ``PATCH /api/devices/{id}/writes`` — the per-device write flag."""
+
+    enabled: bool

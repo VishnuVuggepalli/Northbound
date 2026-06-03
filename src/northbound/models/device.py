@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Boolean, LargeBinary, String
+from sqlalchemy import Boolean, LargeBinary, String, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from northbound.db import Base
@@ -33,5 +33,12 @@ class Device(Base):
     mgmt_ip: Mapped[str] = mapped_column(String(64), nullable=False)
     ssh_user: Mapped[str | None] = mapped_column(String(128), nullable=True)
     prefer_native_api: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Per-device write feature flag (F77): an admin can disable config writes on a
+    # specific device for gradual rollout / as a kill-switch. Defaults True so
+    # existing/onboarded devices keep their current writability. assert_writable
+    # honours it (see services.device_policy).
+    writes_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
     encrypted_credentials: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     created_at: Mapped[dt.datetime] = created_at_col()

@@ -64,6 +64,10 @@ export interface Device {
    * when absent.
    */
   ssh_user?: string;
+  /** Effective write policy (role + platform + the per-device flag). */
+  writable?: boolean;
+  /** Per-device admin write flag alone (F77) — drives the enable/disable toggle. */
+  writes_enabled?: boolean;
 }
 
 /**
