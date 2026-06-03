@@ -101,7 +101,10 @@ async def test_get_ports_count_names_and_link_state() -> None:
     assert up == {"Port4-240", "Port14-16", "Port22-16", "SFP1"}
     assert all(p.admin_up for p in ports)
     # linked ports decode a speed + full duplex; down ports report none.
-    assert by_name["Port4-240"].speed_mbps == 100
+    # SwOS spd is a table INDEX: code 2 → 1G (verified against the SwOS JS +
+    # the SFP-GE-T 1000BASE-T module on SFP1).
+    assert by_name["Port4-240"].speed_mbps == 1000
+    assert by_name["SFP1"].speed_mbps == 1000
     assert by_name["Port4-240"].duplex == "full"
     assert by_name["Port1-Ian-BMC-16"].speed_mbps is None
 

@@ -307,10 +307,12 @@ def _uptime(ticks: int) -> str:
     return f"{d}d {h}h {m}m"
 
 
-# SwOS link.b ``spd`` per-port code → Mbps for a LINKED port. 0x07 is the
-# auto/all-speeds capability shown when a port is DOWN → unknown (None).
-# Grounded against the live CSS326 (linked ports report 0x02).
-_SPD_MBPS: dict[int, int] = {0x01: 10, 0x02: 100, 0x04: 1000, 0x08: 2500, 0x10: 5000, 0x20: 10000}
+# SwOS link.b ``spd`` per-port code is an INDEX into the speed table, NOT a
+# bitmask — confirmed against the SwOS JS:  "10M 100M 1G 10G 5G 2.5G 40G".split.
+# So 0=10M, 1=100M, 2=1G, 3=10G, 4=5G, 5=2.5G, 6=40G. A down port reports 7
+# (past the table) → unknown. Verified on the live CSS326: linked ports report
+# index 2 (1G), and the linked SFP is an "SFP-GE-T" 1000BASE-T module.
+_SPD_MBPS: dict[int, int] = {0: 10, 1: 100, 2: 1000, 3: 10000, 4: 5000, 5: 2500, 6: 40000}
 
 
 def _bit(mask: int, idx: int) -> bool:
