@@ -49,13 +49,15 @@ dependencies = [
  # verify, reconciler tick). AsyncIOScheduler runs on the app event loop — no
  # Redis/Celery broker, per the single-process architecture (principal-eng D9).
  "apscheduler>=3.10",
+ # Async HTTP client — backs the shared HttpxClient transport and the MikroTik
+ # RouterOS REST driver (imported at module load), so it's a RUNTIME dep, not dev.
+ "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
-  "httpx>=0.27",
   "pyright>=1.1",
   "ruff>=0.6",
 ]

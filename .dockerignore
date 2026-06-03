@@ -1,0 +1,40 @@
+# VCS / tooling
+.git
+.gitignore
+*.md
+!README.md
+
+# Python
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.egg-info
+build
+dist
+
+# Local DB / runtime state (never bake into the image)
+*.db
+*.db-*
+
+# Frontend — the prebuilt dist IS shipped into the image (built on the host via
+# `npm --prefix frontend run build`); everything else is excluded.
+frontend/node_modules
+frontend/src
+frontend/public
+frontend/playwright-report
+frontend/test-results
+frontend/scripts
+frontend/openapi.json
+
+# Tests + planning material (not needed at runtime)
+tests
+supporting material
+
+# Docker artifacts
+docker-compose*.yml
+Dockerfile
+.dockerignore
+.env

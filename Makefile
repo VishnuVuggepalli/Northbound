@@ -1,6 +1,6 @@
 .PHONY: install dev test testv lint format typecheck check fix clean \
         frontend-install frontend-build frontend-test build seed migrate \
-        serve run-prod ship verify
+        serve run-prod ship verify docker-build docker-up docker-down
 
 # ───────────────────────── Backend (existing) ─────────────────────────
 
@@ -84,3 +84,18 @@ ship: build migrate
 	@echo "  ssh \$$SSH_HOST 'cd \$$DEPLOY_DIR && .venv/bin/alembic upgrade head \\"
 	@echo "    && sudo systemctl restart northbound'"
 	@echo "─────────────────────────────────────────────────────────────────"
+
+# ───────────────────────── Docker ─────────────────────────
+
+# Build the single SPA+API image. The SPA is built on the host first (the
+# in-container npm install is OOM-prone) and copied into the image.
+# --network=host lets pip reach PyPI on hosts where the build network has no DNS.
+docker-build: frontend-build
+	docker build --network=host -t northbound:latest .
+
+# Run via compose (reads .env — see .env.example). Builds first.
+docker-up: frontend-build
+	docker compose up --build -d
+
+docker-down:
+	docker compose down
