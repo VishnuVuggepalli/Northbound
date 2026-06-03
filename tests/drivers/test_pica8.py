@@ -227,6 +227,20 @@ async def test_render_change_access_is_single_phase() -> None:
     assert len(diff.commands) == 1
 
 
+def test_render_change_inferred_empty_tagged_is_access() -> None:
+    # Request flow sends untagged + tagged=[] (no explicit port_mode) for an
+    # access-intent change. Empty tagged MUST infer access — not trunk — else a
+    # requester picking one VLAN and no tags gets a trunk port.
+    xml = _build_edit_config_xml("xe-1/1/2", PortChange(untagged_vlan=100, tagged_vlans=[]))
+    root = etree.fromstring(xml.encode("utf-8"))
+    assert root.findtext(".//{*}port-mode") == "access"
+    assert root.findtext(".//{*}native-vlan-id") == "100"
+    # access clears any trunk members (vlan removed); no members written
+    vlan = root.find(".//{*}vlan")
+    assert vlan is not None
+    assert vlan.get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation") == "remove"
+
+
 def test_render_change_trunk_empty_tagged_removes_vlan() -> None:
     # Trunk with no tagged VLANs clears the member list → remove the <vlan> subtree.
     xml = _build_edit_config_xml("xe-1/1/2", PortChange(port_mode="trunk", tagged_vlans=[]))

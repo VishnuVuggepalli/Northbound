@@ -308,7 +308,7 @@ class Pica8Driver(Driver):
         # Setting (non-empty) tagged VLANs on a trunk is a two-phase write: phase 1
         # clears the keyed <members> list, phase 2 installs the new set. Otherwise
         # a single payload suffices.
-        mode = change.port_mode or ("trunk" if change.tagged_vlans is not None else None)
+        mode = change.port_mode or ("trunk" if change.tagged_vlans else None)
         commands: tuple[str, ...]
         if change.tagged_vlans and mode == "trunk":
             commands = (_clear_vlan_xml(port), main)
@@ -1138,7 +1138,11 @@ def _append_switching(ge: etree._Element, change: PortChange) -> None:
     """
     mode = change.port_mode
     if mode is None and (change.untagged_vlan is not None or change.tagged_vlans is not None):
-        mode = "trunk" if change.tagged_vlans is not None else "access"
+        # Infer from VLAN intent: a NON-EMPTY tagged set ⇒ trunk; otherwise access.
+        # An empty tagged list ([]) means access (one untagged VLAN, no tags) — it
+        # must NOT be read as trunk, or a requester picking a single VLAN and no
+        # tags would get a trunk port. Matches the frontend's notion of mode.
+        mode = "trunk" if change.tagged_vlans else "access"
     if mode is None:
         return
     family = etree.SubElement(ge, "family")
