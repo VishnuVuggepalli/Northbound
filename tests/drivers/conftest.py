@@ -139,20 +139,85 @@ def _build_cisco_device() -> _FakeCiscoNapalm:
 # ---------------------------------------------------------------------------
 
 
+_NC_BASE = "urn:ietf:params:xml:ns:netconf:base:1.0"
+
+
+def _pica8_ln(tag: object) -> str:
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+
 class _FakePica8Manager:
     """Stand-in for ncclient.manager.Manager.
 
-    Returns the canned interface XML on ``get_config`` and records all
-    write-path calls so tests can assert on them.
+    Stateful: folds committed edit-config payloads into a per-port model so
+    get_config reflects writes (lets the driver's post-write verify pass). Also
+    records every write-path call so tests can assert on them.
     """
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self._running = (_FIXTURE_DIR / "pica8" / "get_interfaces.xml").read_text()
+        self._ports: dict[str, dict[str, Any]] = {}
+        self._candidate: list[str] = []
 
     def get_config(self, source: str, filter: Any = None, with_defaults: Any = None) -> str:
         self.calls.append(("get_config", (source,)))
-        return self._running
+        if not self._ports:
+            return self._running
+        ns = "http://pica8.com/xorplus/interface"
+        blocks = []
+        for name, p in self._ports.items():
+            inner = ""
+            if "port-mode" in p:
+                inner += f"<port-mode>{p['port-mode']}</port-mode>"
+            if "native-vlan-id" in p:
+                inner += f"<native-vlan-id>{p['native-vlan-id']}</native-vlan-id>"
+            if p.get("members"):
+                inner += f"<vlan><members><id>{p['members']}</id></members></vlan>"
+            sw = (
+                f"<family><ethernet-switching>{inner}</ethernet-switching></family>"
+                if inner
+                else ""
+            )
+            extra = "".join(
+                f"<{t}>{p[t]}</{t}>" for t in ("description", "mtu", "disable") if t in p
+            )
+            blocks.append(f"<gigabit-ethernet><name>{name}</name>{extra}{sw}</gigabit-ethernet>")
+        return (
+            f'<configuration><interface xmlns="{ns}">{"".join(blocks)}</interface></configuration>'
+        )
+
+    def _fold(self, payload: str) -> None:
+        from lxml import etree  # type: ignore[attr-defined]
+
+        root = etree.fromstring(payload.encode())
+        ge = next((e for e in root.iter() if _pica8_ln(e.tag) == "gigabit-ethernet"), None)
+        if ge is None:
+            return
+
+        def first(name: str) -> Any:
+            return next((e for e in ge.iter() if _pica8_ln(e.tag) == name), None)
+
+        name_el = first("name")
+        p = self._ports.setdefault((name_el.text or "").strip(), {})
+        desc = first("description")
+        if desc is not None:
+            if desc.get(f"{{{_NC_BASE}}}operation") == "delete":
+                p.pop("description", None)
+            else:
+                p["description"] = desc.text or ""
+        for tag in ("mtu", "disable", "port-mode", "native-vlan-id"):
+            el = first(tag)
+            if el is not None and el.text:
+                p[tag] = el.text.strip()
+        vlan = first("vlan")
+        if vlan is not None:
+            if vlan.get(f"{{{_NC_BASE}}}operation") == "remove":
+                p["members"] = ""
+            else:
+                idel = next((e for e in vlan.iter() if _pica8_ln(e.tag) == "id"), None)
+                if idel is not None and idel.text:
+                    p["members"] = idel.text.strip()
 
     def edit_config(
         self,
@@ -165,6 +230,7 @@ class _FakePica8Manager:
     ) -> str:
         # Signature mirrors REAL ncclient; record (target, config) for assertions.
         self.calls.append(("edit_config", (target, config)))
+        self._candidate.append(config)
         return "<ok/>"
 
     def commit(
@@ -175,10 +241,14 @@ class _FakePica8Manager:
         persist_id: Any = None,
     ) -> str:
         self.calls.append(("commit", (confirmed, timeout)))
+        for payload in self._candidate:
+            self._fold(payload)
+        self._candidate.clear()
         return "<ok/>"
 
     def discard_changes(self) -> str:
         self.calls.append(("discard_changes", ()))
+        self._candidate.clear()
         return "<ok/>"
 
     def close_session(self) -> None:

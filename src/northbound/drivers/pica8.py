@@ -70,6 +70,8 @@ from northbound.schemas.driver import (
 
 # ConfigDiff metadata keys (kept here to avoid magic strings).
 _TOKEN_KEY = "pending_token"
+_PORT_KEY = "port_name"  # diff.metadata: target port, for post-write verify
+_INTENT_KEY = "intent_json"  # diff.metadata: the PortChange, serialized, for verify
 
 
 @register
@@ -308,9 +310,8 @@ class Pica8Driver(Driver):
         # Setting (non-empty) tagged VLANs on a trunk is a two-phase write: phase 1
         # clears the keyed <members> list, phase 2 installs the new set. Otherwise
         # a single payload suffices.
-        mode = change.port_mode or ("trunk" if change.tagged_vlans else None)
         commands: tuple[str, ...]
-        if change.tagged_vlans and mode == "trunk":
+        if change.tagged_vlans and _effective_mode(change) == "trunk":
             commands = (_clear_vlan_xml(port), main)
         else:
             commands = (main,)
@@ -319,7 +320,9 @@ class Pica8Driver(Driver):
             raw_before=f"<!-- previous state for {port} not captured -->",
             raw_after="\n".join(commands),
             commands=commands,
-            metadata={_TOKEN_KEY: token},
+            # Stash the port + intent so apply_change can read the config back and
+            # verify the device actually applied it (see _verify_applied).
+            metadata={_TOKEN_KEY: token, _PORT_KEY: port, _INTENT_KEY: change.model_dump_json()},
         )
 
     async def apply_change(
@@ -375,6 +378,29 @@ class Pica8Driver(Driver):
                 confirm_deadline_at=None,
                 error=_classify_netconf_error(exc),
             )
+
+        # Read the config back and confirm the device actually applied the intent.
+        # The commit can succeed while the change is only partially applied (e.g.
+        # the intermittent trunk→access port-mode flip) — surface that as a failure
+        # instead of a false success.
+        intent_raw = diff.metadata.get(_INTENT_KEY)
+        verify_port = diff.metadata.get(_PORT_KEY)
+        if intent_raw and verify_port:
+            try:
+                cfg = await self._netconf.get_config(source="running")
+                drift = _verify_applied(
+                    cfg, verify_port, PortChange.model_validate_json(intent_raw)
+                )
+            except Exception as exc:  # readback failed — can't confirm, report it
+                drift = f"post-write verification could not read config: {exc}"
+            if drift:
+                return ApplyResult(
+                    success=False,
+                    confirm_token=None,
+                    confirm_deadline_at=None,
+                    error=f"committed but not fully applied on device: {drift}",
+                )
+
         if not confirmed:
             return ApplyResult(
                 success=True,
@@ -797,6 +823,95 @@ def _parse_vlan_membership(iface_el: etree._Element) -> tuple[int | None, tuple[
     return (members[0] if members else native), ()
 
 
+def _effective_mode(change: PortChange) -> str | None:
+    """The port-mode a change implies: explicit wins, else infer from VLANs.
+
+    A NON-EMPTY tagged set ⇒ trunk; an empty/absent tagged with any VLAN field ⇒
+    access. Shared by the builder, render_change, and the post-write verify so all
+    three agree on what "this change means".
+    """
+    mode = change.port_mode
+    if mode is None and (change.untagged_vlan is not None or change.tagged_vlans is not None):
+        mode = "trunk" if change.tagged_vlans else "access"
+    return mode
+
+
+def _descendant_text(el: etree._Element, name: str) -> str | None:
+    """First descendant by local name, stripped text, or None."""
+    node = next((x for x in el.iter() if _localname(x.tag) == name), None)
+    return (node.text or "").strip() if node is not None and node.text else None
+
+
+def _iface_members(iface: etree._Element) -> set[int]:
+    """All VLAN ids in the port's <members> entries (range-expanded)."""
+    out: set[int] = set()
+    for m in iface.iter():
+        if _localname(m.tag) != "members":
+            continue
+        spec = (m.text or "").strip() or next(
+            ((c.text or "").strip() for c in m.iter() if _localname(c.tag) == "id" and c is not m),
+            "",
+        )
+        out.update(_expand_vlan_range(spec))
+    return out
+
+
+def _verify_scalars(iface: etree._Element, change: PortChange) -> list[str]:
+    """Drift in description / mtu / enabled, if those fields were set."""
+    out: list[str] = []
+    if change.description is not None:
+        got = _child_text(iface, "description") or ""
+        if got != change.description:
+            out.append(f"description={got!r}≠{change.description!r}")
+    if change.mtu is not None and (_child_text(iface, "mtu") or "") != str(change.mtu):
+        out.append(f"mtu={_child_text(iface, 'mtu')}≠{change.mtu}")
+    if change.enabled is not None:
+        got_enabled = (_child_text(iface, "disable") or "").lower() != "true"
+        if got_enabled != change.enabled:
+            out.append(f"enabled={got_enabled}≠{change.enabled}")
+    return out
+
+
+def _verify_vlans(iface: etree._Element, change: PortChange) -> list[str]:
+    """Drift in port-mode / native VLAN / tagged members, if those were set."""
+    out: list[str] = []
+    mode = _effective_mode(change)
+    got_mode = _descendant_text(iface, "port-mode")
+    if mode is not None and got_mode is not None and got_mode.lower() != mode:
+        out.append(f"port-mode={got_mode}≠{mode}")
+    if change.untagged_vlan is not None:
+        got_native = _descendant_text(iface, "native-vlan-id")
+        if got_native != str(change.untagged_vlan):
+            out.append(f"native-vlan={got_native}≠{change.untagged_vlan}")
+    if change.tagged_vlans is not None:
+        got = _iface_members(iface)
+        if got != set(change.tagged_vlans):
+            out.append(f"tagged={sorted(got)}≠{sorted(change.tagged_vlans)}")
+    return out
+
+
+def _verify_applied(cfg: str, port: str, change: PortChange) -> str | None:
+    """Confirm the running config matches the intended change; None if it does.
+
+    Guards against a commit the device accepted but did not fully apply (e.g. the
+    intermittent trunk→access port-mode flip): each set field is read back and
+    compared. Returns a human description of any drift so the caller surfaces a
+    real failure instead of a false success.
+    """
+    iface = next(
+        (
+            el
+            for el in etree.fromstring(cfg.encode()).iter()
+            if _localname(el.tag) == "gigabit-ethernet" and (_child_text(el, "name") or "") == port
+        ),
+        None,
+    )
+    if iface is None:
+        return f"{port} not present in running config after write"
+    mismatches = _verify_scalars(iface, change) + _verify_vlans(iface, change)
+    return "; ".join(mismatches) if mismatches else None
+
+
 def _parse_lldp_xml(xml: str) -> list[Neighbor]:
     """Extract LLDP neighbors from a get-config / get response.
 
@@ -1133,16 +1248,10 @@ def _append_switching(ge: etree._Element, change: PortChange) -> None:
     """Append ``<family><ethernet-switching>`` (port-mode + VLANs) when relevant.
 
     Effective port-mode: an explicit ``change.port_mode`` wins; otherwise it is
-    inferred from the VLAN fields so request-flow callers (which only set
-    untagged/tagged) keep working.
+    inferred from the VLAN fields (non-empty tagged ⇒ trunk, else access) so
+    request-flow callers (which only set untagged/tagged) keep working.
     """
-    mode = change.port_mode
-    if mode is None and (change.untagged_vlan is not None or change.tagged_vlans is not None):
-        # Infer from VLAN intent: a NON-EMPTY tagged set ⇒ trunk; otherwise access.
-        # An empty tagged list ([]) means access (one untagged VLAN, no tags) — it
-        # must NOT be read as trunk, or a requester picking a single VLAN and no
-        # tags would get a trunk port. Matches the frontend's notion of mode.
-        mode = "trunk" if change.tagged_vlans else "access"
+    mode = _effective_mode(change)
     if mode is None:
         return
     family = etree.SubElement(ge, "family")

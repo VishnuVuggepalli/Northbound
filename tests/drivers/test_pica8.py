@@ -24,6 +24,7 @@ from northbound.drivers.pica8 import (
     _parse_mac_table,
     _parse_protocols_xml,
     _parse_services_xml,
+    _verify_applied,
 )
 from northbound.schemas.driver import (
     ConfigDiff,
@@ -265,10 +266,39 @@ def test_render_change_empty_description_emits_delete_operation() -> None:
 # ---------------------------------------------------------------------------
 
 
+_NC_BASE = "urn:ietf:params:xml:ns:netconf:base:1.0"
+
+
+def _ln(tag: object) -> str:
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+
+def _first(el: Any, name: str) -> Any:
+    return next((x for x in el.iter() if _ln(x.tag) == name), None)
+
+
+def _expand(spec: str) -> set[int]:
+    out: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if "-" in part:
+            lo, _, hi = part.partition("-")
+            if lo.isdigit() and hi.isdigit():
+                out.update(range(int(lo), int(hi) + 1))
+        elif part.isdigit():
+            out.add(int(part))
+    return out
+
+
 class _FakeManager:
+    """Stateful fake: folds committed edit-config payloads into a per-port model
+    so get_config reflects writes — lets the post-write verify run end-to-end."""
+
     def __init__(self, *, confirmed_commit: bool = True) -> None:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         self._running = _load("get_interfaces.xml")
+        self._ports: dict[str, dict[str, Any]] = {}  # committed per-port facts
+        self._candidate: list[str] = []  # staged (uncommitted) edit payloads
         caps = ["urn:ietf:params:netconf:base:1.0"]
         if confirmed_commit:
             caps.append("urn:ietf:params:netconf:capability:confirmed-commit:1.0")
@@ -276,7 +306,57 @@ class _FakeManager:
 
     def get_config(self, source: str, filter: Any = None, with_defaults: Any = None) -> str:
         self.calls.append(("get_config", (source,)))
-        return self._running
+        if not self._ports:
+            return self._running  # untouched fixture for read-path tests
+        return self._render()
+
+    def _render(self) -> str:
+        blocks = []
+        for name, p in self._ports.items():
+            sw = ""
+            if "port-mode" in p or "native-vlan-id" in p or p.get("members"):
+                inner = ""
+                if "port-mode" in p:
+                    inner += f"<port-mode>{p['port-mode']}</port-mode>"
+                if "native-vlan-id" in p:
+                    inner += f"<native-vlan-id>{p['native-vlan-id']}</native-vlan-id>"
+                if p.get("members"):
+                    ids = ",".join(str(v) for v in sorted(p["members"]))
+                    inner += f"<vlan><members><id>{ids}</id></members></vlan>"
+                sw = f"<family><ethernet-switching>{inner}</ethernet-switching></family>"
+            extra = "".join(
+                f"<{t}>{p[t]}</{t}>" for t in ("description", "mtu", "disable") if t in p
+            )
+            blocks.append(f"<gigabit-ethernet><name>{name}</name>{extra}{sw}</gigabit-ethernet>")
+        ns = "http://pica8.com/xorplus/interface"
+        return (
+            f'<configuration><interface xmlns="{ns}">{"".join(blocks)}</interface></configuration>'
+        )
+
+    def _fold(self, payload: str) -> None:
+        ge = _first(etree.fromstring(payload.encode()), "gigabit-ethernet")
+        if ge is None:
+            return
+        name = (_first(ge, "name").text or "").strip()
+        p = self._ports.setdefault(name, {})
+        desc = _first(ge, "description")
+        if desc is not None:
+            if desc.get(f"{{{_NC_BASE}}}operation") == "delete":
+                p.pop("description", None)
+            else:
+                p["description"] = desc.text or ""
+        for tag in ("mtu", "disable", "port-mode", "native-vlan-id"):
+            el = _first(ge, tag)
+            if el is not None and el.text:
+                p[tag] = el.text.strip()
+        vlan = _first(ge, "vlan")
+        if vlan is not None:
+            if vlan.get(f"{{{_NC_BASE}}}operation") == "remove":
+                p["members"] = set()
+            else:
+                idel = _first(vlan, "id")
+                if idel is not None and idel.text:
+                    p["members"] = _expand(idel.text)
 
     def edit_config(
         self,
@@ -289,6 +369,7 @@ class _FakeManager:
     ) -> str:
         # Signature mirrors REAL ncclient; record (target, config) for assertions.
         self.calls.append(("edit_config", (target, config)))
+        self._candidate.append(config)
         return "<ok/>"
 
     def commit(
@@ -299,10 +380,14 @@ class _FakeManager:
         persist_id: Any = None,
     ) -> str:
         self.calls.append(("commit", (confirmed, timeout)))
+        for payload in self._candidate:
+            self._fold(payload)
+        self._candidate.clear()
         return "<ok/>"
 
     def discard_changes(self) -> str:
         self.calls.append(("discard_changes", ()))
+        self._candidate.clear()
         return "<ok/>"
 
     def close_session(self) -> None:
@@ -618,3 +703,77 @@ def test_parse_interfaces_trunk_members_range() -> None:
     assert p.untagged_vlan == 1065  # native
     # native excluded from tagged; range expanded
     assert p.tagged_vlans == (1000, 1001, 1002, 1070)
+
+
+# ---------------------------------------------------------------------------
+# Post-write verification (_verify_applied) — catches a commit the device
+# accepted but did not fully apply.
+# ---------------------------------------------------------------------------
+_NS = 'xmlns="http://pica8.com/xorplus/interface"'
+
+
+def _cfg(
+    port: str,
+    *,
+    port_mode: str,
+    native: str,
+    members: str = "",
+    mtu: str = "9216",
+    disable: str = "false",
+    desc: str | None = None,
+) -> str:
+    d = f"<description>{desc}</description>" if desc is not None else ""
+    mem = f"<vlan><members><id>{members}</id></members></vlan>" if members else ""
+    return (
+        f"<configuration><interface {_NS}><gigabit-ethernet><name>{port}</name>"
+        f"{d}<mtu>{mtu}</mtu><disable>{disable}</disable>"
+        f"<family><ethernet-switching><port-mode>{port_mode}</port-mode>"
+        f"<native-vlan-id>{native}</native-vlan-id>{mem}</ethernet-switching></family>"
+        f"</gigabit-ethernet></interface></configuration>"
+    )
+
+
+def test_verify_applied_match_returns_none() -> None:
+    cfg = _cfg("xe-1/1/2", port_mode="trunk", native="1010", members="1002,1003")
+    change = PortChange(port_mode="trunk", untagged_vlan=1010, tagged_vlans=[1002, 1003])
+    assert _verify_applied(cfg, "xe-1/1/2", change) is None
+
+
+def test_verify_applied_detects_stuck_trunk_mode() -> None:
+    # Intent access, but the device left port-mode trunk (the real quirk).
+    cfg = _cfg("xe-1/1/2", port_mode="trunk", native="1002", members="")
+    change = PortChange(port_mode="access", untagged_vlan=1002)
+    drift = _verify_applied(cfg, "xe-1/1/2", change)
+    assert drift is not None and "port-mode" in drift
+
+
+def test_verify_applied_detects_wrong_tagged_set() -> None:
+    cfg = _cfg("xe-1/1/2", port_mode="trunk", native="1010", members="1002")
+    change = PortChange(port_mode="trunk", untagged_vlan=1010, tagged_vlans=[1002, 1003])
+    drift = _verify_applied(cfg, "xe-1/1/2", change)
+    assert drift is not None and "tagged" in drift
+
+
+def test_verify_applied_missing_port() -> None:
+    cfg = _cfg("xe-1/1/2", port_mode="trunk", native="1010")
+    assert _verify_applied(cfg, "xe-9/9/9", PortChange(mtu=1500)) is not None
+
+
+@pytest.mark.asyncio
+async def test_apply_change_fails_when_device_does_not_apply() -> None:
+    # Simulate the device quirk: commit succeeds but the port-mode flip is dropped.
+    # apply_change must report failure, not a false success.
+    drv, fake = _make_driver(confirmed_commit=False)
+
+    real_fold = fake._fold
+
+    def _stuck_trunk(payload: str) -> None:
+        real_fold(payload)
+        for p in fake._ports.values():
+            p["port-mode"] = "trunk"  # device ignored the access flip, stayed trunk
+
+    fake._fold = _stuck_trunk  # type: ignore[assignment, method-assign]
+    diff = await drv.render_change("ge-1/1/1", PortChange(port_mode="access", untagged_vlan=10))
+    result = await drv.apply_change(diff)
+    assert result.success is False
+    assert "not fully applied" in (result.error or "")

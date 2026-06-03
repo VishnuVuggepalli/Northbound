@@ -93,6 +93,17 @@ class PortConfigIn(BaseModel):
             raise ValueError("at least one tunable must be set")
         return self
 
+    @model_validator(mode="after")
+    def _vlan_requires_mode(self) -> PortConfigIn:
+        # A VLAN write must state the mode explicitly. Without it the driver would
+        # infer access/trunk, and an untagged-only edit could silently flip a
+        # trunk to access. (The frontend always sends port_mode with VLAN fields.)
+        if (
+            self.untagged_vlan is not None or self.tagged_vlans is not None
+        ) and self.port_mode is None:
+            raise ValueError("port_mode is required when setting untagged_vlan or tagged_vlans")
+        return self
+
 
 class AuditEntryOut(BaseModel):
     """A single audit-log row (also reused by the audit router)."""
