@@ -449,6 +449,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/{device_id}/rediscover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rediscover
+         * @description Re-probe an onboarded device and refresh its stored snapshot.
+         *
+         *     Non-destructive: adds metadata rows only for ports seen for the first time
+         *     (human edits preserved) and writes a fresh baseline backup. 502 on a probe
+         *     failure. Invalidates the live port-state cache so the next read is fresh.
+         */
+        post: operations["rediscover_api_devices__device_id__rediscover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/{device_id}/system": {
         parameters: {
             query?: never;
@@ -1405,6 +1429,21 @@ export interface components {
             rows?: string[][];
             /** Title */
             title: string;
+        };
+        /**
+         * RediscoverOut
+         * @description Result of ``POST /api/devices/{id}/rediscover``.
+         */
+        RediscoverOut: {
+            /**
+             * Hostname
+             * @default
+             */
+            hostname: string;
+            /** Ports Added */
+            ports_added: number;
+            /** Ports Total */
+            ports_total: number;
         };
         /**
          * RegisterRequest
@@ -2369,6 +2408,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProtocolDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rediscover_api_devices__device_id__rediscover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RediscoverOut"];
                 };
             };
             /** @description Validation Error */

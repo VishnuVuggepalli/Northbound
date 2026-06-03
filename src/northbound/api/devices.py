@@ -36,6 +36,7 @@ from northbound.schemas.device import (
     DiscoverIn,
     DiscoverOut,
     PortOut,
+    RediscoverOut,
     TestConnectionOut,
 )
 from northbound.schemas.driver import (
@@ -44,10 +45,14 @@ from northbound.schemas.driver import (
     DiscoveryResult,
     PortState,
 )
-from northbound.services import audit, reachability
-from northbound.services.credvault import FernetCredVault, serialize_credentials
+from northbound.services import audit, port_state, reachability
+from northbound.services.credvault import (
+    FernetCredVault,
+    deserialize_credentials,
+    serialize_credentials,
+)
 from northbound.services.device_policy import is_writable
-from northbound.services.onboarding import onboard_device
+from northbound.services.onboarding import onboard_device, rediscover_device
 from northbound.services.sites import site_exists
 
 logger = logging.getLogger("northbound.api.devices")
@@ -121,6 +126,13 @@ async def _load_device(session: AsyncSession, device_id: str) -> Device:
     if device is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
     return device
+
+
+def _credentials_for(device: Device) -> Credentials:
+    """Decrypt the device's stored credentials (empty bag if none)."""
+    if device.encrypted_credentials is None:
+        return Credentials()
+    return deserialize_credentials(device.encrypted_credentials, FernetCredVault.from_settings())
 
 
 # --------------------------------------------------------------------------- #
@@ -362,6 +374,44 @@ async def set_device_writes(
         result="ok",
     )
     return _device_out(device)
+
+
+# --------------------------------------------------------------------------- #
+# re-discover (F18) — re-run discovery on an EXISTING device to refresh its
+# persisted metadata + config baseline. Read-only on the device, so it works
+# even for read-only platforms (SwOS/FreeBSD).
+# --------------------------------------------------------------------------- #
+@router.post("/{device_id}/rediscover", response_model=RediscoverOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def rediscover(
+    request: Request,
+    device_id: str,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RediscoverOut:
+    """Re-probe an onboarded device and refresh its stored snapshot.
+
+    Non-destructive: adds metadata rows only for ports seen for the first time
+    (human edits preserved) and writes a fresh baseline backup. 502 on a probe
+    failure. Invalidates the live port-state cache so the next read is fresh.
+    """
+    device = await _load_device(session, device_id)
+    creds = _credentials_for(device)
+    driver = driver_for(device, creds)
+    try:
+        discovery = await driver.discover()
+    except (AuthError, ReachabilityError, DriverError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Re-discovery failed: {exc}"
+        ) from exc
+    finally:
+        await driver.aclose()
+
+    total, added = await rediscover_device(
+        session, device=device, discovery=discovery, actor_user_id=admin.id
+    )
+    port_state.invalidate(device.id)
+    return RediscoverOut(ports_total=total, ports_added=added, hostname=discovery.hostname)
 
 
 # --------------------------------------------------------------------------- #

@@ -73,6 +73,19 @@ export function useSetDeviceWrites(deviceId: string) {
   });
 }
 
+export function useRediscoverDevice(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.rediscoverDevice(deviceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.ports(deviceId) });
+      qc.invalidateQueries({ queryKey: queryKeys.allPorts() });
+      qc.invalidateQueries({ queryKey: ['devices', deviceId, 'config'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+}
+
 export function usePorts(deviceId: string | null | undefined) {
   return useQuery({
     queryKey: queryKeys.ports(deviceId ?? ''),

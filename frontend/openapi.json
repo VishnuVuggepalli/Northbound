@@ -1519,6 +1519,30 @@
         "title": "ProtocolTableOut",
         "type": "object"
       },
+      "RediscoverOut": {
+        "description": "Result of ``POST /api/devices/{id}/rediscover``.",
+        "properties": {
+          "hostname": {
+            "default": "",
+            "title": "Hostname",
+            "type": "string"
+          },
+          "ports_added": {
+            "title": "Ports Added",
+            "type": "integer"
+          },
+          "ports_total": {
+            "title": "Ports Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ports_total",
+          "ports_added"
+        ],
+        "title": "RediscoverOut",
+        "type": "object"
+      },
       "RegisterRequest": {
         "description": "Body of ``POST /api/auth/register`` (public self-registration).\n\nThe role is intentionally absent \u2014 self-registered accounts are always\nREQUESTER; only an admin can mint privileged users via ``POST /api/users``.\nA longer password floor than login applies because this creates the secret.",
         "properties": {
@@ -3289,6 +3313,54 @@
         "summary": "Get Protocol Detail",
         "tags": [
           "ports"
+        ]
+      }
+    },
+    "/api/devices/{device_id}/rediscover": {
+      "post": {
+        "description": "Re-probe an onboarded device and refresh its stored snapshot.\n\nNon-destructive: adds metadata rows only for ports seen for the first time\n(human edits preserved) and writes a fresh baseline backup. 502 on a probe\nfailure. Invalidates the live port-state cache so the next read is fresh.",
+        "operationId": "rediscover_api_devices__device_id__rediscover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RediscoverOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Rediscover",
+        "tags": [
+          "devices"
         ]
       }
     },

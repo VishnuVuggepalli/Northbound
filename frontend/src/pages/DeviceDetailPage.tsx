@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Cpu, FileText, Power } from 'lucide-react';
+import { ChevronRight, Cpu, FileText, Power, RefreshCw } from 'lucide-react';
 import { Switch3D } from '@/components/three/Switch3D';
 import { PortStrip } from '@/components/PortStrip';
 import { PortPanel } from '@/components/PortPanel';
@@ -19,6 +19,7 @@ import {
   useDevice,
   usePorts,
   usePlatforms,
+  useRediscoverDevice,
   useRequests,
   useSetDeviceWrites,
 } from '@/api/queries';
@@ -51,6 +52,7 @@ export function DeviceDetailPage() {
   const { data: platforms } = usePlatforms();
   const isAdmin = user?.role === 'admin';
   const setWrites = useSetDeviceWrites(deviceId ?? '');
+  const rediscover = useRediscoverDevice(deviceId ?? '');
 
   // Sync the route's device id into the UI store so global hotkeys (j/k/r)
   // know which device's ports to navigate. Reaching this page via URL (no
@@ -125,6 +127,33 @@ export function DeviceDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {isAdmin && (
+            <button
+              type="button"
+              disabled={rediscover.isPending}
+              onClick={() =>
+                rediscover.mutate(undefined, {
+                  onSuccess: (r) =>
+                    pushToast({
+                      kind: 'success',
+                      message: `Re-discovered ${device.name}: ${r.ports_total} ports${
+                        r.ports_added ? ` (${r.ports_added} new)` : ''
+                      }.`,
+                    }),
+                  onError: (e: unknown) =>
+                    pushToast({
+                      kind: 'error',
+                      message: e instanceof Error ? e.message : 'Re-discovery failed.',
+                    }),
+                })
+              }
+              title="Re-probe the device and refresh its stored ports + config baseline"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-fg-muted transition hover:bg-bg-elev-2 hover:text-fg disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={rediscover.isPending ? 'animate-spin' : ''} />
+              Re-discover
+            </button>
+          )}
           {isAdmin && !readOnly && (
             <button
               type="button"

@@ -132,3 +132,11 @@ class DeviceWritesIn(BaseModel):
     """Body of ``PATCH /api/devices/{id}/writes`` — the per-device write flag."""
 
     enabled: bool
+
+
+class RediscoverOut(BaseModel):
+    """Result of ``POST /api/devices/{id}/rediscover``."""
+
+    ports_total: int
+    ports_added: int
+    hostname: str = ""

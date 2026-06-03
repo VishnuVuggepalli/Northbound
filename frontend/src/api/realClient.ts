@@ -273,6 +273,19 @@ export async function getDevice(id: string): Promise<Device> {
   return mapDevice(d);
 }
 
+export interface RediscoverResult {
+  ports_total: number;
+  ports_added: number;
+  hostname: string;
+}
+
+/** Re-probe an onboarded device, refresh its stored snapshot (admin; F18). */
+export async function rediscoverDevice(id: string): Promise<RediscoverResult> {
+  return request<RediscoverResult>(`/api/devices/${encodeURIComponent(id)}/rediscover`, {
+    method: 'POST',
+  });
+}
+
 /** Enable/disable config writes for a device (admin; F77 per-device flag). */
 export async function setDeviceWrites(id: string, enabled: boolean): Promise<Device> {
   const d = await request<DeviceOut>(`/api/devices/${encodeURIComponent(id)}/writes`, {

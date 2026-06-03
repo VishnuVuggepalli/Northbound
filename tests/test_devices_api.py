@@ -654,3 +654,40 @@ async def test_device_writes_flag_requires_admin(
         f"/api/devices/{dev['id']}/writes", headers=_bearer(alice), json={"enabled": False}
     )
     assert resp.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# re-discover (F18)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_rediscover_refreshes_existing_device(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    _, admin, _ = seeded
+    dev = (await client.post("/api/devices", headers=_bearer(admin), json=_onboard_body())).json()
+    resp = await client.post(f"/api/devices/{dev['id']}/rediscover", headers=_bearer(admin))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ports_total"] >= 0
+    # All discovered ports already have metadata from onboard → none added again.
+    assert body["ports_added"] == 0
+    assert "hostname" in body
+
+
+@pytest.mark.asyncio
+async def test_rediscover_requires_admin(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    _, admin, alice = seeded
+    dev = (await client.post("/api/devices", headers=_bearer(admin), json=_onboard_body())).json()
+    resp = await client.post(f"/api/devices/{dev['id']}/rediscover", headers=_bearer(alice))
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_rediscover_unknown_device_404(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    _, admin, _ = seeded
+    resp = await client.post("/api/devices/does-not-exist/rediscover", headers=_bearer(admin))
+    assert resp.status_code == 404
