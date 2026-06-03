@@ -125,33 +125,37 @@ export function TopBar() {
           <span>{user?.role === 'admin' ? 'All requests' : 'My requests'}</span>
         </Link>
 
-        {/* Role pill — demo affordance, kept inline for the spec */}
-        <div
-          role="group"
-          aria-label="Role"
-          className="ml-1 flex items-center rounded-md border border-border bg-bg-elev-1 p-0.5 text-[11px]"
-        >
-          <button
-            type="button"
-            onClick={() => switchRole('admin')}
-            className={cn(
-              'rounded-[4px] px-2 py-1 uppercase tracking-wider',
-              user?.role === 'admin' ? 'bg-bg-elev-2 text-fg' : 'text-fg-muted hover:text-fg',
-            )}
+        {/* Role pill — DEV-only demo affordance. It flips the client view only
+            (the backend enforces the real role from the JWT), so it would mislead
+            in production; Vite strips this from prod builds via import.meta.env.DEV. */}
+        {import.meta.env.DEV && (
+          <div
+            role="group"
+            aria-label="Role (dev)"
+            className="ml-1 flex items-center rounded-md border border-border bg-bg-elev-1 p-0.5 text-[11px]"
           >
-            admin
-          </button>
-          <button
-            type="button"
-            onClick={() => switchRole('requester')}
-            className={cn(
-              'rounded-[4px] px-2 py-1 uppercase tracking-wider',
-              user?.role === 'requester' ? 'bg-bg-elev-2 text-fg' : 'text-fg-muted hover:text-fg',
-            )}
-          >
-            requester
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => switchRole('admin')}
+              className={cn(
+                'rounded-[4px] px-2 py-1 uppercase tracking-wider',
+                user?.role === 'admin' ? 'bg-bg-elev-2 text-fg' : 'text-fg-muted hover:text-fg',
+              )}
+            >
+              admin
+            </button>
+            <button
+              type="button"
+              onClick={() => switchRole('requester')}
+              className={cn(
+                'rounded-[4px] px-2 py-1 uppercase tracking-wider',
+                user?.role === 'requester' ? 'bg-bg-elev-2 text-fg' : 'text-fg-muted hover:text-fg',
+              )}
+            >
+              requester
+            </button>
+          </div>
+        )}
 
         <div ref={menuRef} className="relative">
           <button
