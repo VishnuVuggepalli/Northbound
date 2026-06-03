@@ -29,11 +29,14 @@ import { apiClient, isApiError } from '@/api';
  * then bounces to /login. Mock client always resolves, so E2E is unaffected.
  */
 function useValidateSession(): void {
-  const token = useAuthStore((s) => s.token);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const setUser = useAuthStore((s) => s.setUser);
   const logout = useAuthStore((s) => s.logout);
   useEffect(() => {
-    if (!token) return;
+    // The session lives in the httpOnly cookie, not JS — so validate by calling
+    // /me (cookie-authed). The request helper silently refreshes once on a 401;
+    // a still-401 means the session is truly gone, so clear it.
+    if (!isAuthenticated) return;
     let cancelled = false;
     apiClient
       .getCurrentUser()
@@ -46,7 +49,7 @@ function useValidateSession(): void {
     return () => {
       cancelled = true;
     };
-  }, [token, setUser, logout]);
+  }, [isAuthenticated, setUser, logout]);
 }
 
 function ProtectedShell() {

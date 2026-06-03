@@ -29,11 +29,16 @@ class LoginResponse(BaseModel):
 
 
 class TokenPayload(BaseModel):
-    """Decoded JWT claims. ``sub`` is the user id; ``exp`` is a UNIX timestamp."""
+    """Decoded JWT claims. ``sub`` is the user id; ``exp`` is a UNIX timestamp.
+
+    ``type`` distinguishes access vs refresh tokens; it defaults to ``access`` so
+    legacy tokens minted before the split still validate as access tokens.
+    """
 
     sub: str
     role: UserRole
     exp: int
+    type: str = "access"
 
 
 class UserOut(BaseModel):

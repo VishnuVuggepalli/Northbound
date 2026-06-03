@@ -101,22 +101,46 @@ async function parseError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message, code);
 }
 
+/** Cookie-based session refresh. Bypasses request() to avoid recursion. */
+async function tryRefresh(): Promise<boolean> {
+  try {
+    const res = await fetch(buildUrl('/api/auth/refresh'), {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      credentials: 'include',
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, query, anonymous } = options;
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (!anonymous) {
-    const token = getAuthToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
+  const send = async (): Promise<Response> => {
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (!anonymous) {
+      // Auth rides in the httpOnly cookie (sent via credentials:'include'). A
+      // legacy in-memory bearer, if any, is still attached for API parity.
+      const token = getAuthToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+    }
+    return fetch(buildUrl(path, query), {
+      method,
+      headers,
+      credentials: 'include',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  };
 
   let res: Response;
   try {
-    res = await fetch(buildUrl(path, query), {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    res = await send();
+    // Access token expired? Try one silent cookie refresh, then replay.
+    if (res.status === 401 && !anonymous) {
+      if (await tryRefresh()) res = await send();
+    }
   } catch (err) {
     throw new ApiError(0, err instanceof Error ? err.message : 'Network error');
   }

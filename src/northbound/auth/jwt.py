@@ -65,6 +65,26 @@ def _resolve_secret_key(settings: Settings) -> str:
     return _EPHEMERAL_DEV_KEY
 
 
+def _mint(
+    sub: str,
+    role: UserRole,
+    *,
+    token_type: str,
+    window: dt.timedelta,
+    settings: Settings | None,
+) -> str:
+    resolved = settings if settings is not None else get_settings()
+    key = _resolve_secret_key(resolved)
+    expires_at = dt.datetime.now(tz=dt.UTC) + window
+    claims: dict[str, str | int] = {
+        "sub": sub,
+        "role": role.value,
+        "exp": int(expires_at.timestamp()),
+        "type": token_type,
+    }
+    return cast(str, jwt.encode(claims, key, algorithm=resolved.jwt_algorithm))
+
+
 def create_access_token(
     sub: str,
     role: UserRole,
@@ -72,22 +92,33 @@ def create_access_token(
     *,
     settings: Settings | None = None,
 ) -> str:
-    """Mint a signed HS256 JWT for ``sub`` with ``role`` and an expiry claim."""
+    """Mint a short-lived access JWT (``type=access``)."""
     resolved = settings if settings is not None else get_settings()
-    key = _resolve_secret_key(resolved)
-    window = expiry if expiry is not None else dt.timedelta(minutes=resolved.jwt_expiry_minutes)
-    expires_at = dt.datetime.now(tz=dt.UTC) + window
-    claims: dict[str, str | int] = {
-        "sub": sub,
-        "role": role.value,
-        "exp": int(expires_at.timestamp()),
-    }
-    token = jwt.encode(claims, key, algorithm=resolved.jwt_algorithm)
-    return cast(str, token)
+    window = expiry if expiry is not None else dt.timedelta(minutes=resolved.access_token_minutes)
+    return _mint(sub, role, token_type="access", window=window, settings=settings)
 
 
-def decode_token(token: str, *, settings: Settings | None = None) -> TokenPayload:
-    """Verify and decode ``token``; raise :class:`InvalidToken` on any failure."""
+def create_refresh_token(
+    sub: str,
+    role: UserRole,
+    expiry: dt.timedelta | None = None,
+    *,
+    settings: Settings | None = None,
+) -> str:
+    """Mint a long-lived refresh JWT (``type=refresh``), used only at /auth/refresh."""
+    resolved = settings if settings is not None else get_settings()
+    window = expiry if expiry is not None else dt.timedelta(days=resolved.refresh_token_days)
+    return _mint(sub, role, token_type="refresh", window=window, settings=settings)
+
+
+def decode_token(
+    token: str, *, expected_type: str | None = None, settings: Settings | None = None
+) -> TokenPayload:
+    """Verify and decode ``token``; raise :class:`InvalidToken` on any failure.
+
+    When ``expected_type`` is given, the token's ``type`` claim must match (so a
+    refresh token can't be used as an access token or vice-versa).
+    """
     resolved = settings if settings is not None else get_settings()
     key = _resolve_secret_key(resolved)
     try:
@@ -98,6 +129,9 @@ def decode_token(token: str, *, settings: Settings | None = None) -> TokenPayloa
     # ``raw`` is untyped (dict from an untyped lib); validate it into a model.
     claims = cast(dict[str, object], raw)
     try:
-        return TokenPayload.model_validate(claims)
+        payload = TokenPayload.model_validate(claims)
     except ValidationError as exc:
         raise InvalidToken("token claims failed validation") from exc
+    if expected_type is not None and payload.type != expected_type:
+        raise InvalidToken(f"expected {expected_type} token, got {payload.type}")
+    return payload

@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from northbound.auth.cookies import ACCESS_COOKIE
 from northbound.auth.jwt import InvalidToken, decode_token
 from northbound.db import get_session
 from northbound.models.enums import UserRole
@@ -30,19 +31,23 @@ _CREDENTIALS_EXCEPTION = HTTPException(
 
 
 async def get_current_user(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> User:
-    """Resolve the current user from the ``Authorization: Bearer`` token.
+    """Resolve the current user from the access token.
 
-    Raises 401 if the header is missing, the token is invalid/expired, or the
-    referenced user no longer exists.
+    The token is read from the ``nb_access`` httpOnly cookie (browser sessions)
+    or, failing that, the ``Authorization: Bearer`` header (API clients/tests).
+    Raises 401 if absent, invalid/expired, the wrong token type, or the user no
+    longer exists.
     """
-    if credentials is None or not credentials.credentials:
+    token = request.cookies.get(ACCESS_COOKIE) or (credentials.credentials if credentials else None)
+    if not token:
         raise _CREDENTIALS_EXCEPTION
 
     try:
-        payload = decode_token(credentials.credentials)
+        payload = decode_token(token, expected_type="access")
     except InvalidToken as exc:
         raise _CREDENTIALS_EXCEPTION from exc
 

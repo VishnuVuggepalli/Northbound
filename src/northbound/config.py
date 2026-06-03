@@ -71,7 +71,23 @@ class Settings(BaseSettings):
     # ephemeral key is minted with a warning (mirrors the master-key policy).
     secret_key: str | None = Field(default=None)
     jwt_algorithm: str = Field(default="HS256")
-    jwt_expiry_minutes: int = Field(default=480)
+    jwt_expiry_minutes: int = Field(default=480)  # legacy default for create_access_token
+
+    # Cookie-based session (hardened): short-lived access token + long-lived
+    # refresh token, both in httpOnly cookies. Access is sent on every request;
+    # refresh is used only at /api/auth/refresh to rotate.
+    access_token_minutes: int = Field(default=30, ge=1)
+    refresh_token_days: int = Field(default=14, ge=1)
+    # Mark auth cookies Secure (HTTPS-only) outside development. Overridable for
+    # an HTTPS dev box; default tracks the environment so http://localhost works.
+    cookie_secure: bool | None = Field(default=None)
+
+    @property
+    def auth_cookie_secure(self) -> bool:
+        """Whether to set the Secure flag on auth cookies."""
+        if self.cookie_secure is not None:
+            return self.cookie_secure
+        return self.environment != "development"
 
     # Open self-registration: when true, anyone can POST /api/auth/register to
     # create a REQUESTER account (never admin). Kill-switch for deployments that

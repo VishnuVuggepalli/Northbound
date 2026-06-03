@@ -304,3 +304,68 @@ async def test_register_disabled_returns_403(
         "/api/auth/register", json={"username": "eve", "password": "hunter2pw"}
     )
     assert resp.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# Cookie session + refresh rotation (hardened auth)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_login_sets_httponly_session_cookies(client: AsyncClient) -> None:
+    resp = await client.post("/api/auth/login", json={"username": "admin", "password": "admin-pw"})
+    assert resp.status_code == 200
+    cookies = {c.name: c for c in resp.cookies.jar}
+    assert "nb_access" in cookies and "nb_refresh" in cookies
+    # Set-Cookie must be httpOnly (not JS-readable).
+    set_cookie_headers = "; ".join(resp.headers.get_list("set-cookie")).lower()
+    assert "httponly" in set_cookie_headers
+
+
+@pytest.mark.asyncio
+async def test_cookie_auth_without_bearer_header(client: AsyncClient) -> None:
+    # Log in (client stores cookies), then call a protected route with NO bearer.
+    await client.post("/api/auth/login", json={"username": "admin", "password": "admin-pw"})
+    me = await client.get("/api/users/me")  # cookie only
+    assert me.status_code == 200
+    assert me.json()["username"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_refresh_rotates_session(client: AsyncClient) -> None:
+    login = await client.post("/api/auth/login", json={"username": "admin", "password": "admin-pw"})
+    first_access = login.json()["access_token"]
+    refreshed = await client.post("/api/auth/refresh")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["role"] == "admin"
+    # A fresh access token is issued and the cookies are re-set.
+    assert {c.name for c in refreshed.cookies.jar} >= {"nb_access", "nb_refresh"}
+    # Still authenticated with the rotated session.
+    assert (await client.get("/api/users/me")).status_code == 200
+    assert isinstance(first_access, str) and first_access
+
+
+@pytest.mark.asyncio
+async def test_refresh_without_cookie_401(client: AsyncClient) -> None:
+    resp = await client.post("/api/auth/refresh")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_access_token_in_refresh_cookie(client: AsyncClient) -> None:
+    # An access token must not be usable at /refresh (type claim is checked).
+    from northbound.auth.cookies import REFRESH_COOKIE
+    from northbound.auth.jwt import create_access_token
+
+    access = create_access_token(sub="x", role=UserRole.ADMIN)
+    client.cookies.set(REFRESH_COOKIE, access, path="/api/auth")
+    resp = await client.post("/api/auth/refresh")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_clears_cookies(client: AsyncClient) -> None:
+    await client.post("/api/auth/login", json={"username": "admin", "password": "admin-pw"})
+    out = await client.post("/api/auth/logout")
+    assert out.status_code == 204
+    # Set-Cookie clears (max-age=0 / expires in the past).
+    cleared = "; ".join(out.headers.get_list("set-cookie")).lower()
+    assert "nb_access" in cleared and "nb_refresh" in cleared
