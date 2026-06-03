@@ -342,6 +342,25 @@ async def test_apply_change_discards_candidate_before_edit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_apply_change_trunk_tagged_is_atomic_single_commit() -> None:
+    # A trunk tagged-VLAN write stages BOTH edits (clear + set) into one candidate
+    # and commits ONCE — atomic. A per-phase commit could leave the clear committed
+    # but the set not, wiping the trunk's tagged VLANs with no rollback.
+    drv, fake = _make_driver()
+    diff = await drv.render_change(
+        "ge-1/1/1", PortChange(port_mode="trunk", untagged_vlan=10, tagged_vlans=[20, 30])
+    )
+    assert len(diff.commands) == 2  # clear + set
+    result = await drv.apply_change(diff)
+    assert result.success is True
+    ops = [c[0] for c in fake.calls]
+    assert ops.count("edit_config") == 2
+    assert ops.count("commit") == 1  # single commit → atomic
+    # both edits precede the one commit
+    assert ops.index("commit") > max(i for i, o in enumerate(ops) if o == "edit_config")
+
+
+@pytest.mark.asyncio
 async def test_apply_change_discards_candidate_on_failure() -> None:
     # A rejected edit/commit must not leave the candidate dirty for the next apply.
     drv, fake = _make_driver()

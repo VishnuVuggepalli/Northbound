@@ -336,30 +336,34 @@ class Pica8Driver(Driver):
                 confirm_deadline_at=None,
                 error="ConfigDiff missing pending_token or commands",
             )
-        # xorplus has no :confirmed-commit, so every phase is a plain commit and
-        # there is no revert window. A change may need >1 phase (a trunk tagged-VLAN
-        # write is clear-then-set); each phase is its own clean discard→edit→commit
-        # so a keyed <members> list is wiped before the new set is merged in.
+        # xorplus has no :confirmed-commit, so a commit is permanent immediately —
+        # there is no revert window. A change may need >1 edit (a trunk tagged-VLAN
+        # write is clear-then-set: phase 1 removes the keyed <members> list, phase 2
+        # merges the new set into the now-empty list). ALL edits are staged into ONE
+        # candidate and applied with a SINGLE commit, so the change is atomic: if the
+        # commit fails we discard and running config is untouched — never left in the
+        # mid-state where the clear committed but the set didn't (which would wipe a
+        # trunk's tagged VLANs).
         try:
             confirmed = await self._netconf.supports(":confirmed-commit")
+            # Clean candidate first: a prior apply that failed AFTER edit_config
+            # leaves its edit staged; without this, retries stack <interface> blocks
+            # → commit fails 'Duplicate key "interface:id"'. (discard only touches the
+            # uncommitted candidate, never the committed running config.)
+            with contextlib.suppress(Exception):
+                await self._netconf.discard_changes()
             for xml_payload in diff.commands:
                 # A targeted delete (clearing a leaf) needs default-operation="none":
-                # only the operation-tagged node acts; under "merge" xorplus keeps
-                # the existing leaf. remove/replace work under the default merge.
+                # only the operation-tagged node acts; under "merge" xorplus keeps the
+                # existing leaf. remove/(plain merge) work under the default merge.
                 default_op = "none" if 'operation="delete"' in xml_payload else None
-                # Clean candidate first: a prior apply that failed AFTER edit_config
-                # leaves its edit staged; without this, retries stack <interface>
-                # blocks → commit fails 'Duplicate key "interface:id"'. (discard only
-                # touches the uncommitted candidate, never a committed prior phase.)
-                with contextlib.suppress(Exception):
-                    await self._netconf.discard_changes()
                 await self._netconf.edit_config(
                     target="candidate", config=xml_payload, default_operation=default_op
                 )
-                await self._netconf.commit(
-                    confirmed=confirmed,
-                    timeout=confirm_seconds if confirmed else None,
-                )
+            await self._netconf.commit(
+                confirmed=confirmed,
+                timeout=confirm_seconds if confirmed else None,
+            )
         except Exception as exc:
             # Don't leave the rejected edit staged in the candidate — it would
             # collide with the next apply. Discard is best-effort.
