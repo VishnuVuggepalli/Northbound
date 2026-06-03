@@ -90,7 +90,6 @@ async def apply_request(
     creds = _credentials_for(device)
     driver = driver_for(device, creds)
     try:
-
         # 4. Stale-state guard: recompute the live fingerprint and compare.
         live_fingerprint = await port_state.current_fingerprint(device, refresh=True)
         if (
