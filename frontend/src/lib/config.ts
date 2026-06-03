@@ -98,6 +98,12 @@ export function renderConfigSnippet(device: Device, port: Port): string {
       ]
         .filter(Boolean)
         .join('\n');
+    case 'mikrotik_swos':
+      // SwOS is read-only from Northbound — no config to render, just status.
+      return [
+        `# SwOS (read-only) · ${port.name}`,
+        `# ${port.link_up ? 'link up' : port.admin_up ? 'enabled' : 'disabled'}`,
+      ].join('\n');
   }
 }
 
@@ -111,6 +117,14 @@ export function renderFullConfig(device: Device, ports: Port[]): string[] {
       return renderPica8(device, ports);
     case 'mikrotik':
       return renderMikrotik(device, ports);
+    case 'mikrotik_swos':
+      return [
+        `# MikroTik SwOS (read-only) · ${device.model}`,
+        `# identity ${device.name}`,
+        ...ports.map(
+          (p) => `${p.name}: ${p.link_up ? 'up' : p.admin_up ? 'enabled' : 'disabled'}`,
+        ),
+      ];
     case 'freebsd':
       return renderFreeBSD(device, ports);
     case 'mock':

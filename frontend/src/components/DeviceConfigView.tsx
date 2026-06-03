@@ -111,6 +111,7 @@ const KEYWORDS: Record<Device['platform'], string[]> = {
   arista: ['interface', 'description', 'no', 'shutdown', 'switchport', 'mode', 'access', 'trunk', 'native', 'vlan', 'allowed', 'router', 'bgp', 'neighbor', 'hostname'],
   pica8: ['set', 'interface', 'description', 'enable', 'disable', 'vlans', 'tagged', 'untagged', 'protocols', 'system'],
   mikrotik: ['/interface', '/system', '/ip', 'bridge', 'port', 'vlan', 'set', 'find', 'comment', 'pvid', 'disabled', 'address', 'identity'],
+  mikrotik_swos: ['SwOS', 'identity', 'version', 'serial', 'mgmt-ip', 'up', 'enabled', 'disabled', 'read-only'],
   freebsd: ['ifconfig_', 'inet', 'up', 'down', 'mtu', 'pf', 'rc.conf', 'frr', 'router', 'bgp', 'hostname', 'gateway_enable'],
   mock: ['interface', 'vlan', 'hostname'],
 };

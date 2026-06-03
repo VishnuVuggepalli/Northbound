@@ -14,6 +14,7 @@ const PLATFORM_TINT: Record<Platform, string> = {
   arista: 'text-[oklch(0.72_0.18_240)] bg-[oklch(0.72_0.18_240/0.12)]',
   pica8: 'text-[oklch(0.78_0.18_55)] bg-[oklch(0.78_0.18_55/0.12)]',
   mikrotik: 'text-[oklch(0.74_0.17_25)] bg-[oklch(0.74_0.17_25/0.12)]',
+  mikrotik_swos: 'text-[oklch(0.70_0.14_30)] bg-[oklch(0.70_0.14_30/0.12)]',
   freebsd: 'text-[oklch(0.72_0.16_300)] bg-[oklch(0.72_0.16_300/0.12)]',
   mock: 'text-[oklch(0.70_0.02_250)] bg-[oklch(0.70_0.02_250/0.12)]',
 };

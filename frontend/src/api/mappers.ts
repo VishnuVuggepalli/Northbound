@@ -41,6 +41,7 @@ const KNOWN_PLATFORMS: readonly Platform[] = [
   'cisco',
   'pica8',
   'mikrotik',
+  'mikrotik_swos',
   'freebsd',
   'mock',
 ];

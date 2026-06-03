@@ -300,6 +300,27 @@ class _FakeMikrotikClient:
 
 
 # ---------------------------------------------------------------------------
+# MikroTik SwOS — fake the .b HTTP endpoints: GET /<ep> serves the captured
+# fixture text (sys.b / link.b). Read-only driver.
+# ---------------------------------------------------------------------------
+class _FakeSwosClient:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self._dir = _FIXTURE_DIR / "mikrotik_swos"
+
+    async def get(self, url: str, *, headers: Any = None, params: Any = None) -> Any:
+        import httpx
+
+        self.calls.append(url)
+        path = self._dir / url.lstrip("/")
+        text = path.read_text() if path.exists() else "{}"
+        return httpx.Response(200, text=text)
+
+    async def aclose(self) -> None:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # The factory the contract suite consumes
 # ---------------------------------------------------------------------------
 
@@ -320,6 +341,8 @@ def driver_factory() -> Callable[[type[Driver]], Driver]:
             return cls(conn, creds, netconf=_build_pica8_netconf_client())  # type: ignore[call-arg]
         if cls.platform_id == "mikrotik":
             return cls(conn, creds, http=_FakeMikrotikClient())  # type: ignore[call-arg]
+        if cls.platform_id == "mikrotik_swos":
+            return cls(conn, creds, http=_FakeSwosClient())  # type: ignore[call-arg]
         return cls(conn, creds)
 
     return factory
