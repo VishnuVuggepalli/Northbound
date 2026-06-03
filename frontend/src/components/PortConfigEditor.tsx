@@ -3,7 +3,7 @@ import { Power, Save } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useSetPortConfig } from '@/api/queries';
-import type { PortConfigPatch } from '@/api/realClient';
+import { buildPortConfigPatch, currentMode, parseTagged, type PortMode } from '@/lib/portConfigPatch';
 import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
 import type { Port } from '@/types';
@@ -13,22 +13,7 @@ interface PortConfigEditorProps {
   port: Port;
 }
 
-type Mode = 'access' | 'trunk';
-
-/** Parse a "100, 200, 300" string into a sorted, de-duped, valid VLAN list. */
-function parseTagged(text: string): number[] {
-  const ids = text
-    .split(',')
-    .map((s) => parseInt(s.trim(), 10))
-    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 4094);
-  return [...new Set(ids)].sort((a, b) => a - b);
-}
-
-function sameSet(a: number[], b: number[]): boolean {
-  if (a.length !== b.length) return false;
-  const sb = new Set(b);
-  return a.every((x) => sb.has(x));
-}
+type Mode = PortMode;
 
 /**
  * Admin-only DIRECT device write of port tunables: port-mode, native/untagged
@@ -36,10 +21,9 @@ function sameSet(a: number[], b: number[]): boolean {
  * sent; the backend commits immediately (no approval gate).
  */
 export function PortConfigEditor({ deviceId, port }: PortConfigEditorProps) {
-  const currentMode: Mode = port.tagged_vlans.length > 0 ? 'trunk' : 'access';
   const setConfig = useSetPortConfig(deviceId);
 
-  const [mode, setMode] = useState<Mode>(currentMode);
+  const [mode, setMode] = useState<Mode>(currentMode(port));
   const [native, setNative] = useState(port.untagged_vlan);
   const [taggedText, setTaggedText] = useState(port.tagged_vlans.join(', '));
   const [mtu, setMtu] = useState(port.mtu);
@@ -55,15 +39,7 @@ export function PortConfigEditor({ deviceId, port }: PortConfigEditorProps) {
   }, [port]);
 
   const tagged = parseTagged(taggedText);
-  const patch: PortConfigPatch = {};
-  const modeChanged = mode !== currentMode;
-  if (modeChanged) patch.port_mode = mode;
-  if (modeChanged || native !== port.untagged_vlan) patch.untagged_vlan = native;
-  if (mode === 'trunk' && (modeChanged || !sameSet(tagged, port.tagged_vlans))) {
-    patch.tagged_vlans = tagged;
-  }
-  if (mtu !== port.mtu) patch.mtu = mtu;
-  if (enabled !== port.admin_up) patch.enabled = enabled;
+  const patch = buildPortConfigPatch(port, { mode, native, tagged, mtu, enabled });
   const dirty = Object.keys(patch).length > 0;
 
   const apply = () => {
