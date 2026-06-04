@@ -1,8 +1,8 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
 from slowapi import _rate_limit_exceeded_handler
@@ -32,9 +32,9 @@ from northbound.api.limiter import limiter
 from northbound.api.static_spa import mount_spa
 from northbound.api.versioning import ApiVersionMiddleware
 from northbound.config import get_settings
-from northbound.db import async_session_factory
+from northbound.db import async_session_factory, engine
 from northbound.services import runtime_settings
-from northbound.services.scheduler import build_scheduler
+from northbound.services.scheduler_lease import SchedulerLease
 from northbound.services.sites import ensure_default_sites
 
 logger = logging.getLogger("northbound.main")
@@ -57,12 +57,18 @@ def _rate_limit_handler(request: Request, exc: Exception) -> Response:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Start the in-process scheduler on startup; stop it on shutdown.
+    """Start background tasks on startup; stop them on shutdown.
 
-    Gated on ``settings.enable_scheduler`` (forced ``False`` under tests) so the
-    test suite never spawns real APScheduler timers — which would otherwise keep
-    the event loop alive and hang collection. In production the four background
-    jobs (reachability poll, nightly backup, audit verify, reconciler) run here.
+    Two background tasks run only when ``settings.enable_scheduler`` is True
+    (forced ``False`` under tests so the suite never spawns real timers — which
+    would keep the event loop alive and hang collection):
+
+    * A :class:`SchedulerLease` that elects a single leader (Postgres advisory
+      lock) and runs the four jobs (reachability poll, nightly backup, audit
+      verify, reconciler) in exactly ONE worker — never N times under
+      multi-worker. On SQLite the lone process is always the leader.
+    * A runtime-settings refresh loop in EVERY worker, so an admin change made
+      on one worker (e.g. the write rate limit) converges to the others.
     """
     settings = get_settings()
 
@@ -83,19 +89,33 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception:
         logger.warning("runtime-settings cache seed skipped (table missing?)", exc_info=True)
 
-    scheduler: AsyncIOScheduler | None = None
+    lease: SchedulerLease | None = None
+    refresh_stop: asyncio.Event | None = None
+    refresh_task: asyncio.Task[None] | None = None
     if settings.enable_scheduler:
-        scheduler = build_scheduler(settings)
-        scheduler.start()
-        logger.info("scheduler started with %d job(s)", len(scheduler.get_jobs()))
+        lease = SchedulerLease(engine, settings)
+        await lease.start()
+        refresh_stop = asyncio.Event()
+        refresh_task = asyncio.create_task(
+            runtime_settings.refresh_loop(
+                async_session_factory,
+                settings.runtime_settings_refresh_seconds,
+                refresh_stop,
+            ),
+            name="runtime-settings-refresh",
+        )
     else:
-        logger.info("scheduler disabled (enable_scheduler=False); no background jobs")
+        logger.info("background tasks disabled (enable_scheduler=False)")
     try:
         yield
     finally:
-        if scheduler is not None:
-            scheduler.shutdown(wait=False)
-            logger.info("scheduler shut down")
+        if refresh_stop is not None:
+            refresh_stop.set()
+        if refresh_task is not None:
+            await refresh_task
+        if lease is not None:
+            await lease.stop()
+            logger.info("scheduler lease stopped")
 
 
 app = FastAPI(title="Northbound", version="0.1.0", lifespan=lifespan)

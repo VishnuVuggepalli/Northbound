@@ -1,0 +1,49 @@
+# Northbound — Postgres + multi-worker overlay.
+#
+# Layers on top of the base single-service compose to run the app against
+# Postgres with multiple uvicorn workers and a shared Redis rate-limit store.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+#
+# Why each piece:
+#   * postgres  — durable store that tolerates concurrent writers from N workers
+#                 (SQLite serializes writers; fine for one worker, not many).
+#   * redis     — shared rate-limit counters so a "30/minute" limit holds across
+#                 ALL workers, not per-process (≈N× without it).
+#   * NB_WEB_CONCURRENCY>1 — fork N uvicorn workers. The scheduler still runs in
+#                 exactly one (Postgres advisory-lock leader election).
+
+services:
+  northbound:
+    environment:
+      NB_DB_URL: postgresql+asyncpg://northbound:${NB_PG_PASSWORD:?set NB_PG_PASSWORD in .env}@postgres:5432/northbound
+      NB_RATELIMIT_STORAGE_URI: redis://redis:6379/0
+      NB_WEB_CONCURRENCY: ${NB_WEB_CONCURRENCY:-4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: northbound
+      POSTGRES_PASSWORD: ${NB_PG_PASSWORD:?set NB_PG_PASSWORD in .env}
+      POSTGRES_DB: northbound
+    volumes:
+      - nb-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U northbound -d northbound"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+
+volumes:
+  nb-pgdata:

@@ -20,5 +20,22 @@ if [ "${NB_SEED:-0}" = "1" ]; then
     fi
 fi
 
+# Multi-worker: scale uvicorn workers via NB_WEB_CONCURRENCY (default 1). Only
+# appended when the command is uvicorn so an overridden command is left intact.
+# Migrations above run ONCE here (before workers fork), so N workers never race
+# `alembic upgrade`. The scheduler self-elects a single leader across workers
+# (Postgres advisory lock — see services.scheduler_lease), so background jobs
+# never run N times.
+workers="${NB_WEB_CONCURRENCY:-1}"
+if [ "$workers" -gt 1 ] 2>/dev/null && [ "$1" = "uvicorn" ]; then
+    if [ -z "${NB_RATELIMIT_STORAGE_URI:-}" ]; then
+        echo "[entrypoint] WARNING: NB_WEB_CONCURRENCY=$workers without NB_RATELIMIT_STORAGE_URI" \
+             "— rate limits are per-worker (about N times the configured limit). Set a shared" \
+             "Redis store for correct global limits."
+    fi
+    echo "[entrypoint] multi-worker: $workers uvicorn workers"
+    set -- "$@" --workers "$workers"
+fi
+
 echo "[entrypoint] starting: $*"
 exec "$@"

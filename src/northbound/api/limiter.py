@@ -98,4 +98,22 @@ def write_rate_key(request: Request) -> str:
     return f"ip:{get_remote_address(request)}"
 
 
-limiter = Limiter(key_func=get_remote_address)
+def build_limiter() -> Limiter:
+    """Construct the shared limiter, wiring shared storage when configured.
+
+    With ``NB_RATELIMIT_STORAGE_URI`` set (e.g. ``redis://redis:6379/0``) all
+    workers share one counter store, so a limit like ``30/minute`` is enforced
+    across the whole deployment. Unset → slowapi's default in-memory storage,
+    which is correct only for a single worker (each process keeps its own
+    counters). Importing the storage backend (e.g. ``redis``) is done lazily by
+    ``limits`` from the URI scheme, so the dependency is needed only when set.
+    """
+    from northbound.config import get_settings
+
+    storage_uri = get_settings().ratelimit_storage_uri
+    if storage_uri:
+        return Limiter(key_func=get_remote_address, storage_uri=storage_uri)
+    return Limiter(key_func=get_remote_address)
+
+
+limiter = build_limiter()

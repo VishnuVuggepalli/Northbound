@@ -35,6 +35,12 @@ dependencies = [
  # DB layer + migrations + at-rest credential encryption (standard, battle-tested libs).
  "sqlalchemy[asyncio]>=2.0",
  "aiosqlite>=0.20",
+ # Async Postgres driver. SQLite (aiosqlite) is the single-worker default; a
+ # `postgresql+asyncpg://` NB_DB_URL switches the engine with no API changes.
+ # Shipped as a base dep (not an extra) so a Postgres URL works out of the box —
+ # an optional driver that is imported only on connect would crash at first
+ # request, not at install (the same trap that bit httpx).
+ "asyncpg>=0.29",
  "alembic>=1.13",
  "cryptography>=43.0",
  # Auth layer: JWT (jose), password hashing (passlib/bcrypt), login throttle (slowapi).
@@ -55,6 +61,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Shared rate-limit storage for multi-worker deployments. Without it slowapi
+# keeps per-process in-memory counters, so N workers allow ~N× the configured
+# limit. Install with `.[redis]` and set NB_RATELIMIT_STORAGE_URI=redis://… when
+# running more than one worker. Imported lazily by `limits` only when that URI
+# is set, so a single-worker install never needs it.
+redis = [
+  "redis>=5.0",
+]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",

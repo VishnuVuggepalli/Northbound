@@ -124,6 +124,24 @@ class Settings(BaseSettings):
     # the suite never spawns real timers (no hangs). See ``main.lifespan``.
     enable_scheduler: bool = Field(default=True)
 
+    # --- Multi-worker / horizontal scaling ---
+    # Shared rate-limit storage backend, e.g. "redis://redis:6379/0". When unset
+    # (the single-worker default) slowapi uses per-process in-memory counters,
+    # which are NOT shared across workers, so running N workers would allow about
+    # N times the configured limit. Set this to a Redis (or memcached) URI
+    # whenever more than one worker runs. See ``api.limiter`` and the [redis] extra.
+    ratelimit_storage_uri: str | None = Field(default=None)
+    # Leader-election retry cadence (seconds): exactly one worker runs the
+    # scheduler, elected via a Postgres advisory lock. A non-leader re-attempts
+    # acquisition this often so it can take over if the leader process dies.
+    # Ignored on SQLite (single process is always the leader). See
+    # ``services.scheduler_lease``.
+    scheduler_lock_retry_seconds: int = Field(default=15, ge=1)
+    # How often each worker reloads admin-tuned runtime settings (e.g. the write
+    # rate limit) from the DB, so a change made on one worker propagates to all
+    # of them within this window. Only runs when ``enable_scheduler`` is True.
+    runtime_settings_refresh_seconds: int = Field(default=30, ge=1)
+
     # --- Static frontend (principal-engineering D9: StaticFiles mount on /) ---
     # Directory of the built Vite SPA (``frontend/dist``). Resolved relative to
     # the repo root when not absolute. If the directory is missing the mount is

@@ -12,14 +12,18 @@ slowapi uses, so an admin can only persist a value slowapi can enforce.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+import logging
 import os
 
 from limits import parse
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from northbound.models.runtime_setting import RuntimeSetting
+
+logger = logging.getLogger("northbound.services.runtime_settings")
 
 WRITE_RATE_LIMIT_KEY = "write_rate_limit"
 
@@ -66,3 +70,34 @@ async def set_value(session: AsyncSession, key: str, value: str, *, updated_by: 
         row.updated_at = now
     await session.flush()
     _cache[key] = value
+
+
+async def refresh_loop(
+    factory: async_sessionmaker[AsyncSession],
+    interval_seconds: float,
+    stop: asyncio.Event,
+) -> None:
+    """Periodically reload the cache from the DB until ``stop`` is set.
+
+    Run in EVERY worker (unlike the scheduler, which runs in one): a setting
+    changed via the API on one worker only updates that worker's local cache,
+    so the others would serve a stale value until restart. Reloading on this
+    cadence makes the change eventually consistent across all workers within
+    ``interval_seconds``. A failed reload is logged and retried next tick — it
+    never propagates (which would kill the loop), and the cache simply keeps its
+    last-known values. The cache is already seeded at startup, so we wait first
+    then refresh.
+    """
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+            return  # stop fired during the wait
+        except TimeoutError:
+            pass
+        try:
+            async with factory() as session:
+                await load_cache(session)
+        except Exception:
+            logger.warning(
+                "runtime-settings cache refresh failed; keeping prior values", exc_info=True
+            )

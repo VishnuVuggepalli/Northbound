@@ -83,15 +83,39 @@ def _change_requests_table(metadata: sa.MetaData, ondelete: str) -> sa.Table:
 
 
 def _recreate_fk(ondelete: str) -> None:
-    """Recreate change_requests with device_id FK using the given ondelete rule."""
-    metadata = sa.MetaData()
-    with op.batch_alter_table(
+    """Set the change_requests.device_id FK ondelete rule, per dialect.
+
+    SQLite cannot ALTER a constraint in place, so we recreate the table via
+    batch mode. Postgres (and other ALTER-capable backends) can drop and re-add
+    the constraint natively — and must, because the initial-schema FK was
+    created *unnamed*, so the server assigned its own name (e.g.
+    ``change_requests_device_id_fkey``). We therefore reflect the actual FK name
+    on ``device_id`` rather than assuming ``_FK_NAME`` already exists.
+    """
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        metadata = sa.MetaData()
+        with op.batch_alter_table(
+            "change_requests",
+            schema=None,
+            copy_from=_change_requests_table(metadata, ondelete),
+            recreate="always",
+        ):
+            pass
+        return
+
+    inspector = sa.inspect(bind)
+    for fk in inspector.get_foreign_keys("change_requests"):
+        if fk["constrained_columns"] == ["device_id"] and fk["name"]:
+            op.drop_constraint(fk["name"], "change_requests", type_="foreignkey")
+    op.create_foreign_key(
+        _FK_NAME,
         "change_requests",
-        schema=None,
-        copy_from=_change_requests_table(metadata, ondelete),
-        recreate="always",
-    ):
-        pass
+        "devices",
+        ["device_id"],
+        ["id"],
+        ondelete=ondelete,
+    )
 
 
 def upgrade() -> None:
