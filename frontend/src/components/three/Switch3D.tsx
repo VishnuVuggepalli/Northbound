@@ -258,9 +258,14 @@ interface SceneProps extends Switch3DProps {
 }
 
 function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, isFreebsd }: SceneProps) {
-  const chassisColor = theme === 'dark' ? 0x1c2127 : 0x2a3038;
-  const frontColor = theme === 'dark' ? 0x121518 : 0x1f242b;
-  const topColor = theme === 'dark' ? 0x252b32 : 0x3a4250;
+  // The dark-mode canvas backdrop is near-black (#08090c, see <color> below).
+  // The chassis must read as a *lighter* steel against it — earlier dark values
+  // (0x1c2127 / 0x121518) sat almost on top of the background and the switch
+  // vanished. Lambert + ambient 0.55 darkens these further at render, so they
+  // are pitched well above the backdrop on purpose.
+  const chassisColor = theme === 'dark' ? 0x343c46 : 0x2a3038;
+  const frontColor = theme === 'dark' ? 0x252d35 : 0x1f242b;
+  const topColor = theme === 'dark' ? 0x404a55 : 0x3a4250;
   const brand = BRAND_COLOR[device.platform];
 
   const chassisW = isFreebsd ? 6 : Math.max(6, layout.cols * 0.55 + 2);
