@@ -29,6 +29,26 @@ logger = logging.getLogger("northbound.config")
 _APPLY_STALE_MIN_MULTIPLE = 3
 
 
+def _read_secret_file(path: str | None, env_name: str) -> str | None:
+    """Read a secret from ``path`` (Docker/K8s/systemd secrets convention).
+
+    Returns ``None`` when ``path`` is unset (caller falls back to the inline
+    value / dev mint). A configured-but-unreadable or empty file raises — a
+    misconfigured secret source must fail loudly, never degrade to ephemeral.
+    Trailing whitespace/newline (common in secret files) is stripped.
+    """
+    if not path:
+        return None
+    file = Path(path)
+    try:
+        value = file.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ValueError(f"{env_name}={path!r} could not be read: {exc}") from exc
+    if not value:
+        raise ValueError(f"{env_name}={path!r} is empty")
+    return value
+
+
 def _load_toml() -> dict[str, Any]:
     """Read ``northbound.toml`` if present; empty mapping otherwise."""
     if not _CONFIG_FILE.is_file():
@@ -58,6 +78,10 @@ class Settings(BaseSettings):
 
     # Fernet master key (urlsafe-base64, 32 bytes). Required outside dev.
     master_key: str | None = Field(default=None)
+    # Optional: read the master key from a FILE instead of an inline env value
+    # (Docker/K8s/systemd secrets convention — keeps the secret off the command
+    # line and out of `ps`/process env). Inline NB_MASTER_KEY wins if both set.
+    master_key_file: str | None = Field(default=None)
 
     # Reverse-proxy trust. When True, X-Forwarded-For/Proto headers are honoured
     # so the rate limiter keys on the real client IP rather than the proxy's.
@@ -70,6 +94,9 @@ class Settings(BaseSettings):
     # JWT signing secret (env NB_SECRET_KEY). Required outside dev; in dev an
     # ephemeral key is minted with a warning (mirrors the master-key policy).
     secret_key: str | None = Field(default=None)
+    # Optional: read the JWT secret from a FILE (same secrets convention as
+    # master_key_file). Inline NB_SECRET_KEY wins if both are set.
+    secret_key_file: str | None = Field(default=None)
     jwt_algorithm: str = Field(default="HS256")
     jwt_expiry_minutes: int = Field(default=480)  # legacy default for create_access_token
 
@@ -147,6 +174,25 @@ class Settings(BaseSettings):
     # the repo root when not absolute. If the directory is missing the mount is
     # skipped with a warning — the API still serves. Override via NB_FRONTEND_DIST.
     frontend_dist: str = Field(default="frontend/dist")
+
+    @model_validator(mode="after")
+    def _load_file_secrets(self) -> Settings:
+        """Resolve ``*_key`` from a ``*_key_file`` path when no inline value is set.
+
+        Standard Docker/K8s/systemd secrets convention: the secret lives in a
+        file (e.g. ``/run/secrets/nb_master_key``) instead of an inline env var,
+        keeping it off the command line and out of the process environment. The
+        inline value wins if both are present. A configured-but-unreadable/empty
+        file is a hard error (fail fast at a security boundary — never silently
+        fall back to a dev-ephemeral key).
+        """
+        self.master_key = self.master_key or _read_secret_file(
+            self.master_key_file, "NB_MASTER_KEY_FILE"
+        )
+        self.secret_key = self.secret_key or _read_secret_file(
+            self.secret_key_file, "NB_SECRET_KEY_FILE"
+        )
+        return self
 
     @model_validator(mode="after")
     def _clamp_apply_stale_seconds(self) -> Settings:

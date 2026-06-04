@@ -89,6 +89,7 @@ Copy `config.example.toml` and edit, or use env vars (recommended for secrets).
 |---|---|---|
 | `NB_SECRET_KEY` | outside dev | JWT signing secret (`openssl rand -hex 32`) |
 | `NB_MASTER_KEY` | outside dev | Fernet key for credential encryption at rest |
+| `NB_MASTER_KEY_FILE` / `NB_SECRET_KEY_FILE` | no | Load the secret from a file (Docker/K8s/systemd secrets) instead of inline; inline wins if both set |
 | `NB_DB_URL` | no | Async SQLAlchemy URL (default single-file SQLite) |
 | `NB_FRONTEND_DIST` | no | Built SPA dir (default `frontend/dist`; missing → API-only) |
 | `NB_ENVIRONMENT` | no | `development` (auto-mints ephemeral keys) / `production` |

@@ -3,8 +3,16 @@
 # first-run seed, then exec the server (CMD).
 set -e
 
-: "${NB_MASTER_KEY:?NB_MASTER_KEY is required (Fernet key — encrypts device creds at rest)}"
-: "${NB_SECRET_KEY:?NB_SECRET_KEY is required (JWT signing secret)}"
+# Each secret may come from an inline env var OR a *_FILE path (Docker/K8s/systemd
+# secrets convention — see config._read_secret_file). Require exactly one source.
+if [ -z "${NB_MASTER_KEY:-}" ] && [ -z "${NB_MASTER_KEY_FILE:-}" ]; then
+    echo "NB_MASTER_KEY or NB_MASTER_KEY_FILE is required (Fernet key — encrypts device creds at rest)" >&2
+    exit 1
+fi
+if [ -z "${NB_SECRET_KEY:-}" ] && [ -z "${NB_SECRET_KEY_FILE:-}" ]; then
+    echo "NB_SECRET_KEY or NB_SECRET_KEY_FILE is required (JWT signing secret)" >&2
+    exit 1
+fi
 
 echo "[entrypoint] applying database migrations (alembic upgrade head)…"
 alembic upgrade head
