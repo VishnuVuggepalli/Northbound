@@ -1,0 +1,46 @@
+# Build context for the SELF-CONTAINED image (Dockerfile.selfcontained).
+#
+# Unlike the default .dockerignore (which strips frontend sources and ships only
+# the prebuilt frontend/dist), this KEEPS the frontend sources + build config so
+# the Node stage can build the SPA in-container. node_modules and any host-built
+# dist are excluded so the image always builds from clean sources.
+
+# VCS / tooling
+.git
+.gitignore
+*.md
+!README.md
+
+# Python
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.egg-info
+build
+
+# Local DB / runtime state (never bake into the image)
+*.db
+*.db-*
+
+# Frontend: keep src/public/index.html/configs/package*.json for the in-image
+# build; drop installed deps and any host-built artifacts.
+frontend/node_modules
+frontend/dist
+frontend/playwright-report
+frontend/test-results
+frontend/scripts
+frontend/openapi.json
+
+# Tests + planning material (not needed at runtime)
+tests
+supporting material
+
+# Docker artifacts
+docker-compose*.yml
+Dockerfile
+Dockerfile.selfcontained
+.dockerignore
+.env

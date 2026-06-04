@@ -1,6 +1,7 @@
 .PHONY: install dev test testv lint format typecheck check fix clean \
         frontend-install frontend-build frontend-test build seed migrate \
-        serve run-prod ship verify docker-build docker-up docker-down
+        serve run-prod ship verify docker-build docker-build-selfcontained \
+        docker-up docker-down
 
 # ───────────────────────── Backend (existing) ─────────────────────────
 
@@ -92,6 +93,12 @@ ship: build migrate
 # --network=host lets pip reach PyPI on hosts where the build network has no DNS.
 docker-build: frontend-build
 	docker build --network=host -t northbound:latest .
+
+# Self-contained build: builds the SPA INSIDE the image (Node stage) — no host
+# prebuild, no host toolchain. Heavier (needs ~1-2 GB RAM in the build) and can
+# OOM on constrained hosts; that's why it's not the default. See Dockerfile.selfcontained.
+docker-build-selfcontained:
+	DOCKER_BUILDKIT=1 docker build -f Dockerfile.selfcontained --network=host -t northbound:latest .
 
 # Run via compose (reads .env — see .env.example). Builds first.
 docker-up: frontend-build
