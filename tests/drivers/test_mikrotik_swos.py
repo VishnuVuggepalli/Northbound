@@ -110,6 +110,34 @@ async def test_get_ports_count_names_and_link_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_ports_vlans_from_fwd_and_vlan_b() -> None:
+    """untagged = fwd.b dvid (matches the per-port access VLAN in the name);
+    tagged = vlan.b members minus the default. Real CSS326 fixtures."""
+    drv, _ = _driver()
+    ports = await drv.get_ports()
+    by_name = {p.name: p for p in ports}
+    # dvid → untagged, validated against the VLAN encoded in the port name.
+    assert by_name["Port1-Ian-BMC-16"].untagged_vlan == 16
+    assert by_name["Port2-Roh-240"].untagged_vlan == 240
+    assert by_name["Port3-116"].untagged_vlan == 116
+    # tagged = member VLANs minus the port's own untagged; the device trunks 83
+    # VLANs to every port, so each port is tagged on many — but never its own.
+    p1 = by_name["Port1-Ian-BMC-16"]
+    assert p1.untagged_vlan not in p1.tagged_vlans
+    assert len(p1.tagged_vlans) > 1
+    assert tuple(sorted(p1.tagged_vlans)) == p1.tagged_vlans  # sorted, deterministic
+
+
+@pytest.mark.asyncio
+async def test_get_vlans_lists_device_database() -> None:
+    drv, _ = _driver()
+    vlans = await drv.get_vlans()
+    assert len(vlans) == 85  # vlan.b table size on the live device
+    v1 = next(v for v in vlans if v.vlan_id == 1)
+    assert v1.name == "VLAN-1" and v1.port_count == 26  # mbr 0x03ffffff = all ports
+
+
+@pytest.mark.asyncio
 async def test_l3_management_ip() -> None:
     drv, _ = _driver()
     l3 = await drv.get_l3_interfaces()

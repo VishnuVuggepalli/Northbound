@@ -20,6 +20,7 @@ Grounded against a live CSS326-24G-2S+ on SwOS 2.18.
 from __future__ import annotations
 
 import contextlib
+import re
 import time
 from typing import Any
 
@@ -102,8 +103,8 @@ class MikrotikSwosDriver(Driver):
             with contextlib.suppress(Exception):
                 await http.aclose()
 
-    async def _get(self, endpoint: str) -> dict[str, Any]:
-        """GET a ``.b`` endpoint and parse it into a dict."""
+    async def _fetch(self, endpoint: str) -> str:
+        """GET a ``.b`` endpoint → raw text, mapping HTTP errors to the taxonomy."""
         try:
             resp = await self._client().get(f"/{endpoint}")
         except httpx.HTTPError as exc:
@@ -112,7 +113,15 @@ class MikrotikSwosDriver(Driver):
             raise AuthError(f"swos: authentication failed ({resp.status_code})")
         if resp.status_code >= 400:
             raise DriverError(f"swos: {endpoint} failed {resp.status_code}")
-        return _parse_swos(resp.text)
+        return resp.text
+
+    async def _get(self, endpoint: str) -> dict[str, Any]:
+        """GET a ``.b`` object endpoint (``{...}``) → dict."""
+        return _parse_swos(await self._fetch(endpoint))
+
+    async def _get_array(self, endpoint: str) -> list[dict[str, Any]]:
+        """GET a ``.b`` array endpoint (``[{...},{...}]``, e.g. vlan.b) → list of dicts."""
+        return _parse_swos_array(await self._fetch(endpoint))
 
     # ---------- onboarding / read ----------
 
@@ -167,13 +176,31 @@ class MikrotikSwosDriver(Driver):
 
     async def get_ports(self) -> list[PortState]:
         link = await self._get("link.b")
-        return _merge_ports(link)
+        # fwd.b carries per-port default VLAN (dvid → untagged); vlan.b is the
+        # VLAN table (vid + member-port bitmask → tagged). Both are best-effort:
+        # a switch with VLANs disabled still returns ports with link/speed only.
+        fwd = await self._get("fwd.b")
+        vlans = await self._get_array("vlan.b")
+        return _merge_ports(link, fwd, vlans)
 
     async def get_neighbors(self, port: str | None = None) -> list[Neighbor]:
         return []  # SwOS exposes no LLDP/neighbor table via the .b endpoints
 
     async def get_vlans(self) -> list[VlanInfo]:
-        return []  # VLAN config lives in /fwd.b/vlan.b; not surfaced (read-only MVP)
+        """The device VLAN database from vlan.b (vid + member-port count)."""
+        out: list[VlanInfo] = []
+        for row in await self._get_array("vlan.b"):
+            vid = int(row.get("vid", 0) or 0)
+            if not vid:
+                continue
+            out.append(
+                VlanInfo(
+                    vlan_id=vid,
+                    name=_hex_ascii(row.get("nm", "")),
+                    port_count=bin(int(row.get("mbr", 0) or 0)).count("1"),
+                )
+            )
+        return out
 
     async def get_l3_interfaces(self) -> list[L3Interface]:
         sysb = await self._get("sys.b")
@@ -324,10 +351,35 @@ def _bit(mask: int, idx: int) -> bool:
     return bool(mask & (1 << idx))
 
 
-def _merge_ports(link: dict[str, Any]) -> list[PortState]:
-    """link.b → PortState list. Port count from ``prt``; names from ``nm`` (the
-    user's configured labels); admin from ``en``; link from ``lnk``; speed from
-    ``spd`` (only meaningful when linked)."""
+def _parse_swos_array(text: str) -> list[dict[str, Any]]:
+    """Parse a SwOS array body ``[{...},{...}]`` (e.g. vlan.b). The objects are
+    flat (no nested braces), so each ``{...}`` run is one entry parsed as a dict."""
+    return [_parse_swos(obj) for obj in re.findall(r"\{[^{}]*\}", text)]
+
+
+def _vlan_membership(vlans: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    """vlan.b → list of (vid, member-port-bitmask)."""
+    out: list[tuple[int, int]] = []
+    for row in vlans:
+        vid = int(row.get("vid", 0) or 0)
+        if vid:
+            out.append((vid, int(row.get("mbr", 0) or 0)))
+    return out
+
+
+def _merge_ports(
+    link: dict[str, Any],
+    fwd: dict[str, Any] | None = None,
+    vlans: list[dict[str, Any]] | None = None,
+) -> list[PortState]:
+    """link.b (+ fwd.b + vlan.b) → PortState list.
+
+    Port count from ``prt``; names from ``nm`` (user labels); admin from ``en``;
+    link from ``lnk``; speed from ``spd`` (only when linked). VLANs:
+    ``fwd.b.dvid[i]`` is the port's default VLAN → **untagged**; a port is a
+    **tagged** member of every vlan.b VLAN whose member-mask includes it, except
+    its own default VLAN (standard 802.1Q egress on SwOS — verified on a live
+    CSS326: dvid matches the per-port access VLAN encoded in the port names)."""
     count = int(link.get("prt", 0)) or len(link.get("nm", []) or [])
     names = link.get("nm", []) or []
     spd = link.get("spd", []) or []
@@ -335,11 +387,16 @@ def _merge_ports(link: dict[str, Any]) -> list[PortState]:
     lnk = int(link.get("lnk", 0))
     dpx = int(link.get("dpx", 0))
 
+    dvid = (fwd or {}).get("dvid", []) or []
+    membership = _vlan_membership(vlans or [])
+
     out: list[PortState] = []
     for i in range(count):
         label = _hex_ascii(names[i]) if i < len(names) and isinstance(names[i], str) else ""
         up = _bit(lnk, i)
         speed = _SPD_MBPS.get(int(spd[i])) if up and i < len(spd) else None
+        untagged = int(dvid[i]) if i < len(dvid) else None
+        tagged = tuple(sorted(vid for vid, mbr in membership if _bit(mbr, i) and vid != untagged))
         out.append(
             PortState(
                 name=label or f"Port{i + 1}",
@@ -349,8 +406,8 @@ def _merge_ports(link: dict[str, Any]) -> list[PortState]:
                 duplex="full" if up and _bit(dpx, i) else None,
                 mac=None,
                 mtu=None,
-                untagged_vlan=None,
-                tagged_vlans=(),
+                untagged_vlan=untagged,
+                tagged_vlans=tagged,
                 description=label,
                 host_model="",
                 bmc_ip="",
