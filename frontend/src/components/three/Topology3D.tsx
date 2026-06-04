@@ -46,7 +46,10 @@ function DeviceBox({ device, position, theme, onClick }: DeviceBoxProps) {
     <group position={position}>
       <mesh onClick={onPick}>
         <boxGeometry args={[w, h, d]} />
-        <meshLambertMaterial color={theme === 'dark' ? 0x1c2127 : 0x2a3038} />
+        {/* Node body must read as lighter steel against the near-black dark
+            backdrop (#0c0f12) — same fix as Switch3D's chassis; the prior
+            0x1c2127 sat almost on the background. */}
+        <meshLambertMaterial color={theme === 'dark' ? 0x343c46 : 0x2a3038} />
       </mesh>
       <mesh position={[0, h / 2 + 0.02, 0]}>
         <boxGeometry args={[w * 0.96, 0.06, d * 0.96]} />
