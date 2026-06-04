@@ -21,6 +21,7 @@ from northbound.api import (
     audit,
     auth,
     devices,
+    events,
     platforms,
     ports,
     requests,
@@ -145,6 +146,7 @@ app.include_router(sites.router)
 app.include_router(ports.router)
 app.include_router(requests.router)
 app.include_router(audit.router)
+app.include_router(events.router)
 app.include_router(settings_api.router)
 
 

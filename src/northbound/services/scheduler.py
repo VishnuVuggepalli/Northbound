@@ -43,7 +43,7 @@ from northbound.drivers.factory import driver_for
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
 from northbound.schemas.driver import Credentials
-from northbound.services import audit, reachability, reconciler
+from northbound.services import audit, events, reachability, reconciler
 from northbound.services.audit import verify_chain
 from northbound.services.credvault import FernetCredVault, deserialize_credentials
 
@@ -104,7 +104,17 @@ async def poll_reachability() -> None:
         except Exception as exc:
             logger.debug("poll_reachability: %s unreachable: %s", device.name, exc)
             reachable = False
-        reachability.record(device.id, reachable=reachable, checked_at=checked_at)
+        if reachability.record(device.id, reachable=reachable, checked_at=checked_at):
+            events.hub.publish(
+                events.Event(
+                    "device.reachability",
+                    {
+                        "device_id": device.id,
+                        "reachable": reachable,
+                        "checked_at": checked_at.isoformat(),
+                    },
+                )
+            )
 
 
 # --------------------------------------------------------------------------- #

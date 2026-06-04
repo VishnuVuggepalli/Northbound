@@ -19,6 +19,7 @@ import { useAuthStore } from '@/store/auth';
 import { useUIStore } from '@/store/ui';
 import { useThemeStore } from '@/store/theme';
 import { useHotkeys, useSequenceHotkeys } from '@/hooks/useHotkeys';
+import { useEventStream } from '@/hooks/useEventStream';
 import { useCreateRequest, useDevice, usePorts, useVlans } from '@/api/queries';
 import { pushToast } from '@/store/toast';
 import { apiClient, isApiError } from '@/api';
@@ -56,6 +57,9 @@ function ProtectedShell() {
   const isAuthed = useAuthStore((s) => s.isAuthenticated);
   const location = useLocation();
   useValidateSession();
+  // Live-state push (F157): open the SSE stream while authenticated so device
+  // reachability + port changes refresh the UI without polling.
+  useEventStream(isAuthed);
   if (!isAuthed) return <Navigate to="/login" replace state={{ from: location }} />;
   // The TopBar renders its own <header>; the rest of the page lives in
   // <main> so screen-reader landmark navigation works (axe `landmark-one-main`).
