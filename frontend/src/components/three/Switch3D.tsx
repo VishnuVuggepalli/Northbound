@@ -423,10 +423,11 @@ export function Switch3D({ device, ports, selectedPort, onPick, theme }: Switch3
             const o = orbitRef.current as unknown as { reset?: () => void } | null;
             o?.reset?.();
           }}
-          className="pointer-events-auto rounded-md border border-border-strong bg-bg-elev-1/80 p-1.5 text-fg-muted backdrop-blur-sm hover:text-fg"
+          className="pointer-events-auto rounded-md border border-border-strong bg-bg-elev-1/80 p-1.5 text-fg-muted backdrop-blur-sm hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          aria-label="Reset camera view"
           title="Reset view"
         >
-          <RotateCcw size={14} />
+          <RotateCcw size={14} aria-hidden />
         </button>
       </div>
 

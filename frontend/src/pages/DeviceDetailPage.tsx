@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Cpu, FileText, Power, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Cpu, FileText, Power, RefreshCw } from 'lucide-react';
 import { Switch3D } from '@/components/three/Switch3D';
 import { PortStrip } from '@/components/PortStrip';
 import { PortPanel } from '@/components/PortPanel';
@@ -10,6 +10,7 @@ import { VendorActions } from '@/components/VendorActions';
 import { PlatformIcon } from '@/components/ui/PlatformIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
@@ -41,7 +42,7 @@ export function DeviceDetailPage() {
 
   const [tab, setTab] = useState<Tab>('ports');
 
-  const { data: device } = useDevice(deviceId);
+  const { data: device, isError: deviceError, error: deviceErr } = useDevice(deviceId);
   const { data: portSnapshot, refetch, dataUpdatedAt } = usePorts(deviceId);
   const ports = portSnapshot?.ports ?? [];
   const { data: requests = [] } = useRequests();
@@ -68,10 +69,28 @@ export function DeviceDetailPage() {
   }, [deviceId, selectPort]);
 
   if (!device) {
+    // Distinguish a real fetch failure (404 / backend down) from loading —
+    // otherwise an error sits on "Loading device…" forever with no recourse.
+    if (deviceError) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+          <AlertTriangle className="text-danger" size={24} aria-hidden />
+          <div className="text-sm text-fg">
+            Couldn&apos;t load this device.
+            <span className="mt-1 block text-fg-muted">
+              {deviceErr instanceof Error
+                ? deviceErr.message
+                : 'It may not exist, or the backend is unreachable.'}
+            </span>
+          </div>
+          <Button kind="outline" onClick={() => navigate(-1)}>
+            Go back
+          </Button>
+        </div>
+      );
+    }
     return (
-      <div className="flex h-full items-center justify-center text-fg-muted">
-        Loading device…
-      </div>
+      <div className="flex h-full items-center justify-center text-fg-muted">Loading device…</div>
     );
   }
 

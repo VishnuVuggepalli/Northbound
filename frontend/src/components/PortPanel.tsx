@@ -232,14 +232,15 @@ export function PortPanel({
                     <span className="nb-mono text-[11px]">{port.description || '—'}</span>
                     <button
                       type="button"
+                      aria-label="Edit description"
                       title="Edit description (writes to device)"
                       onClick={() => {
                         setDescDraft(port.description ?? '');
                         setEditingDesc(true);
                       }}
-                      className="text-accent hover:text-fg"
+                      className="-my-1 rounded p-1.5 text-accent hover:bg-bg-elev-2 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     >
-                      <Pencil size={11} />
+                      <Pencil size={13} aria-hidden />
                     </button>
                   </span>
                 )}
