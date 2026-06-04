@@ -22,6 +22,7 @@ import { apiClient } from '@/api';
 import { initials } from '@/lib/format';
 import { PALETTES } from '@/lib/palette';
 import { cn } from '@/lib/cn';
+import { LiveIndicator } from '@/components/layout/LiveIndicator';
 import type { Environment } from '@/types';
 
 export function TopBar() {
@@ -89,6 +90,7 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-1">
+        <LiveIndicator />
         {user?.role === 'admin' && (
           <Link
             to="/queue"
