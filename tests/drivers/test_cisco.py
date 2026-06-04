@@ -62,6 +62,22 @@ def test_parse_switchport_text_empty() -> None:
     assert _parse_switchport_text("cisco_ios", "show interfaces status", "") == {}
 
 
+def test_parse_switchport_text_logs_on_parse_failure(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A parse failure must log (not silently blank the VLAN columns)."""
+    import ntc_templates.parse as ntc
+
+    def _boom(**_kw: object) -> object:
+        raise ValueError("template engine blew up")
+
+    monkeypatch.setattr(ntc, "parse_output", _boom)
+    with caplog.at_level("WARNING", logger="northbound.drivers.cisco"):
+        out = _parse_switchport_text("cisco_ios", "show interfaces status", "Gi0/1 connected 20")
+    assert out == {}  # still degrades gracefully
+    assert any("switchport parse failed" in r.message for r in caplog.records)
+
+
 def test_parse_vlan_list_ranges_and_sentinels() -> None:
     assert _parse_vlan_list("10,20,30-32") == (10, 20, 30, 31, 32)
     assert _parse_vlan_list("1-4094") == ()

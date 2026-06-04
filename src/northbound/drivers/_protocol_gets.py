@@ -12,7 +12,9 @@ get for any protocol is a one-line registry entry + a template file.
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 import textfsm
@@ -20,6 +22,17 @@ import textfsm
 from northbound.schemas.driver import ProtocolTable
 
 _TEMPLATE_DIR = Path(__file__).parent / "textfsm_templates" / "pica8"
+
+
+@cache
+def _template_text(template_file: str) -> str:
+    """Read a bundled template once and memoize it.
+
+    Templates are immutable package data, so the disk read is cached. We do NOT
+    cache the compiled ``TextFSM`` object — it is stateful (``ParseText`` mutates
+    internal cursors / Filldown state), so a fresh instance is built per parse.
+    """
+    return (_TEMPLATE_DIR / template_file).read_text(encoding="utf-8")
 
 
 @dataclass(frozen=True)
@@ -40,9 +53,7 @@ def parse_table(title: str, template_file: str, text: str) -> ProtocolTable:
     Rows whose first column is empty are dropped (TextFSM Filldown can emit a
     trailing all-empty row at a section boundary).
     """
-    path = _TEMPLATE_DIR / template_file
-    with path.open() as fh:
-        fsm = textfsm.TextFSM(fh)
+    fsm = textfsm.TextFSM(io.StringIO(_template_text(template_file)))
     parsed = fsm.ParseText(text)
     columns = tuple(_humanize(h) for h in fsm.header)
     rows = tuple(tuple(str(c) for c in row) for row in parsed if row and str(row[0]).strip())

@@ -84,3 +84,16 @@ def test_parse_bgp_summary_frr() -> None:
 def test_bgp_registered() -> None:
     assert "BGP" in PROTOCOL_GETS
     assert any(g.command == "show ip bgp summary" for g in PROTOCOL_GETS["BGP"])
+
+
+def test_template_text_is_cached_but_fsm_is_fresh() -> None:
+    """Template text is read+memoized once; the compiled FSM stays fresh per call
+    (TextFSM is stateful), so re-parsing must not bleed state between calls."""
+    from northbound.drivers._protocol_gets import _template_text
+
+    _template_text.cache_clear()
+    assert _template_text("show_arp.textfsm") == _template_text("show_arp.textfsm")
+    assert _template_text.cache_info().hits >= 1
+    a = parse_table("ARP", "show_arp.textfsm", _ARP)
+    b = parse_table("ARP", "show_arp.textfsm", _ARP)
+    assert a.rows == b.rows and len(a.rows) == 2

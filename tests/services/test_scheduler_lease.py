@@ -171,3 +171,29 @@ async def test_postgres_not_leader_closes_connection_and_retries() -> None:
     assert await _wait_leader(lease, timeout=3.0)
     await lease.stop()
     assert len(built) == 1
+
+
+async def test_start_failure_releases_lock_and_retries() -> None:
+    """If scheduler start throws, the advisory lock must be released (so failover
+    works) and the loop must retry — not die while holding the lock."""
+    engine = _FakePostgresEngine(grants=[True, True])
+    calls = {"n": 0}
+
+    def factory(_s: Settings) -> _FakeScheduler:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("scheduler failed to start")
+        return _FakeScheduler()
+
+    lease = SchedulerLease(engine, _fast_settings(), scheduler_factory=factory)  # type: ignore[arg-type]
+    await lease.start()
+    # First acquire succeeds, start raises → lock released (conn0 closed), not leader.
+    for _ in range(50):
+        if engine.conns and engine.conns[0].closed:
+            break
+        await asyncio.sleep(0.02)
+    assert engine.conns[0].closed is True
+    # Next tick re-acquires and the second start succeeds → leader.
+    assert await _wait_leader(lease, timeout=3.0)
+    await lease.stop()
+    assert calls["n"] >= 2

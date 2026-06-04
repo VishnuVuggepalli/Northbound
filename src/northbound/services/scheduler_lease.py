@@ -79,7 +79,18 @@ class SchedulerLease:
         interval = self._settings.scheduler_lock_retry_seconds
         while not self._stop.is_set():
             if self._scheduler is None and await self._acquire():
-                self._start_scheduler()
+                try:
+                    self._start_scheduler()
+                except Exception:
+                    # A start failure must NOT kill the loop while we hold the
+                    # lock — that strands the scheduler cluster-wide (no worker
+                    # can take over). Release leadership so the next tick (here
+                    # or on another worker) retries.
+                    logger.warning(
+                        "scheduler start failed; releasing leadership to retry",
+                        exc_info=True,
+                    )
+                    await self._release_lock()
             # Wait out the retry interval, but wake immediately on stop().
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=interval)
@@ -126,18 +137,24 @@ class SchedulerLease:
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=False)  # type: ignore[attr-defined]
             self._scheduler = None
-        if self._lock_conn is not None:
-            # Explicitly unlock before closing: AsyncConnection.close() returns
-            # the connection to the pool ALIVE, so the session-scoped advisory
-            # lock would otherwise stay held and no other worker could take over.
-            # (A crashed process needs no unlock — the OS closes its socket and
-            # Postgres releases the lock when the session ends.)
-            try:
-                await self._lock_conn.execute(
-                    text("SELECT pg_advisory_unlock(:k)"),
-                    {"k": _ADVISORY_LOCK_KEY},
-                )
-            except Exception:
-                logger.warning("advisory-lock release failed", exc_info=True)
-            await self._lock_conn.close()
-            self._lock_conn = None
+        await self._release_lock()
+
+    async def _release_lock(self) -> None:
+        """Release + close the held advisory-lock connection. No-op if none held.
+
+        ``AsyncConnection.close()`` returns the connection to the pool ALIVE, so
+        the session-scoped advisory lock would otherwise stay held and no other
+        worker could take over — unlock explicitly first. (A crashed process
+        needs no unlock: the OS drops the socket and Postgres ends the session.)
+        """
+        if self._lock_conn is None:
+            return
+        try:
+            await self._lock_conn.execute(
+                text("SELECT pg_advisory_unlock(:k)"),
+                {"k": _ADVISORY_LOCK_KEY},
+            )
+        except Exception:
+            logger.warning("advisory-lock release failed", exc_info=True)
+        await self._lock_conn.close()
+        self._lock_conn = None

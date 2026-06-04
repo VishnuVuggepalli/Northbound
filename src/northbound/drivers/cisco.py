@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 import uuid
 from typing import Any
@@ -49,6 +50,8 @@ from northbound.schemas.driver import (
     PortState,
     TestResult,
 )
+
+logger = logging.getLogger("northbound.drivers.cisco")
 
 _CHECKPOINT_KEY = "checkpoint_name"
 
@@ -274,6 +277,14 @@ def _parse_switchport_text(
 
         rows = parse_output(platform=platform, command=command, data=text)
     except Exception:
+        # A parse failure must not blank the VLAN columns silently — that reads
+        # as "no VLANs configured" and sends people debugging the wrong layer.
+        logger.warning(
+            "cisco switchport parse failed (platform=%s, command=%r); per-port VLANs will be empty",
+            platform,
+            command,
+            exc_info=True,
+        )
         return {}
     out: dict[str, tuple[int | None, tuple[int, ...]]] = {}
     for row in rows:

@@ -78,6 +78,11 @@ class MikrotikSwosDriver(Driver):
     # ---------- transport ----------
 
     def _client(self) -> Any:
+        # NOTE: deliberately not the shared _lib/transport/HttpxClient — SwOS's
+        # `.b` endpoints require HTTP **Digest** auth, which HttpxClient doesn't
+        # expose (basic/bearer only). Migration path: add DigestAuth to
+        # HttpxClient, then route through it. Until then this builds httpx
+        # directly (read-only driver, live-validated against a CSS326).
         if self._http is None:
             scheme = "https" if self._conn.port == 443 else "http"
             base = f"{scheme}://{self._conn.host}" + (

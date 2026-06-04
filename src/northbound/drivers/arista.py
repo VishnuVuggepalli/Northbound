@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 import uuid
 from typing import Any
@@ -49,6 +50,8 @@ from northbound.schemas.driver import (
     PortState,
     TestResult,
 )
+
+logger = logging.getLogger("northbound.drivers.arista")
 
 _SESSION_KEY = "session_name"
 
@@ -193,6 +196,11 @@ class AristaDriver(Driver):
                 encoding="json",
             )
         except Exception:
+            # Don't blank per-port VLANs silently — that masquerades as "no VLANs".
+            logger.warning(
+                "arista switchports query failed; per-port VLANs will be empty",
+                exc_info=True,
+            )
             return {}
         sw = res[0].get("switchports", {}) if res and isinstance(res[0], dict) else {}
         return sw if isinstance(sw, dict) else {}
