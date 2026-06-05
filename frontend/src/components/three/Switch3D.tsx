@@ -106,9 +106,11 @@ function PortMesh({ port, type, position, selected, onPick }: PortMeshProps) {
 
   return (
     <group position={position} onClick={handlePick}>
+      {/* Port body — solid metallic shroud so the cage reads as a real
+          recessed connector housing, not a flat dark patch. */}
       <mesh>
         <boxGeometry args={[body.w, body.h, 0.18]} />
-        <meshLambertMaterial color={body.color} />
+        <meshStandardMaterial color={body.color} metalness={0.6} roughness={0.5} />
       </mesh>
       <mesh position={[0, 0, 0.07]}>
         <boxGeometry args={[body.w * 0.78, body.h * (type === 'rj45' ? 0.72 : 0.55), 0.06]} />
@@ -227,7 +229,7 @@ function InstancedPortGrid({ ports, positions, type, selected, onPick }: Instanc
         onClick={handlePick}
       >
         <boxGeometry args={[body.w, body.h, 0.18]} />
-        <meshLambertMaterial color={body.color} />
+        <meshStandardMaterial color={body.color} metalness={0.6} roughness={0.5} />
       </instancedMesh>
       <instancedMesh ref={ledRef} args={[undefined, undefined, ports.length]}>
         <boxGeometry args={[1, 1, 1]} />
@@ -285,20 +287,24 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
       <directionalLight position={[-5, 2, -3]} intensity={0.4} color={0x7fa8ff} />
       <directionalLight position={[0, -3, 6]} intensity={0.18} color={0x9fd0ff} />
 
-      {/* Chassis body */}
-      <mesh>
+      {/* Chassis body — meshStandardMaterial (low metalness, mid roughness) so
+          the flat faces catch a subtle specular off the key/rim lights and
+          read as solid brushed steel rather than flat painted card. */}
+      <mesh castShadow>
         <boxGeometry args={[chassisW, chassisH, chassisD]} />
-        <meshLambertMaterial color={chassisColor} />
+        <meshStandardMaterial color={chassisColor} metalness={0.45} roughness={0.62} />
       </mesh>
-      {/* Top plate (fine bevel suggestion) */}
+      {/* Top plate (fine bevel suggestion) — slightly smoother so the lid edge
+          highlight separates it from the body and gives a dimensional read. */}
       <mesh position={[0, chassisH / 2 + 0.001, 0]}>
         <boxGeometry args={[chassisW * 0.99, 0.08, chassisD * 0.99]} />
-        <meshLambertMaterial color={topColor} />
+        <meshStandardMaterial color={topColor} metalness={0.5} roughness={0.5} />
       </mesh>
-      {/* Front inset */}
+      {/* Front inset — recessed faceplate; a touch rougher/less metallic so it
+          reads as a solid sunken panel the ports sit in, not a void. */}
       <mesh position={[0, 0, chassisD / 2 + 0.025]}>
         <boxGeometry args={[chassisW - 0.4, chassisH - 0.3, 0.05]} />
-        <meshLambertMaterial color={frontColor} />
+        <meshStandardMaterial color={frontColor} metalness={0.35} roughness={0.72} />
       </mesh>
       {/* Brand chip */}
       <mesh position={[-chassisW / 2 + 0.55, 0, chassisD / 2 + 0.05]}>

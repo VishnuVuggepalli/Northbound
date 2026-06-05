@@ -48,8 +48,14 @@ function DeviceBox({ device, position, theme, onClick }: DeviceBoxProps) {
         <boxGeometry args={[w, h, d]} />
         {/* Node body must read as lighter steel against the near-black dark
             backdrop (#0c0f12) — same fix as Switch3D's chassis; the prior
-            0x1c2127 sat almost on the background. */}
-        <meshLambertMaterial color={theme === 'dark' ? 0x343c46 : 0x2a3038} />
+            0x1c2127 sat almost on the background. meshStandardMaterial (low
+            metalness, mid roughness) catches a specular off the key light so
+            the node reads as a solid device, matching Switch3D's chassis. */}
+        <meshStandardMaterial
+          color={theme === 'dark' ? 0x343c46 : 0x2a3038}
+          metalness={0.45}
+          roughness={0.62}
+        />
       </mesh>
       <mesh position={[0, h / 2 + 0.02, 0]}>
         <boxGeometry args={[w * 0.96, 0.06, d * 0.96]} />
