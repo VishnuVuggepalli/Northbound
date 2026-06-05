@@ -335,3 +335,13 @@ async def list_requests(
 
 async def get_request(session: AsyncSession, request_id: str) -> ChangeRequest | None:
     return await session.scalar(select(ChangeRequest).where(ChangeRequest.id == request_id))
+
+
+async def usernames_for(session: AsyncSession, user_ids: set[str]) -> dict[str, str]:
+    """Map user id → username for the given ids in ONE query (avoids N+1 when
+    serializing a list of requests). Missing ids are simply absent from the map."""
+    ids = {uid for uid in user_ids if uid}
+    if not ids:
+        return {}
+    rows = await session.execute(select(User.id, User.username).where(User.id.in_(ids)))
+    return {uid: name for uid, name in rows.all()}

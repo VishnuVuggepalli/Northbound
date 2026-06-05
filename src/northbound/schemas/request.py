@@ -33,6 +33,10 @@ class RequestOut(BaseModel):
     device_id: str
     port_name: str
     requested_by: str
+    # Human-readable requester username, resolved from ``requested_by`` (a user
+    # id) by the API layer. None if the user no longer exists. Lets the UI show
+    # "who" without the client joining ids→names (non-admins can't list users).
+    requested_by_username: str | None = None
     requested_changes: dict[str, object]
     reason: str
     status: ChangeRequestStatus
@@ -49,12 +53,13 @@ class RequestOut(BaseModel):
     applied_at: str | None = None
 
     @classmethod
-    def from_model(cls, request: ChangeRequest) -> RequestOut:
+    def from_model(cls, request: ChangeRequest, *, username: str | None = None) -> RequestOut:
         return cls(
             id=request.id,
             device_id=request.device_id,
             port_name=request.port_name,
             requested_by=request.requested_by,
+            requested_by_username=username,
             requested_changes=dict(request.requested_changes),
             reason=request.reason,
             status=request.status,

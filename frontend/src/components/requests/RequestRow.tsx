@@ -99,7 +99,11 @@ export function RequestRow({
           ) : null}
         </span>
         <span className="flex items-center justify-end gap-2 text-xs text-fg-muted">
-          <span>@{request.requested_by}</span>
+          {/* Prefer the resolved username; fall back to a short id (e.g. if the
+              user was deleted) rather than a full UUID. */}
+          <span title={request.requested_by}>
+            @{request.requested_by_username ?? request.requested_by.slice(0, 8)}
+          </span>
           <span>·</span>
           <span>{timeAgo(request.created_at)}</span>
           <StatusBadge status={request.status} />
@@ -147,7 +151,7 @@ export function RequestRow({
                 rows={2}
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder={`Required: tell @${request.requested_by} why and what to do.`}
+                placeholder={`Required: tell @${request.requested_by_username ?? request.requested_by.slice(0, 8)} why and what to do.`}
               />
               <div className="flex justify-end gap-1.5">
                 <Button

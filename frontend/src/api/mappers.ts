@@ -156,6 +156,7 @@ export function mapRequest(r: RequestOut): ChangeRequest {
     device_id: r.device_id,
     port_name: r.port_name,
     requested_by: r.requested_by,
+    requested_by_username: r.requested_by_username ?? null,
     requested_changes: {
       untagged_vlan: changes.untagged_vlan as number | undefined,
       tagged_vlans: changes.tagged_vlans as number[] | undefined,

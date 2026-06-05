@@ -138,6 +138,8 @@ export interface ChangeRequest {
   device_id: string;
   port_name: string;
   requested_by: string;
+  /** Requester username resolved by the backend (null if the user was deleted). */
+  requested_by_username: string | null;
   requested_changes: RequestedChanges;
   reason: string;
   status: ChangeRequestStatus;

@@ -54,6 +54,12 @@ async def _load_device(session: AsyncSession, device_id: str) -> Device:
     return device
 
 
+async def _request_out(session: AsyncSession, req: ChangeRequest) -> RequestOut:
+    """Serialize one request, resolving the requester's username for display."""
+    names = await requests.usernames_for(session, {req.requested_by})
+    return RequestOut.from_model(req, username=names.get(req.requested_by))
+
+
 @router.post("", response_model=RequestOut, status_code=status.HTTP_201_CREATED)
 @limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def create_request(
@@ -72,7 +78,7 @@ async def create_request(
         reason=body.reason,
         user=user,
     )
-    return RequestOut.from_model(req)
+    return await _request_out(session, req)
 
 
 @router.get("", response_model=list[RequestOut])
@@ -97,7 +103,9 @@ async def list_requests(
         mine_user_id=mine_user_id,
         status=request_status,
     )
-    return [RequestOut.from_model(r) for r in rows]
+    # Resolve all requester usernames in one query (no N+1 over the list).
+    names = await requests.usernames_for(session, {r.requested_by for r in rows})
+    return [RequestOut.from_model(r, username=names.get(r.requested_by)) for r in rows]
 
 
 @router.get("/{request_id}", response_model=RequestOut)
@@ -113,7 +121,7 @@ async def get_request(
     """
     req = await _load_request(session, request_id)
     _assert_can_read(req, user)
-    return RequestOut.from_model(req)
+    return await _request_out(session, req)
 
 
 @router.post("/{request_id}/approve", response_model=RequestOut)
@@ -130,7 +138,7 @@ async def approve_request(
         req = await requests.approve_request(session, req, admin)
     except IllegalTransition as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return RequestOut.from_model(req)
+    return await _request_out(session, req)
 
 
 @router.post("/{request_id}/reject", response_model=RequestOut)
@@ -150,7 +158,7 @@ async def reject_request(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except RequestError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return RequestOut.from_model(req)
+    return await _request_out(session, req)
 
 
 @router.post("/{request_id}/apply", response_model=RequestOut)
@@ -183,7 +191,7 @@ async def apply_request(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ApplyError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return RequestOut.from_model(req)
+    return await _request_out(session, req)
 
 
 @router.post("/{request_id}/confirm", response_model=RequestOut)
@@ -205,4 +213,4 @@ async def confirm_request(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ApplyError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return RequestOut.from_model(req)
+    return await _request_out(session, req)

@@ -230,7 +230,13 @@ async def test_list_requests_admin_sees_all(
     )
     resp = await client.get("/api/requests", headers=_bearer(admin))
     assert resp.status_code == 200
-    assert len(resp.json()) == 2
+    body = resp.json()
+    assert len(body) == 2
+    # Each request carries the requester's resolved username so the admin can see
+    # WHO filed it (not just the user-id UUID).
+    by_user = {r["requested_by"]: r["requested_by_username"] for r in body}
+    assert by_user[alice.id] == alice.username
+    assert by_user[admin.id] == admin.username
 
 
 @pytest.mark.asyncio
