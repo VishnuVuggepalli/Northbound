@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
 import { Toaster } from '@/components/ui/Toaster';
 import { HelpOverlay } from '@/components/HelpOverlay';
 import { RequestModal } from '@/components/RequestModal';
@@ -66,8 +67,15 @@ function ProtectedShell() {
   // <main> so screen-reader landmark navigation works (axe `landmark-one-main`).
   return (
     <>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-bg-elev-2 focus:px-3 focus:py-2 focus:text-sm focus:text-fg focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-accent"
+      >
+        Skip to content
+      </a>
       <TopBar />
-      <main id="main-content">
+      <Breadcrumbs />
+      <main id="main-content" tabIndex={-1} className="outline-none">
         {/* Per-route boundary: a single page's crash shows a recoverable
             fallback while the shell/nav stays usable. Keyed by pathname so
             navigating to another route clears a stuck error. */}

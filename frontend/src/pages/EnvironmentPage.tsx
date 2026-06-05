@@ -15,7 +15,8 @@ export function EnvironmentPage() {
   if (!env) return null;
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)]">
+    // viewport − TopBar (3.5rem) − Breadcrumb bar (2rem)
+    <div className="flex h-[calc(100vh-3.5rem-2rem)]">
       <Sidebar env={env} />
       <section aria-label={`${env} site`} className="relative flex-1 overflow-hidden">
         <Outlet />

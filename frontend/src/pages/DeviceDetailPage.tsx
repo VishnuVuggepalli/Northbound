@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ChevronRight, Cpu, FileText, Power, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Cpu, FileText, Power, RefreshCw } from 'lucide-react';
 import { Switch3D } from '@/components/three/Switch3D';
 import { PortStrip } from '@/components/PortStrip';
 import { PortPanel } from '@/components/PortPanel';
@@ -26,12 +26,11 @@ import {
 } from '@/api/queries';
 import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
-import type { Environment } from '@/types';
 
 type Tab = 'ports' | 'config' | 'system';
 
 export function DeviceDetailPage() {
-  const { env, deviceId } = useParams<{ env: Environment; deviceId: string }>();
+  const { deviceId } = useParams<{ deviceId: string }>();
   const navigate = useNavigate();
   const theme = useThemeStore((s) => s.theme);
   const user = useAuthStore((s) => s.user);
@@ -107,17 +106,10 @@ export function DeviceDetailPage() {
         <div className="flex items-center gap-3">
           <PlatformIcon platform={device.platform} role={device.role} size={16} />
           <div>
-            <div className="flex items-center gap-1.5 text-xs">
-              <button
-                type="button"
-                onClick={() => navigate(`/env/${env}`)}
-                className="text-fg-muted hover:text-fg"
-              >
-                {env?.toUpperCase()}
-              </button>
-              <ChevronRight size={11} className="text-fg-subtle" />
-              <span className="nb-mono text-fg">{device.name}</span>
-            </div>
+            {/* Breadcrumb trail (Home › Lab › device) is now the global
+                <Breadcrumbs/> in the shell; here we keep the device name as the
+                page heading. */}
+            <h1 className="nb-mono text-sm text-fg">{device.name}</h1>
             <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-fg-muted">
               <span className="nb-mono uppercase">{device.platform}</span>
               <span>·</span>
