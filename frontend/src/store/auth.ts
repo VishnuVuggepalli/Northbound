@@ -12,7 +12,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AuthSession, User, UserRole } from '@/types';
+import type { AuthSession, User, UserRole } from '@/models';
 
 interface AuthState {
   user: User | null;

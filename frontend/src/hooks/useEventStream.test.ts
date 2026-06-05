@@ -6,7 +6,7 @@ import { useEventStream } from './useEventStream';
 import { queryKeys } from '@/api/queries';
 import { useLiveStore } from '@/store/live';
 import { useToastStore } from '@/store/toast';
-import type { Device } from '@/types';
+import type { Device } from '@/models';
 
 /** Minimal EventSource stand-in: records listeners, lets a test dispatch events. */
 class FakeEventSource {

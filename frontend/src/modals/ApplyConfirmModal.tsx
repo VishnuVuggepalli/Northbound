@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { Modal } from '@/components/ui/Modal';
-import { Button } from '@/components/ui/Button';
+import { Modal } from '@/modals/Modal';
+import { Button } from '@/shared/Button';
 import { ConfigDiff } from '@/components/Diff';
 import { applyChangeToPort } from '@/lib/config';
-import type { ChangeRequest, Device, Port } from '@/types';
+import type { ChangeRequest, Device, Port } from '@/models';
 
 interface ApplyConfirmModalProps {
   open: boolean;

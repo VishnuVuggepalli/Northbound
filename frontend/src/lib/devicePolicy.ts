@@ -15,7 +15,7 @@
  */
 
 import { findPlatformForDevice } from '@/lib/platforms';
-import type { Device, PlatformRegistryEntry } from '@/types';
+import type { Device, PlatformRegistryEntry } from '@/models';
 
 /**
  * Returns true when no admin write should be possible against this device,

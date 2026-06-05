@@ -8,10 +8,10 @@ import {
   Loader2,
   ShieldAlert,
 } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Input, Textarea } from '@/components/ui/Input';
-import { Badge } from '@/components/ui/Badge';
-import { PlatformIcon } from '@/components/ui/PlatformIcon';
+import { Button } from '@/shared/Button';
+import { Input, Textarea } from '@/shared/Input';
+import { Badge } from '@/shared/Badge';
+import { PlatformIcon } from '@/shared/PlatformIcon';
 import { cn } from '@/lib/cn';
 import {
   usePlatforms,
@@ -31,7 +31,7 @@ import type {
   OnboardingDraft,
   PlatformId,
   PlatformRegistryEntry,
-} from '@/types';
+} from '@/models';
 
 type StepId = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 

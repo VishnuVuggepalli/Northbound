@@ -12,11 +12,11 @@
  */
 
 import { Copy, ExternalLink, Terminal } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
+import { Button } from '@/shared/Button';
 import { vendorWebUiUrl } from '@/lib/devicePolicy';
 import { pushToast } from '@/store/toast';
 import { useAuthStore } from '@/store/auth';
-import type { Device, PlatformRegistryEntry } from '@/types';
+import type { Device, PlatformRegistryEntry } from '@/models';
 
 interface VendorActionsProps {
   device: Device;

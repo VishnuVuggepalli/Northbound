@@ -2,7 +2,7 @@ import { Suspense, useMemo, useRef, useCallback } from 'react';
 import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
-import type { Device, TopologyLink } from '@/types';
+import type { Device, TopologyLink } from '@/models';
 import type { ThemeMode } from '@/lib/palette';
 
 interface Topology3DProps {

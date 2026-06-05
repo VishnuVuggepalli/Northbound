@@ -1,5 +1,5 @@
 import { Server, Network, Router, ShieldCheck, Layers } from 'lucide-react';
-import type { DeviceRole, Platform } from '@/types';
+import type { DeviceRole, Platform } from '@/models';
 import { cn } from '@/lib/cn';
 
 interface PlatformIconProps {

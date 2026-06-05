@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Activity, ChevronDown, ChevronRight, Cpu, Layers, Loader2, Network, Router, ShieldCheck, Table2 } from 'lucide-react';
 import { useL3Interfaces, useProtocolDetail, useSystemInfo, useVlans } from '@/api/queries';
-import { Section } from '@/components/ui/Section';
-import { KV } from '@/components/ui/KV';
-import { DataTable } from '@/components/ui/DataTable';
-import { StatusDot } from '@/components/ui/StatusDot';
-import { Input } from '@/components/ui/Input';
+import { Section } from '@/shared/Section';
+import { KV } from '@/shared/KV';
+import { DataTable } from '@/shared/DataTable';
+import { StatusDot } from '@/shared/StatusDot';
+import { Input } from '@/shared/Input';
 import { cn } from '@/lib/cn';
-import type { Device } from '@/types';
+import type { Device } from '@/models';
 
 type SubTab = 'overview' | 'interfaces' | 'vlans' | 'mac' | 'diagnostics';
 

@@ -33,7 +33,7 @@ import type {
   VlanInfo,
   PlatformRegistryEntry,
   User,
-} from '@/types';
+} from '@/models';
 import type { components } from './schema.gen';
 import type { SettingsOut, SettingsPatch } from './schema';
 import { ApiError } from './errors';

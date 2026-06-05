@@ -8,7 +8,7 @@
  */
 
 import type { PortConfigPatch } from '@/api/realClient';
-import type { Port } from '@/types';
+import type { Port } from '@/models';
 
 export type PortMode = 'access' | 'trunk';
 

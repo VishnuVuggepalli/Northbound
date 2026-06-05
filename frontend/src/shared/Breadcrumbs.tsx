@@ -1,7 +1,7 @@
 import { Link, matchRoutes, useLocation, useParams, type RouteObject } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import { useDevices, useSites } from '@/api/queries';
-import type { Environment } from '@/types';
+import type { Environment } from '@/models';
 
 /**
  * Breadcrumbs derived from the matched route hierarchy — a single source of

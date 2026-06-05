@@ -3,7 +3,7 @@ import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, type OrbitControlsProps } from '@react-three/drei';
 import { RotateCcw } from 'lucide-react';
 import * as THREE from 'three';
-import type { Device, Port, PortKind } from '@/types';
+import type { Device, Port, PortKind } from '@/models';
 import { vlanRGB } from '@/lib/vlan';
 import type { ThemeMode } from '@/lib/palette';
 

@@ -5,7 +5,7 @@ import { NocRibbon } from '@/components/layout/NocRibbon';
 import { useAllPorts, useDevices, useLinks, useRequests, useSites } from '@/api/queries';
 import { useThemeStore } from '@/store/theme';
 import { plural } from '@/lib/format';
-import type { Environment } from '@/types';
+import type { Environment } from '@/models';
 
 export function EnvironmentTopologyPage() {
   const navigate = useNavigate();

@@ -11,9 +11,9 @@ import {
   Settings,
   Sun,
 } from 'lucide-react';
-import { Wordmark } from '@/components/ui/Wordmark';
-import { Kbd } from '@/components/ui/Kbd';
-import { Badge } from '@/components/ui/Badge';
+import { Wordmark } from '@/shared/Wordmark';
+import { Kbd } from '@/shared/Kbd';
+import { Badge } from '@/shared/Badge';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
@@ -23,7 +23,7 @@ import { initials } from '@/lib/format';
 import { PALETTES } from '@/lib/palette';
 import { cn } from '@/lib/cn';
 import { LiveIndicator } from '@/components/layout/LiveIndicator';
-import type { Environment } from '@/types';
+import type { Environment } from '@/models';
 
 export function TopBar() {
   const navigate = useNavigate();

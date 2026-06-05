@@ -12,7 +12,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { apiClient as api } from './index';
-import type { ChangeRequestStatus, Environment } from '@/types';
+import type { ChangeRequestStatus, Environment } from '@/models';
 
 export const queryKeys = {
   platforms: () => ['platforms'] as const,

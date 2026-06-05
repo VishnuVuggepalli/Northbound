@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Send } from 'lucide-react';
-import { Modal } from '@/components/ui/Modal';
-import { Button } from '@/components/ui/Button';
-import { Input, Textarea } from '@/components/ui/Input';
+import { Modal } from '@/modals/Modal';
+import { Button } from '@/shared/Button';
+import { Input, Textarea } from '@/shared/Input';
 import { vlanColor, vlanColorMuted } from '@/lib/vlan';
 import { isPlausibleIp } from '@/lib/format';
 import type { ThemeMode } from '@/lib/palette';
-import type { Device, Port, RequestedChanges } from '@/types';
+import type { Device, Port, RequestedChanges } from '@/models';
 import { cn } from '@/lib/cn';
 import { useAuthStore } from '@/store/auth';
 

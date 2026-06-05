@@ -6,7 +6,7 @@ import {
   renderConfigSnippet,
   renderFullConfig,
 } from './config';
-import type { Device, Port } from '@/types';
+import type { Device, Port } from '@/models';
 
 const device: Device = {
   id: 'd1',

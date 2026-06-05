@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Breadcrumbs } from './Breadcrumbs';
 import { queryKeys } from '@/api/queries';
-import type { Device, Site } from '@/types';
+import type { Device, Site } from '@/models';
 
 afterEach(cleanup);
 

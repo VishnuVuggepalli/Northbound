@@ -3,7 +3,7 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/api/queries';
 import { useLiveStore } from '@/store/live';
 import { pushToast } from '@/store/toast';
-import type { Device } from '@/types';
+import type { Device } from '@/models';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 

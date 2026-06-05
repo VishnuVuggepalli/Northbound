@@ -2,7 +2,7 @@ import { Outlet, useParams } from 'react-router-dom';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { useUIStore } from '@/store/ui';
 import { useEffect } from 'react';
-import type { Environment } from '@/types';
+import type { Environment } from '@/models';
 
 export function EnvironmentPage() {
   const { env } = useParams<{ env: Environment }>();

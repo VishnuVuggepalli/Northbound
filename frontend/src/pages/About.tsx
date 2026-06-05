@@ -8,7 +8,7 @@
 
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { Wordmark } from '@/components/ui/Wordmark';
+import { Wordmark } from '@/shared/Wordmark';
 
 interface BulletProps {
   title: string;

@@ -2,12 +2,12 @@ import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { Topology3D } from '@/components/three/Topology3D';
-import { Wordmark } from '@/components/ui/Wordmark';
+import { Wordmark } from '@/shared/Wordmark';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
 import { useAllPorts, useDevices, useLinks, useRequests, useSites } from '@/api/queries';
-import type { Environment } from '@/types';
+import type { Environment } from '@/models';
 
 export function EnvPickerPage() {
   const navigate = useNavigate();

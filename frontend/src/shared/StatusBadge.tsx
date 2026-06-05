@@ -1,4 +1,4 @@
-import type { ChangeRequestStatus } from '@/types';
+import type { ChangeRequestStatus } from '@/models';
 import { Badge } from './Badge';
 
 const LABELS: Record<ChangeRequestStatus, string> = {

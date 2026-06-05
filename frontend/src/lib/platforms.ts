@@ -5,7 +5,7 @@
  * backend `GET /api/platforms` and loaded via `usePlatforms()`. These are pure
  * lookups over that fetched list — no hardcoded/mock dataset.
  */
-import type { Device, PlatformId, PlatformRegistryEntry } from '@/types';
+import type { Device, PlatformId, PlatformRegistryEntry } from '@/models';
 
 export function findPlatform(
   id: PlatformId | string,

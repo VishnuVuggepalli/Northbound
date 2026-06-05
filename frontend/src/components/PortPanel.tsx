@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, Clock, Network, Pencil, RefreshCw, Send, X } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Input, Textarea } from '@/components/ui/Input';
-import { Section } from '@/components/ui/Section';
-import { KV } from '@/components/ui/KV';
-import { StatusDot } from '@/components/ui/StatusDot';
-import { VlanChip } from '@/components/ui/VlanChip';
-import { Kbd } from '@/components/ui/Kbd';
+import { Button } from '@/shared/Button';
+import { Input, Textarea } from '@/shared/Input';
+import { Section } from '@/shared/Section';
+import { KV } from '@/shared/KV';
+import { StatusDot } from '@/shared/StatusDot';
+import { VlanChip } from '@/shared/VlanChip';
+import { Kbd } from '@/shared/Kbd';
 import { Diff } from '@/components/Diff';
 import { PortConfigEditor } from '@/components/PortConfigEditor';
 import { VendorActions } from '@/components/VendorActions';
@@ -19,7 +19,7 @@ import type {
   Device,
   Port,
   User,
-} from '@/types';
+} from '@/models';
 import {
   useApplyRequest,
   usePlatforms,

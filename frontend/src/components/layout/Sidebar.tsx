@@ -3,13 +3,13 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useDevices, useRequests, useSites } from '@/api/queries';
 import { useUIStore } from '@/store/ui';
-import { PlatformIcon } from '@/components/ui/PlatformIcon';
-import { StatusDot } from '@/components/ui/StatusDot';
-import { Badge } from '@/components/ui/Badge';
-import { SkeletonList } from '@/components/ui/Skeleton';
+import { PlatformIcon } from '@/shared/PlatformIcon';
+import { StatusDot } from '@/shared/StatusDot';
+import { Badge } from '@/shared/Badge';
+import { SkeletonList } from '@/shared/Skeleton';
 import { cn } from '@/lib/cn';
 import { plural } from '@/lib/format';
-import type { Device, DeviceRole, Environment } from '@/types';
+import type { Device, DeviceRole, Environment } from '@/models';
 
 const ROLE_ORDER: DeviceRole[] = ['spine', 'leaf', 'router', 'vpn'];
 const ROLE_LABELS: Record<DeviceRole, string> = {

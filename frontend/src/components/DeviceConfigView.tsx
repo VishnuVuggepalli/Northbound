@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { History, RefreshCw, Search } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import { Button } from '@/shared/Button';
+import { Input } from '@/shared/Input';
 import { ConfigDiff } from './Diff';
 import { renderFullConfig } from '@/lib/config';
 import { cn } from '@/lib/cn';
-import type { Device, Port, User } from '@/types';
+import type { Device, Port, User } from '@/models';
 
 interface DeviceConfigViewProps {
   device: Device;

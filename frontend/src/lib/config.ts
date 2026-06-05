@@ -7,7 +7,7 @@
  * what they're asking for before submitting.
  */
 
-import type { Device, Port, RequestedChanges } from '@/types';
+import type { Device, Port, RequestedChanges } from '@/models';
 
 export function portToRequestedChanges(p: Port): Required<RequestedChanges> {
   return {

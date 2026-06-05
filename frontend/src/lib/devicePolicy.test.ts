@@ -7,7 +7,7 @@
 import { describe, expect, test } from 'vitest';
 import { isWriteLocked, vendorWebUiUrl, findPlatformForDevice } from './devicePolicy';
 import { findPlatform } from '@/lib/platforms';
-import type { Device, DeviceRole, PlatformRegistryEntry } from '@/types';
+import type { Device, DeviceRole, PlatformRegistryEntry } from '@/models';
 
 // Minimal local platform sample (test data — the app fetches the real catalog
 // from GET /api/platforms via usePlatforms()).

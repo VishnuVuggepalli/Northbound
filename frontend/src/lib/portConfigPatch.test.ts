@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildPortConfigPatch, parseTagged, sameSet } from './portConfigPatch';
-import type { Port } from '@/types';
+import type { Port } from '@/models';
 
 function port(over: Partial<Port> = {}): Port {
   return {

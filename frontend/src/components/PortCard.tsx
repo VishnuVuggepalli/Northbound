@@ -1,9 +1,9 @@
 import { Inbox } from 'lucide-react';
-import { StatusDot } from '@/components/ui/StatusDot';
+import { StatusDot } from '@/shared/StatusDot';
 import { vlanColor, vlanColorMuted } from '@/lib/vlan';
 import type { ThemeMode } from '@/lib/palette';
 import { cn } from '@/lib/cn';
-import type { ChangeRequest, Port } from '@/types';
+import type { ChangeRequest, Port } from '@/models';
 
 interface PortCardProps {
   port: Port;

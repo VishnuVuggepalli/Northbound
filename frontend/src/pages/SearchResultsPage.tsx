@@ -4,8 +4,8 @@ import { ArrowRight } from 'lucide-react';
 import { apiClient } from '@/api';
 import { useUIStore } from '@/store/ui';
 import { useThemeStore } from '@/store/theme';
-import { VlanChip } from '@/components/ui/VlanChip';
-import type { Device, Environment, Port } from '@/types';
+import { VlanChip } from '@/shared/VlanChip';
+import type { Device, Environment, Port } from '@/models';
 
 export function SearchResultsPage() {
   const { env } = useParams<{ env: Environment }>();

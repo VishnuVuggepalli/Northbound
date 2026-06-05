@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Power, Save } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import { Button } from '@/shared/Button';
+import { Input } from '@/shared/Input';
 import { useSetPortConfig } from '@/api/queries';
 import { buildPortConfigPatch, currentMode, parseTagged, type PortMode } from '@/lib/portConfigPatch';
 import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
-import type { Port } from '@/types';
+import type { Port } from '@/models';
 
 interface PortConfigEditorProps {
   deviceId: string;

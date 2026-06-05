@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wordmark } from '@/components/ui/Wordmark';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import { Wordmark } from '@/shared/Wordmark';
+import { Button } from '@/shared/Button';
+import { Input } from '@/shared/Input';
 import { useAuthStore } from '@/store/auth';
 import { apiClient, isApiError } from '@/api';
 import { pushToast } from '@/store/toast';

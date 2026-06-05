@@ -5,7 +5,7 @@
  * field names than the UI's hand-written domain types (`environment` vs `env`,
  * timestamps as ISO strings vs epoch ms, no `model`/`portKind` on devices —
  * those are presentation concerns). These functions translate the generated
- * `schema.gen.ts` shapes into the canonical `@/types`. Keeping the translation
+ * `schema.gen.ts` shapes into the canonical `@/models`. Keeping the translation
  * here means components and the mock client never see the wire shape.
  */
 
@@ -19,7 +19,7 @@ import type {
   PlatformRegistryEntry,
   Port,
   PortKind,
-} from '@/types';
+} from '@/models';
 
 type DeviceOut = components['schemas']['DeviceOut'];
 type PortStateOut = components['schemas']['PortStateOut'];

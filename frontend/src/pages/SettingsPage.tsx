@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Gauge, Save } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Section } from '@/components/ui/Section';
+import { Button } from '@/shared/Button';
+import { Input } from '@/shared/Input';
+import { Section } from '@/shared/Section';
 import { useSettings, useUpdateSettings } from '@/api/queries';
 import { useAuthStore } from '@/store/auth';
 import { pushToast } from '@/store/toast';
