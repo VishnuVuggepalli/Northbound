@@ -30,6 +30,37 @@ import {
 import { pushToast } from '@/store/toast';
 import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
 
+const TAGGED_VLAN_PREVIEW = 12;
+
+/** Tagged VLAN chips, capped to a preview with a "+N more" expander — a trunk
+ *  port can carry dozens (an all-VLANs SwOS trunk has 80+), and an uncapped wall
+ *  of chips buries the rest of the panel. */
+function TaggedVlanList({ vlans, theme }: { vlans: readonly number[]; theme: ThemeMode }) {
+  const [expanded, setExpanded] = useState(false);
+  if (vlans.length === 0) return <span className="text-xs text-fg-muted">none</span>;
+  const shown = expanded ? vlans : vlans.slice(0, TAGGED_VLAN_PREVIEW);
+  const hidden = vlans.length - shown.length;
+  const pill =
+    'rounded-sm border border-border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-fg-muted hover:border-border-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {shown.map((v) => (
+        <VlanChip key={v} vlan={v} theme={theme} />
+      ))}
+      {hidden > 0 && (
+        <button type="button" onClick={() => setExpanded(true)} className={pill}>
+          +{hidden} more
+        </button>
+      )}
+      {expanded && vlans.length > TAGGED_VLAN_PREVIEW && (
+        <button type="button" onClick={() => setExpanded(false)} className={pill}>
+          show less
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface PortPanelProps {
   device: Device;
   port: Port;
@@ -318,13 +349,7 @@ export function PortPanel({
                 <span className="w-20 text-[11px] uppercase tracking-wider text-fg-subtle">
                   Tagged
                 </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {port.tagged_vlans.length === 0 ? (
-                    <span className="text-xs text-fg-muted">none</span>
-                  ) : (
-                    port.tagged_vlans.map((v) => <VlanChip key={v} vlan={v} theme={theme} />)
-                  )}
-                </div>
+                <TaggedVlanList vlans={port.tagged_vlans} theme={theme} />
               </div>
             </>
           )}

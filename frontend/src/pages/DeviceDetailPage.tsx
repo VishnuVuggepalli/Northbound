@@ -221,8 +221,32 @@ export function DeviceDetailPage() {
       </header>
 
       <div className="min-h-0 flex-1">
-        {tab === 'ports' && (
-          <div className="grid h-full grid-rows-[1.6fr_1fr]">
+        {tab === 'ports' &&
+          (ports.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm">
+              <AlertTriangle
+                className={device.reachable === false ? 'text-warn' : 'text-fg-subtle'}
+                size={24}
+                aria-hidden
+              />
+              {device.reachable === false ? (
+                <>
+                  <span className="text-fg">
+                    This device is unreachable — its ports can&apos;t be read right now.
+                  </span>
+                  <span className="text-fg-muted">Check connectivity, then Re-discover.</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-fg">No ports to show yet.</span>
+                  <span className="text-fg-muted">
+                    Use Re-discover to fetch the live port list.
+                  </span>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="grid h-full grid-rows-[1.6fr_1fr]">
             <div
               className="nb-reveal overflow-hidden p-4"
               style={{ '--nb-reveal-i': 1 } as React.CSSProperties}
@@ -246,7 +270,7 @@ export function DeviceDetailPage() {
               />
             </div>
           </div>
-        )}
+          ))}
         {tab === 'config' && <DeviceConfigView device={device} ports={ports} user={user!} />}
         {tab === 'system' && <DeviceSystemView device={device} />}
       </div>
