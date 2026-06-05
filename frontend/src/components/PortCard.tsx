@@ -50,7 +50,10 @@ export function PortCard({ port, selected, theme, pendingRequests, onClick }: Po
         />
       </header>
       <div className="flex items-baseline gap-1.5">
-        {port.state !== 'down' ? (
+        {/* Untagged VLAN is configuration, not live link state — show it even
+            when the port is down (the card is already de-emphasized for down
+            ports). Only "—" when there is genuinely no access VLAN. */}
+        {port.untagged_vlan != null ? (
           <span className="nb-mono text-2xl font-semibold leading-none" style={{ color }}>
             {port.untagged_vlan}
           </span>
