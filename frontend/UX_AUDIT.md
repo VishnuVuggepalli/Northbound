@@ -411,3 +411,40 @@ distinctive through precision, not maximalism.
 - `prefers-reduced-motion` respected everywhere motion was added.
 - New deps: `@fontsource/sora`, `@fontsource/ibm-plex-mono` only (fonts;
   justified + self-hosted). No new icon lib, no state store, no motion lib.
+
+---
+
+## Clean sweep — 2026-06-05 (frontend-only, no backend changes)
+
+A focused resilience + UX pass. All changes are frontend; verified with
+`tsc` + `eslint` + `vitest` (no backend calls).
+
+**WS1 — resilience & safety**
+- `ErrorBoundary` (app-root full-reload + per-route reset-in-place, keyed by
+  pathname). Previously *any* component throw was a blank white screen.
+- `listAllPorts`/`searchPorts`: per-device 7s timeout + resilient helper so one
+  unreachable device no longer stalls/blanks the whole env's ports (topology
+  "0 ports", empty search). `searchPorts` previously had no per-device catch.
+- `Skeleton`/`SkeletonList` + wired into the sidebar (loading shimmer; true-empty
+  shows a "no devices → Onboard" state).
+
+**WS2 — navigation & wayfinding**
+- Global `Breadcrumbs` derived from the matched route hierarchy (`matchRoutes` +
+  route→crumb config — the component-router equivalent of `handle.crumb`).
+  Dynamic labels from the query cache; removed the hardcoded per-page crumb.
+- Skip-to-content link; `<main>` is a focus target; device name is now an `<h1>`.
+
+**WS3 — data-state correctness**
+- Tagged VLANs in `PortPanel` cap at 12 chips + "+N more" expander (SwOS trunks
+  carry 80+).
+- Device ports tab: clear empty/unreachable state instead of an empty 3D switch.
+
+**WS4 — polish & a11y**
+- Remove-device action (admin) → confirm Modal wired to `DELETE`, 409 handled.
+- `StatusDot` optional accessible `label` — sidebar reachability is no longer
+  conveyed by color alone (labelled `img` + tooltip).
+
+**Also** — `Switch3D`/`Topology3D` materials `meshLambertMaterial` →
+`meshStandardMaterial` so the chassis/ports/nodes read as solid steel.
+
+Tests added: `ErrorBoundary`, `Breadcrumbs`. Gate: tsc · eslint · 62 vitest green.
