@@ -31,14 +31,20 @@ export function RequestsPage() {
 
   const scope: 'mine' | 'all' = user.role === 'admin' ? 'all' : 'mine';
 
+  // The backend already scopes the list: non-admins get ONLY their own requests
+  // (forced server-side by user id), admins get all. So we trust `requests`
+  // as-is. We must NOT re-filter by `requested_by` here — that field is the
+  // requester's user id (a UUID), while the frontend only knows `user.username`,
+  // so a client-side `requested_by === username` compare matches nothing and
+  // wrongly empties the page. (`scope` still drives the heading copy below.)
   const filtered = useMemo(() => {
-    let list = scope === 'mine' ? requests.filter((r) => r.requested_by === user.username) : requests;
+    let list = requests;
     if (filter !== 'all') list = list.filter((r) => r.status === filter);
     return [...list].sort((a, b) => b.created_at - a.created_at);
-  }, [requests, scope, user.username, filter]);
+  }, [requests, filter]);
 
   const counts = useMemo<Record<FilterKey, number>>(() => {
-    const base = scope === 'mine' ? requests.filter((r) => r.requested_by === user.username) : requests;
+    const base = requests;
     return {
       all: base.length,
       pending: base.filter((r) => r.status === 'pending').length,
@@ -47,7 +53,7 @@ export function RequestsPage() {
       rejected: base.filter((r) => r.status === 'rejected').length,
       failed: base.filter((r) => r.status === 'failed').length,
     };
-  }, [requests, scope, user.username]);
+  }, [requests]);
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-6">
