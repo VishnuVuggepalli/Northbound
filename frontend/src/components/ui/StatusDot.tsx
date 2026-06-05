@@ -7,6 +7,13 @@ interface StatusDotProps {
   size?: number;
   pulse?: boolean;
   className?: string;
+  /**
+   * Accessible status text. Pass it where the dot is the ONLY status indicator
+   * (e.g. the sidebar) so state isn't conveyed by color alone — it becomes a
+   * labelled `img` (announced by screen readers) with a hover tooltip. Omit it
+   * where adjacent text already names the status (the dot stays decorative).
+   */
+  label?: string;
 }
 
 const COLOR: Record<DotState, string> = {
@@ -17,10 +24,13 @@ const COLOR: Record<DotState, string> = {
   pending: 'bg-warn',
 };
 
-export function StatusDot({ state, size = 8, pulse = false, className }: StatusDotProps) {
+export function StatusDot({ state, size = 8, pulse = false, className, label }: StatusDotProps) {
   return (
     <span
-      aria-hidden
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      title={label}
       className={cn(
         'inline-block shrink-0 rounded-full',
         COLOR[state],

@@ -73,6 +73,17 @@ export function useSetDeviceWrites(deviceId: string) {
   });
 }
 
+export function useDeleteDevice(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.deleteDevice(deviceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['devices'] });
+      qc.invalidateQueries({ queryKey: queryKeys.allPorts() });
+    },
+  });
+}
+
 export function useRediscoverDevice(deviceId: string) {
   const qc = useQueryClient();
   return useMutation({

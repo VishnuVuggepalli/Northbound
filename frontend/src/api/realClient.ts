@@ -286,6 +286,15 @@ export async function rediscoverDevice(id: string): Promise<RediscoverResult> {
   });
 }
 
+/**
+ * Offboard a device (admin). 204 on success. A device with change-request
+ * history can't be hard-deleted (compliance trail) → backend returns 409, which
+ * surfaces here as an ApiError(409) the caller can message.
+ */
+export async function deleteDevice(id: string): Promise<void> {
+  await request<void>(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 /** Enable/disable config writes for a device (admin; F77 per-device flag). */
 export async function setDeviceWrites(id: string, enabled: boolean): Promise<Device> {
   const d = await request<DeviceOut>(`/api/devices/${encodeURIComponent(id)}/writes`, {

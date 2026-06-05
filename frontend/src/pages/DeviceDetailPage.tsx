@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, Cpu, FileText, Power, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Cpu, FileText, Power, RefreshCw, Trash2 } from 'lucide-react';
 import { Switch3D } from '@/components/three/Switch3D';
 import { PortStrip } from '@/components/PortStrip';
 import { PortPanel } from '@/components/PortPanel';
@@ -11,12 +11,15 @@ import { PlatformIcon } from '@/components/ui/PlatformIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
 import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
+import { isApiError } from '@/api';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
 import {
   useAudit,
+  useDeleteDevice,
   useDevice,
   usePorts,
   usePlatforms,
@@ -53,6 +56,8 @@ export function DeviceDetailPage() {
   const isAdmin = user?.role === 'admin';
   const setWrites = useSetDeviceWrites(deviceId ?? '');
   const rediscover = useRediscoverDevice(deviceId ?? '');
+  const remove = useDeleteDevice(deviceId ?? '');
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   // Sync the route's device id into the UI store so global hotkeys (j/k/r)
   // know which device's ports to navigate. Reaching this page via URL (no
@@ -182,6 +187,17 @@ export function DeviceDetailPage() {
               {device.writes_enabled === false ? 'Writes off' : 'Writes on'}
             </button>
           )}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setConfirmRemove(true)}
+              title="Remove (offboard) this device"
+              className="flex h-9 items-center gap-1.5 rounded-md border border-danger/40 px-2.5 text-xs font-medium text-danger transition hover:bg-danger/10"
+            >
+              <Trash2 size={13} />
+              Remove
+            </button>
+          )}
           <VendorActions device={device} platform={platform} />
           <nav className="flex items-center gap-0.5 rounded-md border border-border bg-bg-elev-1 p-0.5 text-xs">
           <button
@@ -296,6 +312,52 @@ export function DeviceDetailPage() {
           }}
         />
       )}
+
+      <Modal
+        open={confirmRemove}
+        onClose={() => {
+          if (!remove.isPending) setConfirmRemove(false);
+        }}
+        title="Remove device?"
+        subtitle={device.name}
+        footer={
+          <>
+            <Button kind="ghost" onClick={() => setConfirmRemove(false)} disabled={remove.isPending}>
+              Cancel
+            </Button>
+            <Button
+              kind="danger"
+              disabled={remove.isPending}
+              onClick={() =>
+                remove.mutate(undefined, {
+                  onSuccess: () => {
+                    setConfirmRemove(false);
+                    pushToast({ kind: 'success', message: `Removed ${device.name}.` });
+                    navigate(`/env/${device.env}`);
+                  },
+                  onError: (e: unknown) => {
+                    const msg =
+                      isApiError(e) && e.status === 409
+                        ? 'This device has change-request history and can’t be hard-deleted — the change trail must be retained.'
+                        : e instanceof Error
+                          ? e.message
+                          : 'Remove failed.';
+                    pushToast({ kind: 'error', message: msg });
+                  },
+                })
+              }
+            >
+              {remove.isPending ? 'Removing…' : 'Remove device'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-fg-muted">
+          This offboards <span className="text-fg">{device.name}</span> ({device.mgmt_ip}) and
+          deletes its stored port metadata and config backups. The audit trail is retained. This
+          can&apos;t be undone.
+        </p>
+      </Modal>
     </div>
   );
 }

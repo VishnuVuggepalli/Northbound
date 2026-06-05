@@ -145,6 +145,13 @@ export function Sidebar({ env }: SidebarProps) {
                           )}
                           <StatusDot
                             state={d.reachable == null ? 'pending' : d.reachable ? 'up' : 'down'}
+                            label={
+                              d.reachable == null
+                                ? 'Reachability unknown'
+                                : d.reachable
+                                  ? 'Reachable'
+                                  : 'Unreachable'
+                            }
                           />
                         </span>
                       </button>
