@@ -387,20 +387,44 @@ export async function setPortConfig(
   );
 }
 
+// One slow/unreachable device must neither blank nor STALL the whole env-wide
+// port view. A plain Promise.all with a per-item try/catch still waits for the
+// slowest fetch (a backend that hangs polling a dead device), so the topology
+// shows "0 ports" and search goes blank until that one device finally errors.
+// Cap each device fetch with a deadline so the aggregate is bounded.
+const PER_DEVICE_PORTS_TIMEOUT_MS = 7000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
+/** Ports for one device — resilient: never rejects, never hangs the caller. */
+async function portsForDeviceResilient(deviceId: string): Promise<Port[]> {
+  try {
+    const snap = await withTimeout(
+      listPortsForDevice(deviceId),
+      PER_DEVICE_PORTS_TIMEOUT_MS,
+      `ports for device ${deviceId}`,
+    );
+    return snap.ports;
+  } catch (err) {
+    // Surfaced (not swallowed); the device simply contributes no ports.
+    console.error(`listAllPorts: failed to load ports for device ${deviceId}`, err);
+    return [];
+  }
+}
+
 export async function listAllPorts(): Promise<PortMap> {
   const devices = await listDevices();
   const map: PortMap = {};
   await Promise.all(
     devices.map(async (d) => {
-      try {
-        const snap = await listPortsForDevice(d.id);
-        map[d.id] = snap.ports;
-      } catch (err) {
-        // A single device failing to poll must not collapse the whole map, but
-        // the failure must be surfaced, not silently swallowed.
-        console.error(`listAllPorts: failed to load ports for device ${d.id}`, err);
-        map[d.id] = [];
-      }
+      map[d.id] = await portsForDeviceResilient(d.id);
     }),
   );
   return map;
@@ -416,8 +440,10 @@ export async function searchPorts(
   const results: Array<{ device: Device; port: Port }> = [];
   await Promise.all(
     devices.map(async (device) => {
-      const snap = await listPortsForDevice(device.id);
-      for (const port of snap.ports) {
+      // Resilient per device: one unreachable device must not fail the whole
+      // search (and must not stall it past the deadline).
+      const ports = await portsForDeviceResilient(device.id);
+      for (const port of ports) {
         if (
           port.name.toLowerCase().includes(q) ||
           port.description.toLowerCase().includes(q) ||

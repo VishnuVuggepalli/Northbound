@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Toaster } from '@/components/ui/Toaster';
 import { HelpOverlay } from '@/components/HelpOverlay';
 import { RequestModal } from '@/components/RequestModal';
@@ -67,7 +68,12 @@ function ProtectedShell() {
     <>
       <TopBar />
       <main id="main-content">
-        <Outlet />
+        {/* Per-route boundary: a single page's crash shows a recoverable
+            fallback while the shell/nav stays usable. Keyed by pathname so
+            navigating to another route clears a stuck error. */}
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </>
   );
@@ -254,9 +260,13 @@ function GlobalDialogs() {
 export function App() {
   return (
     <BrowserRouter>
-      <GlobalShortcuts />
-      <AppRoutes />
-      <GlobalDialogs />
+      {/* App-root boundary: a catastrophic shell crash falls back to a full
+          reload rather than a blank white screen. */}
+      <ErrorBoundary fullReload title="Northbound hit an unexpected error.">
+        <GlobalShortcuts />
+        <AppRoutes />
+        <GlobalDialogs />
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

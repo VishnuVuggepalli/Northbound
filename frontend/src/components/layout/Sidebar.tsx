@@ -6,6 +6,7 @@ import { useUIStore } from '@/store/ui';
 import { PlatformIcon } from '@/components/ui/PlatformIcon';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { Badge } from '@/components/ui/Badge';
+import { SkeletonList } from '@/components/ui/Skeleton';
 import { cn } from '@/lib/cn';
 import { plural } from '@/lib/format';
 import type { Device, DeviceRole, Environment } from '@/types';
@@ -25,7 +26,7 @@ interface SidebarProps {
 export function Sidebar({ env }: SidebarProps) {
   const navigate = useNavigate();
   const params = useParams();
-  const { data: devices = [] } = useDevices(env);
+  const { data: devices = [], isLoading: devicesLoading } = useDevices(env);
   const { data: requests = [] } = useRequests();
   const { data: sites = [] } = useSites();
   const siteName = sites.find((s) => s.slug === env)?.name ?? env;
@@ -86,6 +87,24 @@ export function Sidebar({ env }: SidebarProps) {
             </button>
           </div>
         </div>
+
+        {devicesLoading && devices.length === 0 && (
+          <div className="p-3">
+            <SkeletonList rows={4} rowClassName="h-7" />
+          </div>
+        )}
+        {!devicesLoading && devices.length === 0 && (
+          <div className="px-4 py-6 text-center text-xs text-fg-muted">
+            No devices in {siteName} yet.{' '}
+            <button
+              type="button"
+              onClick={() => navigate('/onboard')}
+              className="text-accent hover:underline"
+            >
+              Onboard one
+            </button>
+          </div>
+        )}
 
         {ROLE_ORDER.map((role) => {
           const list = grouped[role];
