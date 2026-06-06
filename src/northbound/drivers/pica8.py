@@ -1290,27 +1290,45 @@ def _build_vlan_edit_config_xml(change: VlanChange) -> str:
         vlan_id.set(f"{{{_NC_BASE_NS}}}operation", "delete")
     else:  # create — xorplus requires a name; default it to the id when unset
         etree.SubElement(vlan_id, "vlan-name").text = change.name or str(change.vlan_id)
+        if change.description:
+            etree.SubElement(vlan_id, "description").text = change.description
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
 
 
 def _build_l3_edit_config_xml(change: L3Change) -> str:
-    """Render a xorplus ``<l3-interface>`` edit for an SVI create/delete.
+    """Render a xorplus SVI create/delete (grounded against a live get-config).
 
-    Schema (verified against a live get-config):
-        <l3-interface xmlns="http://pica8.com/xorplus/vlan-interface">
-          <vlan-interface>
-            <name>vlan1010</name>
-            <address><ip>10.10.250.2</ip><prefix-length>16</prefix-length></address>
+    An SVI's interface object is *created by* the VLAN's ``<l3-interface>`` link;
+    setting only the address fails with "Vlan-interface vlanN not found". So a
+    create emits BOTH, in one edit-config:
+        <vlans xmlns=".../vlans">
+          <vlan-id><id>3997</id><l3-interface>vlan3997</l3-interface></vlan-id>
+        </vlans>
+        <l3-interface xmlns=".../vlan-interface">
+          <vlan-interface><name>vlan3997</name>
+            <address><ip>..</ip><prefix-length>..</prefix-length></address>
+            [<mtu>..</mtu>][<disable>..</disable>][<dhcp>..</dhcp>]
           </vlan-interface>
         </l3-interface>
-    ``<name>`` is the list key. Create merges name+address; delete tags the keyed
-    <vlan-interface> with operation="delete" (run under default-operation="none").
-    Loopback is not yet grounded → :meth:`render_l3_change` rejects it.
+    Delete removes the address object AND the VLAN link (both operation="delete",
+    run under default-operation="none"). Loopback is rejected upstream.
     """
     cfg = etree.Element("config")
+    name = change.iface_name  # "vlan<id>"
+
+    # The VLAN's l3-interface link — this is what instantiates the SVI object.
+    vlans = etree.SubElement(cfg, "vlans", nsmap={None: _XORPLUS_VLANS_NS})
+    vlan_id = etree.SubElement(vlans, "vlan-id")
+    etree.SubElement(vlan_id, "id").text = str(change.vlan_id)
+    link = etree.SubElement(vlan_id, "l3-interface")
+    link.text = name
+    if change.action == "delete":
+        link.set(f"{{{_NC_BASE_NS}}}operation", "delete")
+
+    # The addressed vlan-interface.
     l3 = etree.SubElement(cfg, "l3-interface", nsmap={None: _XORPLUS_VLAN_IFACE_NS})
     vi = etree.SubElement(l3, "vlan-interface")
-    etree.SubElement(vi, "name").text = change.iface_name  # "vlan<id>"
+    etree.SubElement(vi, "name").text = name
     if change.action == "delete":
         vi.set(f"{{{_NC_BASE_NS}}}operation", "delete")
     else:
@@ -1318,6 +1336,12 @@ def _build_l3_edit_config_xml(change: L3Change) -> str:
         addr = etree.SubElement(vi, "address")
         etree.SubElement(addr, "ip").text = ip
         etree.SubElement(addr, "prefix-length").text = prefix
+        if change.mtu is not None:
+            etree.SubElement(vi, "mtu").text = str(change.mtu)
+        if change.enabled is not None:
+            etree.SubElement(vi, "disable").text = "false" if change.enabled else "true"
+        if change.dhcp is not None:
+            etree.SubElement(vi, "dhcp").text = "true" if change.dhcp else "false"
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
 
 

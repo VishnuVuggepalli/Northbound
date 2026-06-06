@@ -269,13 +269,18 @@ async def test_render_vlan_delete_tags_operation() -> None:
 async def test_render_l3_svi_create() -> None:
     drv, _ = _make_driver()
     diff = await drv.render_l3_change(
-        L3Change(action="create", kind="svi", vlan_id=1010, ipv4="10.10.250.2/16")
+        L3Change(action="create", kind="svi", vlan_id=1010, ipv4="10.10.250.2/16", mtu=1500)
     )
     root = etree.fromstring(diff.commands[0].encode())
-    assert root.find(".//{http://pica8.com/xorplus/vlan-interface}l3-interface") is not None
-    assert root.findtext(".//{*}name") == "vlan1010"
+    # The VLAN l3-interface LINK is what instantiates the SVI (the device errors
+    # "Vlan-interface not found" without it). Must be present, value "vlan1010".
+    link = root.find(".//{http://pica8.com/xorplus/vlans}l3-interface")
+    assert link is not None and link.text == "vlan1010"
+    # The addressed vlan-interface in its own namespace.
+    assert root.find(".//{http://pica8.com/xorplus/vlan-interface}vlan-interface") is not None
     assert root.findtext(".//{*}ip") == "10.10.250.2"
     assert root.findtext(".//{*}prefix-length") == "16"
+    assert root.findtext(".//{*}mtu") == "1500"
     assert "SVI vlan1010" in diff.summary
 
 

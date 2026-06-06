@@ -278,6 +278,7 @@ class VlanChange(BaseModel):
     action: Literal["create", "delete"]
     vlan_id: int = Field(ge=1, le=4094)
     name: str | None = Field(default=None, max_length=64)
+    description: str | None = Field(default=None, max_length=255)
 
 
 class L3Change(BaseModel):
@@ -295,6 +296,9 @@ class L3Change(BaseModel):
     name: str | None = Field(default=None, max_length=64)
     vlan_id: int | None = Field(default=None, ge=1, le=4094)
     ipv4: str | None = Field(default=None, max_length=43)  # IPv4 or IPv6 CIDR
+    mtu: int | None = Field(default=None, ge=64, le=16360)
+    enabled: bool | None = None  # maps to <disable> (disable = not enabled)
+    dhcp: bool | None = None
 
     @model_validator(mode="after")
     def _check(self) -> L3Change:

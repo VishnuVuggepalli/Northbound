@@ -100,7 +100,9 @@ async def create_vlan_request(
 ) -> RequestOut:
     """File a VLAN-database change request (create/delete a VLAN). 403 if read-only."""
     device = await _load_device(session, body.device_id)
-    change = VlanChange(action=body.action, vlan_id=body.vlan_id, name=body.name)
+    change = VlanChange(
+        action=body.action, vlan_id=body.vlan_id, name=body.name, description=body.description
+    )
     req = await requests.create_vlan_request(
         session,
         device=device,
@@ -132,6 +134,9 @@ async def create_l3_request(
             name=body.name,
             vlan_id=body.vlan_id,
             ipv4=body.ipv4,
+            mtu=body.mtu,
+            enabled=body.enabled,
+            dhcp=body.dhcp,
         )
     except ValueError as exc:
         raise HTTPException(

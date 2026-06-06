@@ -27,6 +27,7 @@ class RequestVlanIn(BaseModel):
     action: Literal["create", "delete"]
     vlan_id: int = Field(ge=1, le=4094)
     name: str | None = Field(default=None, max_length=64)
+    description: str | None = Field(default=None, max_length=255)
     reason: str = Field(default="", max_length=2000)
 
 
@@ -39,6 +40,9 @@ class RequestL3In(BaseModel):
     name: str | None = Field(default=None, max_length=64)
     vlan_id: int | None = Field(default=None, ge=1, le=4094)
     ipv4: str | None = Field(default=None, max_length=43)
+    mtu: int | None = Field(default=None, ge=64, le=16360)
+    enabled: bool | None = None
+    dhcp: bool | None = None
     reason: str = Field(default="", max_length=2000)
 
 
