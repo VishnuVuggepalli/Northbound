@@ -20,6 +20,7 @@ from northbound.schemas.driver import (
     L3Change,
     L3Interface,
     Neighbor,
+    OspfChange,
     PortChange,
     PortState,
     ProtocolDetail,
@@ -153,6 +154,10 @@ class Driver(ABC):
     async def render_vrf_change(self, change: VrfChange) -> ConfigDiff:
         """Render a VRF create/delete. Default: unsupported."""
         raise NotSupported(f"{self.platform_id}: render_vrf_change not supported")
+
+    async def render_ospf_change(self, change: OspfChange) -> ConfigDiff:
+        """Render an OSPFv2 config change. Default: unsupported."""
+        raise NotSupported(f"{self.platform_id}: render_ospf_change not supported")
 
     async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
         raise NotSupported(f"{self.platform_id}: apply_change not supported")

@@ -289,6 +289,43 @@ class VrfChange(BaseModel):
     description: str | None = Field(default=None, max_length=255)
 
 
+class OspfChange(BaseModel):
+    """An OSPFv2 config change (`set protocols ospf ...`).
+
+    PicOS OSPF is interface-centric: an interface declares its area, and per-
+    interface knobs tune the adjacency. ``target`` selects what changes:
+
+    - ``router-id``: set/clear the global router-id (needs ``router_id``).
+    - ``interface``: add/remove an interface in OSPF + tune it (needs ``interface``;
+      ``set`` requires ``area``). Optional cost / hello / dead / passive.
+
+    ``action="delete"`` removes the targeted node (the whole interface from OSPF,
+    or the router-id). redistribute / area-type targets are deliberately not
+    modelled yet (their xorplus XML isn't grounded — routing config, no guessing).
+    """
+
+    action: Literal["set", "delete"]
+    target: Literal["router-id", "interface"]
+    router_id: str | None = Field(default=None, max_length=15)
+    interface: str | None = Field(default=None, max_length=64)
+    area: str | None = Field(default=None, max_length=15)  # dotted (0.0.0.0) or int
+    cost: int | None = Field(default=None, ge=1, le=65535)
+    hello_interval: int | None = Field(default=None, ge=1, le=65535)
+    dead_interval: int | None = Field(default=None, ge=1, le=65535)
+    passive: bool | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> OspfChange:
+        if self.target == "router-id" and self.action == "set" and not self.router_id:
+            raise ValueError("router-id set requires router_id")
+        if self.target == "interface":
+            if not self.interface:
+                raise ValueError("interface target requires interface")
+            if self.action == "set" and not self.area:
+                raise ValueError("adding an OSPF interface requires area")
+        return self
+
+
 class L3Change(BaseModel):
     """A routed-interface change: create/delete an SVI (VLAN interface) or a
     loopback, with an optional IPv4 address.

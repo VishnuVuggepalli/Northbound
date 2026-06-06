@@ -678,6 +678,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/requests/ospf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Ospf Request
+         * @description File an OSPFv2 config-change request. 403 read-only; 422 if inconsistent.
+         */
+        post: operations["create_ospf_request_api_requests_ospf_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/requests/vrf": {
         parameters: {
             query?: never;
@@ -1642,6 +1662,43 @@ export interface components {
             dhcp?: boolean | null;
             /** Vrf */
             vrf?: string | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * RequestOspfIn
+         * @description Body of ``POST /api/requests/ospf`` — file an OSPFv2 config change.
+         */
+        RequestOspfIn: {
+            /** Device Id */
+            device_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "set" | "delete";
+            /**
+             * Target
+             * @enum {string}
+             */
+            target: "router-id" | "interface";
+            /** Router Id */
+            router_id?: string | null;
+            /** Interface */
+            interface?: string | null;
+            /** Area */
+            area?: string | null;
+            /** Cost */
+            cost?: number | null;
+            /** Hello Interval */
+            hello_interval?: number | null;
+            /** Dead Interval */
+            dead_interval?: number | null;
+            /** Passive */
+            passive?: boolean | null;
             /**
              * Reason
              * @default
@@ -3031,6 +3088,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RequestVlanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_ospf_request_api_requests_ospf_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestOspfIn"];
             };
         };
         responses: {

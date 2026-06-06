@@ -27,6 +27,7 @@ from northbound.schemas.driver import (
     DriverCapabilities,
     L3Change,
     Neighbor,
+    OspfChange,
     PortChange,
     PortState,
     TestResult,
@@ -241,6 +242,33 @@ class MockDriver(Driver):
         return ConfigDiff(
             summary=summary,
             raw_before=before,
+            raw_after="\n".join(cmds) + "\n",
+            commands=tuple(cmds),
+        )
+
+    async def render_ospf_change(self, change: OspfChange) -> ConfigDiff:
+        await asyncio.sleep(0)
+        neg = "no " if change.action == "delete" else ""
+        if change.target == "router-id":
+            cmds = ["router ospf", f"  {neg}router-id {change.router_id or ''}".rstrip()]
+            summary = f"{'Clear' if change.action == 'delete' else 'Set'} OSPF router-id"
+        else:  # interface
+            if change.action == "delete":
+                cmds = ["router ospf", f"  no interface {change.interface}"]
+            else:
+                cmds = [f"interface {change.interface}", f"  ip ospf area {change.area}"]
+                if change.cost is not None:
+                    cmds.append(f"  ip ospf cost {change.cost}")
+                if change.hello_interval is not None:
+                    cmds.append(f"  ip ospf hello-interval {change.hello_interval}")
+                if change.dead_interval is not None:
+                    cmds.append(f"  ip ospf dead-interval {change.dead_interval}")
+                if change.passive:
+                    cmds.append("  ip ospf passive")
+            summary = f"OSPF {change.action} interface {change.interface}"
+        return ConfigDiff(
+            summary=summary,
+            raw_before="! (prior ospf state)\n",
             raw_after="\n".join(cmds) + "\n",
             commands=tuple(cmds),
         )

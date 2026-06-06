@@ -59,6 +59,7 @@ from northbound.schemas.driver import (
     MacEntry,
     MgmtService,
     Neighbor,
+    OspfChange,
     PortChange,
     PortState,
     ProtocolDetail,
@@ -370,6 +371,19 @@ class Pica8Driver(Driver):
         return ConfigDiff(
             summary=f"{verb} VRF {change.name}",
             raw_before=f"<!-- vrf {change.name} prior state not captured -->",
+            raw_after=main,
+            commands=(main,),
+            metadata={_TOKEN_KEY: token},
+        )
+
+    async def render_ospf_change(self, change: OspfChange) -> ConfigDiff:
+        """Render an OSPFv2 change via NETCONF (`set protocols ospf ...`)."""
+        token = f"pica8-{uuid.uuid4().hex[:8]}"
+        main = _build_ospf_edit_config_xml(change)
+        what = "router-id" if change.target == "router-id" else f"interface {change.interface}"
+        return ConfigDiff(
+            summary=f"OSPF {change.action} {what}",
+            raw_before="<!-- ospf prior state not captured -->",
             raw_after=main,
             commands=(main,),
             metadata={_TOKEN_KEY: token},
@@ -1254,6 +1268,7 @@ _XORPLUS_VLAN_IFACE_NS = "http://pica8.com/xorplus/vlan-interface"
 # Grounded from a live get-config: `set ip vrf <name>` lives under <ip> in the
 # ip-routing namespace.
 _XORPLUS_IP_ROUTING_NS = "http://pica8.com/xorplus/ip-routing"
+_XORPLUS_OSPFV2_NS = "http://pica8.com/xorplus/ospfv2"
 
 
 def _build_edit_config_xml(port: str, change: PortChange) -> str:
@@ -1383,6 +1398,43 @@ def _build_vrf_edit_config_xml(change: VrfChange) -> str:
         vrf.set(f"{{{_NC_BASE_NS}}}operation", "delete")
     elif change.description:
         etree.SubElement(vrf, "description").text = change.description
+    return etree.tostring(cfg, pretty_print=True).decode("utf-8")
+
+
+def _build_ospf_edit_config_xml(change: OspfChange) -> str:
+    """Render an OSPFv2 change under the xorplus ``<ospf>`` tree.
+
+    Namespace + core structure grounded from a live get-config:
+        <ospf xmlns="http://pica8.com/xorplus/ospfv2">
+          <router-id>1.2.3.4</router-id>
+          <interface><name>vlan1010</name><area>0.0.0.0</area>
+            [<cost>][<hello-interval>][<dead-interval>][<passive>]</interface>
+        </ospf>
+    Interface name is the list key. delete tags the keyed node operation="delete".
+    """
+    cfg = etree.Element("config")
+    ospf = etree.SubElement(cfg, "ospf", nsmap={None: _XORPLUS_OSPFV2_NS})
+    if change.target == "router-id":
+        rid = etree.SubElement(ospf, "router-id")
+        if change.action == "delete":
+            rid.set(f"{{{_NC_BASE_NS}}}operation", "delete")
+        else:
+            rid.text = change.router_id
+    else:  # interface
+        iface = etree.SubElement(ospf, "interface")
+        etree.SubElement(iface, "name").text = change.interface
+        if change.action == "delete":
+            iface.set(f"{{{_NC_BASE_NS}}}operation", "delete")
+        else:
+            etree.SubElement(iface, "area").text = change.area
+            if change.cost is not None:
+                etree.SubElement(iface, "cost").text = str(change.cost)
+            if change.hello_interval is not None:
+                etree.SubElement(iface, "hello-interval").text = str(change.hello_interval)
+            if change.dead_interval is not None:
+                etree.SubElement(iface, "dead-interval").text = str(change.dead_interval)
+            if change.passive is not None:
+                etree.SubElement(iface, "passive").text = "true" if change.passive else "false"
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
 
 

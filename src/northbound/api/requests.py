@@ -21,11 +21,12 @@ from northbound.models.change_request import ChangeRequest
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus, UserRole
 from northbound.models.user import User
-from northbound.schemas.driver import L3Change, VlanChange, VrfChange
+from northbound.schemas.driver import L3Change, OspfChange, VlanChange, VrfChange
 from northbound.schemas.request import (
     RequestChangesIn,
     RequestCreateIn,
     RequestL3In,
+    RequestOspfIn,
     RequestOut,
     RequestRejectIn,
     RequestResubmitIn,
@@ -110,6 +111,38 @@ async def create_vlan_request(
         change=change,
         reason=body.reason,
         user=user,
+    )
+    return await _request_out(session, req)
+
+
+@router.post("/ospf", response_model=RequestOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def create_ospf_request(
+    request: Request,
+    body: RequestOspfIn,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """File an OSPFv2 config-change request. 403 read-only; 422 if inconsistent."""
+    device = await _load_device(session, body.device_id)
+    try:
+        change = OspfChange(
+            action=body.action,
+            target=body.target,
+            router_id=body.router_id,
+            interface=body.interface,
+            area=body.area,
+            cost=body.cost,
+            hello_interval=body.hello_interval,
+            dead_interval=body.dead_interval,
+            passive=body.passive,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    req = await requests.create_ospf_request(
+        session, device=device, change=change, reason=body.reason, user=user
     )
     return await _request_out(session, req)
 

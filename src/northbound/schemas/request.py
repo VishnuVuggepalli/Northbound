@@ -31,6 +31,22 @@ class RequestVlanIn(BaseModel):
     reason: str = Field(default="", max_length=2000)
 
 
+class RequestOspfIn(BaseModel):
+    """Body of ``POST /api/requests/ospf`` — file an OSPFv2 config change."""
+
+    device_id: str = Field(min_length=1, max_length=36)
+    action: Literal["set", "delete"]
+    target: Literal["router-id", "interface"]
+    router_id: str | None = Field(default=None, max_length=15)
+    interface: str | None = Field(default=None, max_length=64)
+    area: str | None = Field(default=None, max_length=15)
+    cost: int | None = Field(default=None, ge=1, le=65535)
+    hello_interval: int | None = Field(default=None, ge=1, le=65535)
+    dead_interval: int | None = Field(default=None, ge=1, le=65535)
+    passive: bool | None = None
+    reason: str = Field(default="", max_length=2000)
+
+
 class RequestVrfIn(BaseModel):
     """Body of ``POST /api/requests/vrf`` — file a VRF create/delete."""
 

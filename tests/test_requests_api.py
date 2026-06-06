@@ -605,3 +605,47 @@ async def test_vrf_read_only_device_403(
         json={"device_id": router.id, "action": "create", "name": "x"},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_ospf_interface_full_lifecycle(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/ospf",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "set", "target": "interface",
+              "interface": "vlan1010", "area": "0.0.0.0", "cost": 10},
+    )
+    assert created.status_code == 201
+    rid = created.json()["id"]
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    assert "ospf area 0.0.0.0" in applied.json()["diff_text"]
+
+
+@pytest.mark.asyncio
+async def test_ospf_interface_without_area_422(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    resp = await client.post(
+        "/api/requests/ospf",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "set", "target": "interface", "interface": "vlan1010"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_ospf_read_only_device_403(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, _, router = seeded
+    resp = await client.post(
+        "/api/requests/ospf",
+        headers=_bearer(alice),
+        json={"device_id": router.id, "action": "set", "target": "router-id", "router_id": "1.1.1.1"},
+    )
+    assert resp.status_code == 403
