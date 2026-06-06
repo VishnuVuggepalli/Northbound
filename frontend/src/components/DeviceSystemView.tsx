@@ -46,6 +46,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [addingVlan, setAddingVlan] = useState(false);
   const [newVid, setNewVid] = useState('');
   const [newName, setNewName] = useState('');
+  const [newDesc, setNewDesc] = useState('');
   const [deleteVid, setDeleteVid] = useState<number | null>(null);
   const createL3 = useCreateL3Request();
   const [addingL3, setAddingL3] = useState(false);
@@ -53,6 +54,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [l3Vid, setL3Vid] = useState('');
   const [l3Name, setL3Name] = useState('');
   const [l3Ip, setL3Ip] = useState('');
+  const [l3Mtu, setL3Mtu] = useState('');
   // A VLAN write must be filed as a change request; only on a writable device.
   const canWriteVlan = device.writable !== false && device.writes_enabled !== false;
 
@@ -244,6 +246,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                   pushToast({ kind: 'error', title: 'SVI needs a VLAN id' });
                   return;
                 }
+                const mtu = Number.parseInt(l3Mtu, 10);
                 createL3.mutate(
                   {
                     device_id: device.id,
@@ -252,6 +255,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                     vlan_id: l3Kind === 'svi' ? vid : undefined,
                     name: l3Kind === 'loopback' ? l3Name || undefined : undefined,
                     ipv4: l3Ip.trim(),
+                    mtu: Number.isFinite(mtu) ? mtu : undefined,
                   },
                   {
                     onSuccess: () => {
@@ -264,6 +268,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                       setL3Vid('');
                       setL3Name('');
                       setL3Ip('');
+                      setL3Mtu('');
                     },
                     onError: (err: unknown) =>
                       pushToast({
@@ -319,6 +324,18 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                   className="h-8 w-44"
                   placeholder="10.10.250.2/16"
                   required
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                MTU (optional)
+                <Input
+                  type="number"
+                  min={64}
+                  max={16360}
+                  value={l3Mtu}
+                  onChange={(e) => setL3Mtu(e.target.value)}
+                  className="h-8 w-24"
+                  placeholder="1500"
                 />
               </label>
               <Button type="submit" kind="primary" size="sm" disabled={createL3.isPending}>
@@ -440,7 +457,13 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                 return;
               }
               createVlan.mutate(
-                { device_id: device.id, action: 'create', vlan_id: vid, name: newName || undefined },
+                {
+                  device_id: device.id,
+                  action: 'create',
+                  vlan_id: vid,
+                  name: newName || undefined,
+                  description: newDesc || undefined,
+                },
                 {
                   onSuccess: () => {
                     pushToast({
@@ -451,6 +474,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                     setAddingVlan(false);
                     setNewVid('');
                     setNewName('');
+                    setNewDesc('');
                   },
                   onError: (err: unknown) =>
                     pushToast({
@@ -480,8 +504,17 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
               <Input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                className="h-8 w-48"
+                className="h-8 w-40"
                 placeholder="e.g. web-tier"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-fg-muted">
+              Description (optional)
+              <Input
+                value={newDesc}
+                onChange={(e) => setNewDesc(e.target.value)}
+                className="h-8 w-48"
+                placeholder="free text"
               />
             </label>
             <Button type="submit" kind="primary" size="sm" disabled={createVlan.isPending}>

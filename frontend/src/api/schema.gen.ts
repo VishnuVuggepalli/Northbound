@@ -1614,6 +1614,12 @@ export interface components {
             vlan_id?: number | null;
             /** Ipv4 */
             ipv4?: string | null;
+            /** Mtu */
+            mtu?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Dhcp */
+            dhcp?: boolean | null;
             /**
              * Reason
              * @default
@@ -1698,6 +1704,8 @@ export interface components {
             vlan_id: number;
             /** Name */
             name?: string | null;
+            /** Description */
+            description?: string | null;
             /**
              * Reason
              * @default

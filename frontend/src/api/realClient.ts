@@ -505,6 +505,7 @@ export async function createVlanRequest(input: {
   action: 'create' | 'delete';
   vlan_id: number;
   name?: string;
+  description?: string;
   reason?: string;
 }): Promise<ChangeRequest> {
   const req = await request<RequestOut>('/api/requests/vlan', { method: 'POST', body: input });
@@ -519,6 +520,9 @@ export async function createL3Request(input: {
   name?: string;
   vlan_id?: number;
   ipv4?: string;
+  mtu?: number;
+  enabled?: boolean;
+  dhcp?: boolean;
   reason?: string;
 }): Promise<ChangeRequest> {
   const req = await request<RequestOut>('/api/requests/l3', { method: 'POST', body: input });
