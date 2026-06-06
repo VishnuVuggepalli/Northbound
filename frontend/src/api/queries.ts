@@ -241,6 +241,14 @@ export function useCreateVlanRequest() {
   });
 }
 
+export function useCreateL3Request() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createL3Request,
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
 export function useApproveRequest() {
   const qc = useQueryClient();
   return useMutation({

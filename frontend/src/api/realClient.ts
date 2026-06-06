@@ -511,6 +511,20 @@ export async function createVlanRequest(input: {
   return mapRequest(req);
 }
 
+/** File a routed-interface (SVI / loopback) change request. */
+export async function createL3Request(input: {
+  device_id: string;
+  action: 'create' | 'delete';
+  kind: 'svi' | 'loopback';
+  name?: string;
+  vlan_id?: number;
+  ipv4?: string;
+  reason?: string;
+}): Promise<ChangeRequest> {
+  const req = await request<RequestOut>('/api/requests/l3', { method: 'POST', body: input });
+  return mapRequest(req);
+}
+
 export async function approveRequest(id: string, _reviewer: string): Promise<ChangeRequest> {
   const req = await request<RequestOut>(
     `/api/requests/${encodeURIComponent(id)}/approve`,

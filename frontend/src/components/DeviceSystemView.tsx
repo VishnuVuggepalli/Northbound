@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Activity, ChevronDown, ChevronRight, Cpu, Layers, Loader2, Network, Router, ShieldCheck, Table2 } from 'lucide-react';
 import {
+  useCreateL3Request,
   useCreateVlanRequest,
   useL3Interfaces,
   useProtocolDetail,
@@ -46,6 +47,12 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [newVid, setNewVid] = useState('');
   const [newName, setNewName] = useState('');
   const [deleteVid, setDeleteVid] = useState<number | null>(null);
+  const createL3 = useCreateL3Request();
+  const [addingL3, setAddingL3] = useState(false);
+  const [l3Kind, setL3Kind] = useState<'svi' | 'loopback'>('svi');
+  const [l3Vid, setL3Vid] = useState('');
+  const [l3Name, setL3Name] = useState('');
+  const [l3Ip, setL3Ip] = useState('');
   // A VLAN write must be filed as a change request; only on a writable device.
   const canWriteVlan = device.writable !== false && device.writes_enabled !== false;
 
@@ -210,8 +217,122 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
               <span className="nb-mono ml-1 text-xs text-fg-subtle">{l3.length}</span>
             </SectionTitle>
           }
+          right={
+            canWriteVlan ? (
+              <Button
+                kind="outline"
+                size="sm"
+                leftIcon={<Plus size={13} />}
+                onClick={() => setAddingL3((v) => !v)}
+              >
+                Add L3
+              </Button>
+            ) : undefined
+          }
         >
-          {l3.length === 0 ? (
+          {addingL3 && (
+            <form
+              className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-accent/30 bg-accent-soft p-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!l3Ip.trim()) {
+                  pushToast({ kind: 'error', title: 'IPv4 (CIDR) is required' });
+                  return;
+                }
+                const vid = Number.parseInt(l3Vid, 10);
+                if (l3Kind === 'svi' && !Number.isFinite(vid)) {
+                  pushToast({ kind: 'error', title: 'SVI needs a VLAN id' });
+                  return;
+                }
+                createL3.mutate(
+                  {
+                    device_id: device.id,
+                    action: 'create',
+                    kind: l3Kind,
+                    vlan_id: l3Kind === 'svi' ? vid : undefined,
+                    name: l3Kind === 'loopback' ? l3Name || undefined : undefined,
+                    ipv4: l3Ip.trim(),
+                  },
+                  {
+                    onSuccess: () => {
+                      pushToast({
+                        kind: 'success',
+                        title: 'L3 change requested',
+                        message: `Create ${l3Kind} — pending approval`,
+                      });
+                      setAddingL3(false);
+                      setL3Vid('');
+                      setL3Name('');
+                      setL3Ip('');
+                    },
+                    onError: (err: unknown) =>
+                      pushToast({
+                        kind: 'error',
+                        title: 'Could not file request',
+                        message: err instanceof Error ? err.message : 'Failed',
+                      }),
+                  },
+                );
+              }}
+            >
+              <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                Kind
+                <select
+                  value={l3Kind}
+                  onChange={(e) => setL3Kind(e.target.value as 'svi' | 'loopback')}
+                  className="h-8 rounded-md border border-border bg-bg-elev-1 px-2 text-xs text-fg"
+                >
+                  <option value="svi">SVI (VLAN interface)</option>
+                  <option value="loopback">Loopback</option>
+                </select>
+              </label>
+              {l3Kind === 'svi' ? (
+                <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                  VLAN id
+                  <Input
+                    type="number"
+                    min={1}
+                    max={4094}
+                    value={l3Vid}
+                    onChange={(e) => setL3Vid(e.target.value)}
+                    className="h-8 w-28"
+                    required
+                  />
+                </label>
+              ) : (
+                <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                  Name
+                  <Input
+                    value={l3Name}
+                    onChange={(e) => setL3Name(e.target.value)}
+                    className="h-8 w-32"
+                    placeholder="lo0"
+                    required
+                  />
+                </label>
+              )}
+              <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                IPv4 (CIDR)
+                <Input
+                  value={l3Ip}
+                  onChange={(e) => setL3Ip(e.target.value)}
+                  className="h-8 w-44"
+                  placeholder="10.10.250.2/16"
+                  required
+                />
+              </label>
+              <Button type="submit" kind="primary" size="sm" disabled={createL3.isPending}>
+                {createL3.isPending ? 'Filing…' : 'Request L3'}
+              </Button>
+              <Button type="button" kind="ghost" size="sm" onClick={() => setAddingL3(false)}>
+                Cancel
+              </Button>
+              <span className="basis-full text-[11px] text-fg-subtle">
+                Files a change request — admin approves &amp; applies (commit-confirm).
+              </span>
+            </form>
+          )}
+          {l3.length === 0 && !addingL3 ? (
             <p className="px-1 text-xs text-fg-subtle">No addressed interfaces reported.</p>
           ) : (
             <div className="px-1">

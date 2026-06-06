@@ -678,6 +678,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/requests/l3": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create L3 Request
+         * @description File a routed-interface change request (SVI / loopback). 403 if read-only.
+         *
+         *     422 if the L3 intent is internally inconsistent (e.g. svi without vlan_id,
+         *     create without ipv4) — validated by the L3Change model.
+         */
+        post: operations["create_l3_request_api_requests_l3_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/requests/{request_id}": {
         parameters: {
             query?: never;
@@ -1562,6 +1585,35 @@ export interface components {
             /** Port Name */
             port_name: string;
             requested_changes: components["schemas"]["PortChange"];
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * RequestL3In
+         * @description Body of ``POST /api/requests/l3`` — file a routed-interface change.
+         */
+        RequestL3In: {
+            /** Device Id */
+            device_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "create" | "delete";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "svi" | "loopback";
+            /** Name */
+            name?: string | null;
+            /** Vlan Id */
+            vlan_id?: number | null;
+            /** Ipv4 */
+            ipv4?: string | null;
             /**
              * Reason
              * @default
@@ -2927,6 +2979,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RequestVlanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_l3_request_api_requests_l3_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestL3In"];
             };
         };
         responses: {
