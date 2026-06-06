@@ -68,6 +68,7 @@ from northbound.schemas.driver import (
     TestResult,
     VlanChange,
     VlanInfo,
+    VrfChange,
 )
 
 # ConfigDiff metadata keys (kept here to avoid magic strings).
@@ -356,6 +357,19 @@ class Pica8Driver(Driver):
         return ConfigDiff(
             summary=f"{verb} {label} {change.iface_name}",
             raw_before=f"<!-- {change.iface_name} prior state not captured -->",
+            raw_after=main,
+            commands=(main,),
+            metadata={_TOKEN_KEY: token},
+        )
+
+    async def render_vrf_change(self, change: VrfChange) -> ConfigDiff:
+        """Render a VRF create/delete via NETCONF (`set ip vrf <name>`)."""
+        token = f"pica8-{uuid.uuid4().hex[:8]}"
+        main = _build_vrf_edit_config_xml(change)
+        verb = "Create" if change.action == "create" else "Delete"
+        return ConfigDiff(
+            summary=f"{verb} VRF {change.name}",
+            raw_before=f"<!-- vrf {change.name} prior state not captured -->",
             raw_after=main,
             commands=(main,),
             metadata={_TOKEN_KEY: token},
@@ -1237,6 +1251,9 @@ _XORPLUS_VLANS_NS = "http://pica8.com/xorplus/vlans"
 # Grounded against a live get-config: the <l3-interface> element (SVIs) lives in
 # the vlan-interface namespace, NOT a "l3-interface" one.
 _XORPLUS_VLAN_IFACE_NS = "http://pica8.com/xorplus/vlan-interface"
+# Grounded from a live get-config: `set ip vrf <name>` lives under <ip> in the
+# ip-routing namespace.
+_XORPLUS_IP_ROUTING_NS = "http://pica8.com/xorplus/ip-routing"
 
 
 def _build_edit_config_xml(port: str, change: PortChange) -> str:
@@ -1348,6 +1365,24 @@ def _build_l3_edit_config_xml(change: L3Change) -> str:
             etree.SubElement(iface, "disable").text = "false" if change.enabled else "true"
         if change.dhcp is not None:
             etree.SubElement(iface, "dhcp").text = "true" if change.dhcp else "false"
+    return etree.tostring(cfg, pretty_print=True).decode("utf-8")
+
+
+def _build_vrf_edit_config_xml(change: VrfChange) -> str:
+    """Render a VRF create/delete (`set ip vrf <name> [description]`).
+
+    Namespace grounded from a live get-config (<ip xmlns=.../ip-routing>); the
+    ip>vrf>name path is from the PicOS CLI. ``<name>`` is the list key. Create
+    merges name+description; delete tags the keyed <vrf> with operation="delete".
+    """
+    cfg = etree.Element("config")
+    ip = etree.SubElement(cfg, "ip", nsmap={None: _XORPLUS_IP_ROUTING_NS})
+    vrf = etree.SubElement(ip, "vrf")
+    etree.SubElement(vrf, "name").text = change.name
+    if change.action == "delete":
+        vrf.set(f"{{{_NC_BASE_NS}}}operation", "delete")
+    elif change.description:
+        etree.SubElement(vrf, "description").text = change.description
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
 
 

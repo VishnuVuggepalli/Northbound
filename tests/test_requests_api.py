@@ -574,3 +574,34 @@ async def test_l3_read_only_device_403(
         },
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_vrf_create_full_lifecycle(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/vrf",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "create", "name": "tenant-a", "description": "prod"},
+    )
+    assert created.status_code == 201
+    assert created.json()["port_name"] == ""
+    rid = created.json()["id"]
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    assert "ip vrf tenant-a" in applied.json()["diff_text"]
+
+
+@pytest.mark.asyncio
+async def test_vrf_read_only_device_403(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, _, router = seeded
+    resp = await client.post(
+        "/api/requests/vrf",
+        headers=_bearer(alice),
+        json={"device_id": router.id, "action": "create", "name": "x"},
+    )
+    assert resp.status_code == 403

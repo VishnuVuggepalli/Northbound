@@ -3,6 +3,7 @@ import { Activity, ChevronDown, ChevronRight, Cpu, Layers, Loader2, Network, Rou
 import {
   useCreateL3Request,
   useCreateVlanRequest,
+  useCreateVrfRequest,
   useL3Interfaces,
   useProtocolDetail,
   useSystemInfo,
@@ -56,6 +57,10 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [l3Ip, setL3Ip] = useState('');
   const [l3Mtu, setL3Mtu] = useState('');
   const [l3Vrf, setL3Vrf] = useState('');
+  const createVrf = useCreateVrfRequest();
+  const [addingVrf, setAddingVrf] = useState(false);
+  const [vrfName, setVrfName] = useState('');
+  const [vrfDesc, setVrfDesc] = useState('');
   // A VLAN write must be filed as a change request; only on a writable device.
   const canWriteVlan = device.writable !== false && device.writes_enabled !== false;
 
@@ -222,17 +227,92 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
           }
           right={
             canWriteVlan ? (
-              <Button
-                kind="outline"
-                size="sm"
-                leftIcon={<Plus size={13} />}
-                onClick={() => setAddingL3((v) => !v)}
-              >
-                Add L3
-              </Button>
+              <span className="flex items-center gap-2">
+                <Button
+                  kind="outline"
+                  size="sm"
+                  leftIcon={<Plus size={13} />}
+                  onClick={() => setAddingVrf((v) => !v)}
+                >
+                  Add VRF
+                </Button>
+                <Button
+                  kind="outline"
+                  size="sm"
+                  leftIcon={<Plus size={13} />}
+                  onClick={() => setAddingL3((v) => !v)}
+                >
+                  Add L3
+                </Button>
+              </span>
             ) : undefined
           }
         >
+          {addingVrf && (
+            <form
+              className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-accent/30 bg-accent-soft p-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!vrfName.trim()) {
+                  pushToast({ kind: 'error', title: 'VRF name is required' });
+                  return;
+                }
+                createVrf.mutate(
+                  {
+                    device_id: device.id,
+                    action: 'create',
+                    name: vrfName.trim(),
+                    description: vrfDesc || undefined,
+                  },
+                  {
+                    onSuccess: () => {
+                      pushToast({
+                        kind: 'success',
+                        title: 'VRF change requested',
+                        message: `Create VRF ${vrfName.trim()} — pending approval`,
+                      });
+                      setAddingVrf(false);
+                      setVrfName('');
+                      setVrfDesc('');
+                    },
+                    onError: (err: unknown) =>
+                      pushToast({
+                        kind: 'error',
+                        title: 'Could not file request',
+                        message: err instanceof Error ? err.message : 'Failed',
+                      }),
+                  },
+                );
+              }}
+            >
+              <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                VRF name
+                <Input
+                  value={vrfName}
+                  onChange={(e) => setVrfName(e.target.value)}
+                  className="h-8 w-40"
+                  placeholder="tenant-a"
+                  autoFocus
+                  required
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                Description (optional)
+                <Input
+                  value={vrfDesc}
+                  onChange={(e) => setVrfDesc(e.target.value)}
+                  className="h-8 w-48"
+                  placeholder="free text"
+                />
+              </label>
+              <Button type="submit" kind="primary" size="sm" disabled={createVrf.isPending}>
+                {createVrf.isPending ? 'Filing…' : 'Request VRF'}
+              </Button>
+              <Button type="button" kind="ghost" size="sm" onClick={() => setAddingVrf(false)}>
+                Cancel
+              </Button>
+            </form>
+          )}
           {addingL3 && (
             <form
               className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-accent/30 bg-accent-soft p-3"

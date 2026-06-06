@@ -281,6 +281,14 @@ class VlanChange(BaseModel):
     description: str | None = Field(default=None, max_length=255)
 
 
+class VrfChange(BaseModel):
+    """Device-level VRF create/delete (`set ip vrf <name> [description]`)."""
+
+    action: Literal["create", "delete"]
+    name: str = Field(min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=255)
+
+
 class L3Change(BaseModel):
     """A routed-interface change: create/delete an SVI (VLAN interface) or a
     loopback, with an optional IPv4 address.

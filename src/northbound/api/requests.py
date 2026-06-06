@@ -21,7 +21,7 @@ from northbound.models.change_request import ChangeRequest
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus, UserRole
 from northbound.models.user import User
-from northbound.schemas.driver import L3Change, VlanChange
+from northbound.schemas.driver import L3Change, VlanChange, VrfChange
 from northbound.schemas.request import (
     RequestChangesIn,
     RequestCreateIn,
@@ -30,6 +30,7 @@ from northbound.schemas.request import (
     RequestRejectIn,
     RequestResubmitIn,
     RequestVlanIn,
+    RequestVrfIn,
 )
 from northbound.services import change_apply, requests
 from northbound.services.change_apply import ApplyError, ApplyFailed, StateDrift
@@ -109,6 +110,23 @@ async def create_vlan_request(
         change=change,
         reason=body.reason,
         user=user,
+    )
+    return await _request_out(session, req)
+
+
+@router.post("/vrf", response_model=RequestOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def create_vrf_request(
+    request: Request,
+    body: RequestVrfIn,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """File a VRF create/delete request. 403 if the device is read-only."""
+    device = await _load_device(session, body.device_id)
+    change = VrfChange(action=body.action, name=body.name, description=body.description)
+    req = await requests.create_vrf_request(
+        session, device=device, change=change, reason=body.reason, user=user
     )
     return await _request_out(session, req)
 

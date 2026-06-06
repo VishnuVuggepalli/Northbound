@@ -249,6 +249,14 @@ export function useCreateL3Request() {
   });
 }
 
+export function useCreateVrfRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createVrfRequest,
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
 export function useApproveRequest() {
   const qc = useQueryClient();
   return useMutation({

@@ -31,6 +31,7 @@ from northbound.schemas.driver import (
     PortState,
     TestResult,
     VlanChange,
+    VrfChange,
 )
 
 
@@ -218,6 +219,25 @@ class MockDriver(Driver):
             cmds = [f"no interface {name}"]
             summary = f"Delete {change.kind} {name}"
             before = f"interface {name}\n"
+        return ConfigDiff(
+            summary=summary,
+            raw_before=before,
+            raw_after="\n".join(cmds) + "\n",
+            commands=tuple(cmds),
+        )
+
+    async def render_vrf_change(self, change: VrfChange) -> ConfigDiff:
+        await asyncio.sleep(0)
+        if change.action == "create":
+            cmds = [f"ip vrf {change.name}"]
+            if change.description:
+                cmds.append(f"  description {change.description}")
+            summary = f"Create VRF {change.name}"
+            before = f"! vrf {change.name} absent\n"
+        else:
+            cmds = [f"no ip vrf {change.name}"]
+            summary = f"Delete VRF {change.name}"
+            before = f"ip vrf {change.name}\n"
         return ConfigDiff(
             summary=summary,
             raw_before=before,

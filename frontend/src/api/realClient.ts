@@ -512,6 +512,18 @@ export async function createVlanRequest(input: {
   return mapRequest(req);
 }
 
+/** File a VRF create/delete change request. */
+export async function createVrfRequest(input: {
+  device_id: string;
+  action: 'create' | 'delete';
+  name: string;
+  description?: string;
+  reason?: string;
+}): Promise<ChangeRequest> {
+  const req = await request<RequestOut>('/api/requests/vrf', { method: 'POST', body: input });
+  return mapRequest(req);
+}
+
 /** File a routed-interface (SVI / loopback) change request. */
 export async function createL3Request(input: {
   device_id: string;

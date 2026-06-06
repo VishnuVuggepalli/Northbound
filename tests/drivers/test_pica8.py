@@ -877,3 +877,18 @@ async def test_apply_change_fails_when_device_does_not_apply() -> None:
     result = await drv.apply_change(diff)
     assert result.success is False
     assert "not fully applied" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_render_vrf_create_and_delete() -> None:
+    from northbound.schemas.driver import VrfChange
+
+    drv, _ = _make_driver()
+    c = await drv.render_vrf_change(VrfChange(action="create", name="tenant-a", description="prod"))
+    root = etree.fromstring(c.commands[0].encode())
+    assert root.find("{http://pica8.com/xorplus/ip-routing}ip") is not None
+    assert root.findtext(".//{*}name") == "tenant-a"
+    assert root.findtext(".//{*}description") == "prod"
+    d = await drv.render_vrf_change(VrfChange(action="delete", name="tenant-a"))
+    vrf = etree.fromstring(d.commands[0].encode()).find(".//{*}vrf")
+    assert vrf.get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation") == "delete"

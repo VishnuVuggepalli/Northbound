@@ -31,6 +31,16 @@ class RequestVlanIn(BaseModel):
     reason: str = Field(default="", max_length=2000)
 
 
+class RequestVrfIn(BaseModel):
+    """Body of ``POST /api/requests/vrf`` — file a VRF create/delete."""
+
+    device_id: str = Field(min_length=1, max_length=36)
+    action: Literal["create", "delete"]
+    name: str = Field(min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=255)
+    reason: str = Field(default="", max_length=2000)
+
+
 class RequestL3In(BaseModel):
     """Body of ``POST /api/requests/l3`` — file a routed-interface change."""
 

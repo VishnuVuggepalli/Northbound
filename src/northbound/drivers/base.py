@@ -27,6 +27,7 @@ from northbound.schemas.driver import (
     TestResult,
     VlanChange,
     VlanInfo,
+    VrfChange,
 )
 
 
@@ -148,6 +149,10 @@ class Driver(ABC):
         """Render a routed-interface (SVI / loopback) create/delete. Default:
         unsupported — drivers that can write L3 config override this."""
         raise NotSupported(f"{self.platform_id}: render_l3_change not supported")
+
+    async def render_vrf_change(self, change: VrfChange) -> ConfigDiff:
+        """Render a VRF create/delete. Default: unsupported."""
+        raise NotSupported(f"{self.platform_id}: render_vrf_change not supported")
 
     async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
         raise NotSupported(f"{self.platform_id}: apply_change not supported")
