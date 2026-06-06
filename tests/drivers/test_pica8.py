@@ -32,6 +32,7 @@ from northbound.schemas.driver import (
     Credentials,
     PortChange,
     PortState,
+    VlanChange,
 )
 
 _FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "pica8"
@@ -226,6 +227,41 @@ async def test_render_change_access_is_single_phase() -> None:
     drv, _ = _make_driver()
     diff = await drv.render_change("ge-1/1/1", PortChange(port_mode="access", untagged_vlan=10))
     assert len(diff.commands) == 1
+
+
+@pytest.mark.asyncio
+async def test_render_vlan_create() -> None:
+    drv, _ = _make_driver()
+    diff = await drv.render_vlan_change(VlanChange(action="create", vlan_id=1234, name="web"))
+    assert len(diff.commands) == 1
+    root = etree.fromstring(diff.commands[0].encode())
+    assert root.find(".//{http://pica8.com/xorplus/vlans}vlans") is not None
+    assert root.findtext(".//{*}id") == "1234"
+    assert root.findtext(".//{*}vlan-name") == "web"
+    assert "Create VLAN 1234" in diff.summary
+    # No port metadata → apply_change skips the port-level readback verify.
+    assert "port_name" not in diff.metadata
+
+
+@pytest.mark.asyncio
+async def test_render_vlan_create_defaults_name_to_id() -> None:
+    drv, _ = _make_driver()
+    diff = await drv.render_vlan_change(VlanChange(action="create", vlan_id=77))
+    root = etree.fromstring(diff.commands[0].encode())
+    assert root.findtext(".//{*}vlan-name") == "77"
+
+
+@pytest.mark.asyncio
+async def test_render_vlan_delete_tags_operation() -> None:
+    drv, _ = _make_driver()
+    diff = await drv.render_vlan_change(VlanChange(action="delete", vlan_id=1234))
+    root = etree.fromstring(diff.commands[0].encode())
+    vid = root.find(".//{*}vlan-id")
+    assert vid is not None
+    assert vid.get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation") == "delete"
+    assert vid.findtext("{*}id") == "1234"
+    # The literal operation="delete" drives apply_change's default-operation="none".
+    assert 'operation="delete"' in diff.commands[0]
 
 
 def test_render_change_inferred_empty_tagged_is_access() -> None:

@@ -65,6 +65,7 @@ from northbound.schemas.driver import (
     ProtocolTable,
     SystemInfo,
     TestResult,
+    VlanChange,
     VlanInfo,
 )
 
@@ -323,6 +324,23 @@ class Pica8Driver(Driver):
             # Stash the port + intent so apply_change can read the config back and
             # verify the device actually applied it (see _verify_applied).
             metadata={_TOKEN_KEY: token, _PORT_KEY: port, _INTENT_KEY: change.model_dump_json()},
+        )
+
+    async def render_vlan_change(self, change: VlanChange) -> ConfigDiff:
+        """Render a VLAN-database create/delete as a xorplus ``<vlans>`` edit.
+
+        No ``_PORT_KEY`` in metadata, so apply_change's port-level readback verify
+        is skipped — a clean commit IS the success signal for a VLAN-db write.
+        """
+        token = f"pica8-{uuid.uuid4().hex[:8]}"
+        main = _build_vlan_edit_config_xml(change)
+        verb = "Create" if change.action == "create" else "Delete"
+        return ConfigDiff(
+            summary=f"{verb} VLAN {change.vlan_id}",
+            raw_before=f"<!-- vlan {change.vlan_id} prior state not captured -->",
+            raw_after=main,
+            commands=(main,),
+            metadata={_TOKEN_KEY: token},
         )
 
     async def apply_change(
@@ -1197,6 +1215,7 @@ def _parse_mac_table(text: str) -> tuple[MacEntry, ...]:
 # "no device/data that could be affected" on edit-config.
 _XORPLUS_IFACE_NS = "http://pica8.com/xorplus/interface"
 _NC_BASE_NS = "urn:ietf:params:xml:ns:netconf:base:1.0"
+_XORPLUS_VLANS_NS = "http://pica8.com/xorplus/vlans"
 
 
 def _build_edit_config_xml(port: str, change: PortChange) -> str:
@@ -1226,6 +1245,28 @@ def _build_edit_config_xml(port: str, change: PortChange) -> str:
         # xorplus models admin-down as <disable>; enabled=True -> disable=false.
         etree.SubElement(ge, "disable").text = "false" if change.enabled else "true"
     _append_switching(ge, change)
+    return etree.tostring(cfg, pretty_print=True).decode("utf-8")
+
+
+def _build_vlan_edit_config_xml(change: VlanChange) -> str:
+    """Render a xorplus ``<vlans>`` edit for a VLAN-database create/delete.
+
+    Schema (verified against a live get-config):
+        <vlans xmlns="http://pica8.com/xorplus/vlans">
+          <vlan-id><id>1010</id><vlan-name>web</vlan-name></vlan-id>
+        </vlans>
+    ``<id>`` is the list key. Create merges the entry; delete tags the keyed
+    node with NETCONF operation="delete" (apply_change runs it under
+    default-operation="none" so only the tagged node acts).
+    """
+    cfg = etree.Element("config")
+    vlans = etree.SubElement(cfg, "vlans", nsmap={None: _XORPLUS_VLANS_NS})
+    vlan_id = etree.SubElement(vlans, "vlan-id")
+    etree.SubElement(vlan_id, "id").text = str(change.vlan_id)
+    if change.action == "delete":
+        vlan_id.set(f"{{{_NC_BASE_NS}}}operation", "delete")
+    else:  # create — xorplus requires a name; default it to the id when unset
+        etree.SubElement(vlan_id, "vlan-name").text = change.name or str(change.vlan_id)
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
 
 
