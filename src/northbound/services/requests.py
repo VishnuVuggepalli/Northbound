@@ -42,7 +42,10 @@ from northbound.services.device_policy import assert_writable
 
 # Legal transitions: from_status -> set of permitted to_status.
 _LEGAL: dict[S, frozenset[S]] = {
-    S.PENDING: frozenset({S.APPROVED, S.REJECTED, S.APPLYING}),
+    S.PENDING: frozenset({S.APPROVED, S.REJECTED, S.APPLYING, S.NEEDS_REVISION}),
+    # Requester resubmits (→ PENDING) or it's rejected outright. NEEDS_REVISION is
+    # NOT terminal — that's what makes the review loop two-way.
+    S.NEEDS_REVISION: frozenset({S.PENDING, S.REJECTED}),
     S.APPROVED: frozenset({S.APPLYING, S.REJECTED}),
     S.APPLYING: frozenset({S.AWAITING_CONFIRM, S.APPLIED, S.FAILED}),
     S.AWAITING_CONFIRM: frozenset({S.APPLIED, S.FAILED, S.REVERTED}),
@@ -306,6 +309,88 @@ async def reject_request(
         target_device_id=request.device_id,
         target_port=request.port_name,
         after={"comment": comment},
+        result="ok",
+    )
+    await session.flush()
+    return request
+
+
+async def request_changes(
+    session: AsyncSession,
+    request: ChangeRequest,
+    reviewer: User,
+    comment: str,
+) -> ChangeRequest:
+    """pending → needs_revision. Admin asks the requester to revise instead of a
+    hard reject; ``comment`` (what to change / why) is required."""
+    if not comment or not comment.strip():
+        raise RequestError("a comment explaining the requested changes is required")
+
+    await record_transition(
+        session,
+        request,
+        to_status=S.NEEDS_REVISION,
+        actor=reviewer.id,
+        payload={"comment": comment},
+    )
+    request.reviewer_id = reviewer.id
+    request.reviewer_comment = comment
+    request.reviewed_at = dt.datetime.now(tz=dt.UTC)
+    session.add(request)
+    await audit.append_audit(
+        session,
+        user_id=reviewer.id,
+        action="request.changes_requested",
+        target_device_id=request.device_id,
+        target_port=request.port_name,
+        after={"comment": comment},
+        result="ok",
+    )
+    await session.flush()
+    return request
+
+
+async def resubmit_request(
+    session: AsyncSession,
+    request: ChangeRequest,
+    requester: User,
+    *,
+    device: Device,
+    requested_changes: PortChange | None = None,
+    reason: str | None = None,
+) -> ChangeRequest:
+    """needs_revision → pending. The owner revises and resubmits for review.
+
+    If ``requested_changes`` is supplied the request is updated and its drift
+    fingerprint is re-captured (the device may have moved on while in revision).
+    """
+    assert_writable(device)
+    if requested_changes is not None:
+        request.requested_changes = requested_changes.model_dump(exclude_none=False)
+        request.device_state_fingerprint = await port_state.current_fingerprint(
+            device, refresh=True
+        )
+    if reason is not None:
+        request.reason = reason
+
+    await record_transition(
+        session,
+        request,
+        to_status=S.PENDING,
+        actor=requester.id,
+        payload={"resubmitted": True},
+    )
+    # Back in the queue: the prior review is superseded (the admin's note stays
+    # on the row + in the event log as history).
+    request.reviewed_at = None
+    session.add(request)
+    await audit.append_audit(
+        session,
+        user_id=requester.id,
+        action="request.resubmitted",
+        target_device_id=request.device_id,
+        target_port=request.port_name,
+        after={"requested_changes": request.requested_changes, "reason": request.reason},
         result="ok",
     )
     await session.flush()

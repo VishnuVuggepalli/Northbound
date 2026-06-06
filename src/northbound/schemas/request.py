@@ -24,6 +24,23 @@ class RequestRejectIn(BaseModel):
     comment: str = Field(min_length=1, max_length=2000)
 
 
+class RequestChangesIn(BaseModel):
+    """Body of ``POST /api/requests/{id}/request-changes`` — what to revise; required."""
+
+    comment: str = Field(min_length=1, max_length=2000)
+
+
+class RequestResubmitIn(BaseModel):
+    """Body of ``POST /api/requests/{id}/resubmit`` — owner revises and resubmits.
+
+    Both fields optional: omit ``requested_changes`` to resubmit unchanged (e.g.
+    after a back-and-forth in comments), or supply edited changes / reason.
+    """
+
+    requested_changes: PortChange | None = None
+    reason: str | None = Field(default=None, max_length=2000)
+
+
 class RequestOut(BaseModel):
     """Public view of a change request."""
 

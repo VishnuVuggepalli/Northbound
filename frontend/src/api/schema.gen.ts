@@ -721,6 +721,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/requests/{request_id}/request-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Changes
+         * @description Ask the requester to revise (instead of rejecting). pending → needs_revision.
+         */
+        post: operations["request_changes_api_requests__request_id__request_changes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{request_id}/resubmit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resubmit Request
+         * @description Owner revises and resubmits after a request-changes. needs_revision → pending.
+         *
+         *     Only the request's owner may resubmit; a foreign id returns 404 (no existence
+         *     leak), mirroring the read-path authz.
+         */
+        post: operations["resubmit_request_api_requests__request_id__resubmit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/requests/{request_id}/apply": {
         parameters: {
             query?: never;
@@ -907,7 +950,7 @@ export interface components {
          * ChangeRequestStatus
          * @enum {string}
          */
-        ChangeRequestStatus: "pending" | "approved" | "rejected" | "applying" | "awaiting_confirm" | "applied" | "failed" | "reverted";
+        ChangeRequestStatus: "pending" | "needs_revision" | "approved" | "rejected" | "applying" | "awaiting_confirm" | "applied" | "failed" | "reverted";
         /**
          * ConfigOut
          * @description Running config snapshot.
@@ -1482,6 +1525,14 @@ export interface components {
             email?: string | null;
         };
         /**
+         * RequestChangesIn
+         * @description Body of ``POST /api/requests/{id}/request-changes`` — what to revise; required.
+         */
+        RequestChangesIn: {
+            /** Comment */
+            comment: string;
+        };
+        /**
          * RequestCreateIn
          * @description Body of ``POST /api/requests`` — file a change request.
          */
@@ -1546,6 +1597,18 @@ export interface components {
         RequestRejectIn: {
             /** Comment */
             comment: string;
+        };
+        /**
+         * RequestResubmitIn
+         * @description Body of ``POST /api/requests/{id}/resubmit`` — owner revises and resubmits.
+         *
+         *     Both fields optional: omit ``requested_changes`` to resubmit unchanged (e.g.
+         *     after a back-and-forth in comments), or supply edited changes / reason.
+         */
+        RequestResubmitIn: {
+            requested_changes?: components["schemas"]["PortChange"] | null;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * SettingsOut
@@ -2886,6 +2949,76 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RequestRejectIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_changes_api_requests__request_id__request_changes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestChangesIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resubmit_request_api_requests__request_id__resubmit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestResubmitIn"];
             };
         };
         responses: {

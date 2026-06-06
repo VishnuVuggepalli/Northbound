@@ -26,6 +26,7 @@ import type {
   PortListSnapshot,
   L3Interface,
   PortMap,
+  RequestedChanges,
   ProtocolDetail,
   Site,
   SystemInfo,
@@ -514,6 +515,27 @@ export async function rejectRequest(
   const req = await request<RequestOut>(
     `/api/requests/${encodeURIComponent(id)}/reject`,
     { method: 'POST', body: { comment } },
+  );
+  return mapRequest(req);
+}
+
+/** Admin asks the requester to revise (pending → needs_revision). Comment required. */
+export async function requestChanges(id: string, comment: string): Promise<ChangeRequest> {
+  const req = await request<RequestOut>(
+    `/api/requests/${encodeURIComponent(id)}/request-changes`,
+    { method: 'POST', body: { comment } },
+  );
+  return mapRequest(req);
+}
+
+/** Owner revises + resubmits (needs_revision → pending). Both fields optional. */
+export async function resubmitRequest(
+  id: string,
+  input: { requested_changes?: RequestedChanges; reason?: string },
+): Promise<ChangeRequest> {
+  const req = await request<RequestOut>(
+    `/api/requests/${encodeURIComponent(id)}/resubmit`,
+    { method: 'POST', body: input },
   );
   return mapRequest(req);
 }

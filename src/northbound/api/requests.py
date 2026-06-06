@@ -21,7 +21,13 @@ from northbound.models.change_request import ChangeRequest
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus, UserRole
 from northbound.models.user import User
-from northbound.schemas.request import RequestCreateIn, RequestOut, RequestRejectIn
+from northbound.schemas.request import (
+    RequestChangesIn,
+    RequestCreateIn,
+    RequestOut,
+    RequestRejectIn,
+    RequestResubmitIn,
+)
 from northbound.services import change_apply, requests
 from northbound.services.change_apply import ApplyError, ApplyFailed, StateDrift
 from northbound.services.requests import AlreadyClaimed, IllegalTransition, RequestError
@@ -158,6 +164,59 @@ async def reject_request(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except RequestError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return await _request_out(session, req)
+
+
+@router.post("/{request_id}/request-changes", response_model=RequestOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def request_changes(
+    request: Request,
+    request_id: str,
+    body: RequestChangesIn,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """Ask the requester to revise (instead of rejecting). pending → needs_revision."""
+    req = await _load_request(session, request_id)
+    try:
+        req = await requests.request_changes(session, req, admin, body.comment)
+    except IllegalTransition as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except RequestError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return await _request_out(session, req)
+
+
+@router.post("/{request_id}/resubmit", response_model=RequestOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def resubmit_request(
+    request: Request,
+    request_id: str,
+    body: RequestResubmitIn,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """Owner revises and resubmits after a request-changes. needs_revision → pending.
+
+    Only the request's owner may resubmit; a foreign id returns 404 (no existence
+    leak), mirroring the read-path authz.
+    """
+    req = await _load_request(session, request_id)
+    if req.requested_by != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+    device = await _load_device(session, req.device_id)
+    try:
+        req = await requests.resubmit_request(
+            session,
+            req,
+            user,
+            device=device,
+            requested_changes=body.requested_changes,
+            reason=body.reason,
+        )
+    except IllegalTransition as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    # A read-only device raises HTTPException(403) directly via assert_writable.
     return await _request_out(session, req)
 
 

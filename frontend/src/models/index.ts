@@ -117,6 +117,7 @@ export type TopologyLink = readonly [from: string, to: string, kind: LinkKind];
  */
 export type ChangeRequestStatus =
   | 'pending'
+  | 'needs_revision'
   | 'approved'
   | 'applying'
   | 'awaiting_confirm'

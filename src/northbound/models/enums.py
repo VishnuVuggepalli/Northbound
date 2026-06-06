@@ -30,6 +30,9 @@ class DeviceRole(StrEnum):
 
 class ChangeRequestStatus(StrEnum):
     PENDING = "pending"
+    # Admin asked the requester to revise (non-terminal): the requester edits and
+    # resubmits → back to PENDING. The collaborative alternative to a hard reject.
+    NEEDS_REVISION = "needs_revision"
     APPROVED = "approved"
     REJECTED = "rejected"
     APPLYING = "applying"

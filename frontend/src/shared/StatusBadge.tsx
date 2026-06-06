@@ -3,6 +3,7 @@ import { Badge } from './Badge';
 
 const LABELS: Record<ChangeRequestStatus, string> = {
   pending: 'Pending',
+  needs_revision: 'Needs revision',
   approved: 'Approved',
   applying: 'Applying',
   awaiting_confirm: 'Awaiting confirm',
@@ -14,6 +15,7 @@ const LABELS: Record<ChangeRequestStatus, string> = {
 
 const VARIANT: Record<ChangeRequestStatus, Parameters<typeof Badge>[0]['variant']> = {
   pending: 'warn',
+  needs_revision: 'warn',
   approved: 'accent',
   applying: 'accent',
   awaiting_confirm: 'warn',

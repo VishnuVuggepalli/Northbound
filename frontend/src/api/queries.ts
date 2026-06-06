@@ -251,6 +251,30 @@ export function useRejectRequest() {
   });
 }
 
+export function useRequestChanges() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, comment }: { id: string; comment: string }) =>
+      api.requestChanges(id, comment),
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
+export function useResubmitRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...input
+    }: {
+      id: string;
+      requested_changes?: import('@/models').RequestedChanges;
+      reason?: string;
+    }) => api.resubmitRequest(id, input),
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
 export function useApplyRequest() {
   const qc = useQueryClient();
   return useMutation({

@@ -314,3 +314,94 @@ async def test_audit_list_filtered(
     assert "request.created" in actions
     # No plaintext creds anywhere in the audit feed.
     assert "switch-pw" not in str(resp.json())
+
+
+# --------------------------------------------------------------------------- #
+# Request-changes review loop (needs_revision)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_request_changes_then_resubmit_round_trip(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """pending → (admin request-changes) needs_revision → (owner resubmit) pending."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+
+    rc = await client.post(
+        f"/api/requests/{req_id}/request-changes",
+        headers=_bearer(admin),
+        json={"comment": "use vlan 210, not 200"},
+    )
+    assert rc.status_code == 200
+    assert rc.json()["status"] == "needs_revision"
+    assert rc.json()["reviewer_comment"] == "use vlan 210, not 200"
+
+    re = await client.post(
+        f"/api/requests/{req_id}/resubmit",
+        headers=_bearer(alice),
+        json={"requested_changes": {"untagged_vlan": 210}, "reason": "fixed per review"},
+    )
+    assert re.status_code == 200
+    assert re.json()["status"] == "pending"
+    assert re.json()["requested_changes"]["untagged_vlan"] == 210
+    assert re.json()["reason"] == "fixed per review"
+
+
+@pytest.mark.asyncio
+async def test_request_changes_requires_comment(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    # "" is rejected by the schema (min_length=1); whitespace-only passes the
+    # schema but the service strip-check rejects it as 400.
+    empty = await client.post(
+        f"/api/requests/{req_id}/request-changes", headers=_bearer(admin), json={"comment": ""}
+    )
+    assert empty.status_code == 422
+    blank = await client.post(
+        f"/api/requests/{req_id}/request-changes", headers=_bearer(admin), json={"comment": "   "}
+    )
+    assert blank.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_request_changes_admin_only(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    resp = await client.post(
+        f"/api/requests/{req_id}/request-changes", headers=_bearer(alice), json={"comment": "x"}
+    )
+    assert resp.status_code == 403  # require_admin
+
+
+@pytest.mark.asyncio
+async def test_resubmit_owner_only(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """A non-owner resubmitting gets 404 (no existence leak), like the read path."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    await client.post(
+        f"/api/requests/{req_id}/request-changes", headers=_bearer(admin), json={"comment": "x"}
+    )
+    resp = await client.post(f"/api/requests/{req_id}/resubmit", headers=_bearer(admin), json={})
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resubmit_from_pending_is_illegal(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """Resubmitting a PENDING request (not in needs_revision) is a 409."""
+    _, _, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    resp = await client.post(f"/api/requests/{req_id}/resubmit", headers=_bearer(alice), json={})
+    assert resp.status_code == 409
