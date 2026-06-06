@@ -21,10 +21,11 @@ from northbound.models.change_request import ChangeRequest
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus, UserRole
 from northbound.models.user import User
-from northbound.schemas.driver import VlanChange
+from northbound.schemas.driver import L3Change, VlanChange
 from northbound.schemas.request import (
     RequestChangesIn,
     RequestCreateIn,
+    RequestL3In,
     RequestOut,
     RequestRejectIn,
     RequestResubmitIn,
@@ -106,6 +107,38 @@ async def create_vlan_request(
         change=change,
         reason=body.reason,
         user=user,
+    )
+    return await _request_out(session, req)
+
+
+@router.post("/l3", response_model=RequestOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def create_l3_request(
+    request: Request,
+    body: RequestL3In,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """File a routed-interface change request (SVI / loopback). 403 if read-only.
+
+    422 if the L3 intent is internally inconsistent (e.g. svi without vlan_id,
+    create without ipv4) — validated by the L3Change model.
+    """
+    device = await _load_device(session, body.device_id)
+    try:
+        change = L3Change(
+            action=body.action,
+            kind=body.kind,
+            name=body.name,
+            vlan_id=body.vlan_id,
+            ipv4=body.ipv4,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    req = await requests.create_l3_request(
+        session, device=device, change=change, reason=body.reason, user=user
     )
     return await _request_out(session, req)
 

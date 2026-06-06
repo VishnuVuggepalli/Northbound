@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AuthMethod(StrEnum):
@@ -278,3 +278,35 @@ class VlanChange(BaseModel):
     action: Literal["create", "delete"]
     vlan_id: int = Field(ge=1, le=4094)
     name: str | None = Field(default=None, max_length=64)
+
+
+class L3Change(BaseModel):
+    """A routed-interface change: create/delete an SVI (VLAN interface) or a
+    loopback, with an optional IPv4 address.
+
+    - ``svi``: ``vlan_id`` is required; the interface name is ``vlan<id>``.
+    - ``loopback``: ``name`` is required (e.g. ``lo0``).
+    - ``create`` requires ``ipv4`` (CIDR, e.g. ``10.0.0.1/24``); ``delete`` removes
+      the whole interface and ignores ``ipv4``.
+    """
+
+    action: Literal["create", "delete"]
+    kind: Literal["svi", "loopback"]
+    name: str | None = Field(default=None, max_length=64)
+    vlan_id: int | None = Field(default=None, ge=1, le=4094)
+    ipv4: str | None = Field(default=None, max_length=43)  # IPv4 or IPv6 CIDR
+
+    @model_validator(mode="after")
+    def _check(self) -> L3Change:
+        if self.kind == "svi" and self.vlan_id is None:
+            raise ValueError("svi requires vlan_id")
+        if self.kind == "loopback" and not self.name:
+            raise ValueError("loopback requires name")
+        if self.action == "create" and not self.ipv4:
+            raise ValueError("create requires ipv4 (CIDR)")
+        return self
+
+    @property
+    def iface_name(self) -> str:
+        """Canonical interface name: ``vlan<id>`` for an SVI, else ``name``."""
+        return f"vlan{self.vlan_id}" if self.kind == "svi" else (self.name or "")

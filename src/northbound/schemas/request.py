@@ -30,6 +30,18 @@ class RequestVlanIn(BaseModel):
     reason: str = Field(default="", max_length=2000)
 
 
+class RequestL3In(BaseModel):
+    """Body of ``POST /api/requests/l3`` — file a routed-interface change."""
+
+    device_id: str = Field(min_length=1, max_length=36)
+    action: Literal["create", "delete"]
+    kind: Literal["svi", "loopback"]
+    name: str | None = Field(default=None, max_length=64)
+    vlan_id: int | None = Field(default=None, ge=1, le=4094)
+    ipv4: str | None = Field(default=None, max_length=43)
+    reason: str = Field(default="", max_length=2000)
+
+
 class RequestRejectIn(BaseModel):
     """Body of ``POST /api/requests/{id}/reject`` — comment required."""
 

@@ -17,6 +17,7 @@ from northbound.schemas.driver import (
     Credentials,
     DiscoveryResult,
     DriverCapabilities,
+    L3Change,
     L3Interface,
     Neighbor,
     PortChange,
@@ -142,6 +143,11 @@ class Driver(ABC):
         :class:`NotSupported` to a clear error so unsupported platforms fail
         cleanly rather than silently no-op."""
         raise NotSupported(f"{self.platform_id}: render_vlan_change not supported")
+
+    async def render_l3_change(self, change: L3Change) -> ConfigDiff:
+        """Render a routed-interface (SVI / loopback) create/delete. Default:
+        unsupported — drivers that can write L3 config override this."""
+        raise NotSupported(f"{self.platform_id}: render_l3_change not supported")
 
     async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
         raise NotSupported(f"{self.platform_id}: apply_change not supported")

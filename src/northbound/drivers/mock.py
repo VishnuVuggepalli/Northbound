@@ -25,6 +25,7 @@ from northbound.schemas.driver import (
     Credentials,
     DiscoveryResult,
     DriverCapabilities,
+    L3Change,
     Neighbor,
     PortChange,
     PortState,
@@ -195,6 +196,26 @@ class MockDriver(Driver):
             cmds = [f"no vlan {change.vlan_id}"]
             summary = f"Delete VLAN {change.vlan_id}"
             before = f"vlan {change.vlan_id}\n"
+        return ConfigDiff(
+            summary=summary,
+            raw_before=before,
+            raw_after="\n".join(cmds) + "\n",
+            commands=tuple(cmds),
+        )
+
+    async def render_l3_change(self, change: L3Change) -> ConfigDiff:
+        await asyncio.sleep(0)
+        name = change.iface_name
+        if change.action == "create":
+            cmds = [f"interface {name}"]
+            if change.ipv4:
+                cmds.append(f"  ip address {change.ipv4}")
+            summary = f"Create {change.kind} {name}"
+            before = f"! {name} absent\n"
+        else:
+            cmds = [f"no interface {name}"]
+            summary = f"Delete {change.kind} {name}"
+            before = f"interface {name}\n"
         return ConfigDiff(
             summary=summary,
             raw_before=before,

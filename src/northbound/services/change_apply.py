@@ -33,7 +33,7 @@ from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus as S
 from northbound.models.user import User
-from northbound.schemas.driver import Credentials, PortChange, VlanChange
+from northbound.schemas.driver import Credentials, L3Change, PortChange, VlanChange
 from northbound.services import audit, port_state, requests
 from northbound.services.credvault import FernetCredVault, deserialize_credentials
 from northbound.services.device_policy import assert_writable
@@ -158,6 +158,8 @@ async def apply_request(
             #    genuinely-slow apply is not mistaken for a crash-interrupted one.
             if change_kind == "vlan":
                 diff = await driver.render_vlan_change(VlanChange(**raw_changes))
+            elif change_kind == "l3":
+                diff = await driver.render_l3_change(L3Change(**raw_changes))
             else:
                 diff = await driver.render_change(request.port_name, PortChange(**raw_changes))
             request.diff_text = diff.raw_after

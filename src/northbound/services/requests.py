@@ -32,7 +32,7 @@ from northbound.models.change_request_event import ChangeRequestEvent
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus as S
 from northbound.models.user import User
-from northbound.schemas.driver import PortChange, VlanChange
+from northbound.schemas.driver import L3Change, PortChange, VlanChange
 from northbound.services import audit, port_state
 from northbound.services.device_policy import assert_writable
 
@@ -301,6 +301,56 @@ async def create_vlan_request(
         action="request.created",
         target_device_id=device.id,
         target_port=f"vlan:{change.vlan_id}",
+        after={"requested_changes": request.requested_changes, "reason": reason},
+        result="ok",
+    )
+    await session.flush()
+    return request
+
+
+async def create_l3_request(
+    session: AsyncSession,
+    *,
+    device: Device,
+    change: L3Change,
+    reason: str,
+    user: User,
+) -> ChangeRequest:
+    """File a routed-interface change request (SVI / loopback create or delete).
+
+    Device-level (``port_name=""``); the L3 intent is tagged into
+    ``requested_changes`` as ``_kind="l3"`` so apply renders it via
+    ``driver.render_l3_change``. Fails fast (403) on a read-only device."""
+    assert_writable(device)
+    fingerprint = await port_state.current_fingerprint(device, refresh=True)
+
+    request = ChangeRequest(
+        device_id=device.id,
+        port_name="",
+        requested_by=user.id,
+        requested_changes={"_kind": "l3", **change.model_dump()},
+        reason=reason,
+        status=S.PENDING,
+        device_state_fingerprint=fingerprint,
+    )
+    session.add(request)
+    await session.flush()
+
+    session.add(
+        ChangeRequestEvent(
+            request_id=request.id,
+            from_status="",
+            to_status=S.PENDING.value,
+            actor=user.id,
+            payload={"reason": reason, "kind": "l3"},
+        )
+    )
+    await audit.append_audit(
+        session,
+        user_id=user.id,
+        action="request.created",
+        target_device_id=device.id,
+        target_port=change.iface_name,
         after={"requested_changes": request.requested_changes, "reason": reason},
         result="ok",
     )

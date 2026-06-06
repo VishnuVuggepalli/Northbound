@@ -478,3 +478,99 @@ async def test_vlan_id_out_of_range_422(
         json={"device_id": leaf.id, "action": "create", "vlan_id": 4095},
     )
     assert resp.status_code == 422  # 4095 reserved, ge/le validation
+
+
+# --------------------------------------------------------------------------- #
+# L3 change requests (SVI / loopback) — device-level routed interfaces
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_l3_svi_create_full_lifecycle(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/l3",
+        headers=_bearer(alice),
+        json={
+            "device_id": leaf.id,
+            "action": "create",
+            "kind": "svi",
+            "vlan_id": 1010,
+            "ipv4": "10.10.250.2/16",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["status"] == "pending"
+    assert created.json()["port_name"] == ""
+    rid = created.json()["id"]
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    diff = applied.json()["diff_text"]
+    assert "interface vlan1010" in diff and "10.10.250.2/16" in diff
+
+
+@pytest.mark.asyncio
+async def test_l3_loopback_create(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/l3",
+        headers=_bearer(alice),
+        json={
+            "device_id": leaf.id,
+            "action": "create",
+            "kind": "loopback",
+            "name": "lo0",
+            "ipv4": "10.0.0.1/32",
+        },
+    )
+    rid = created.json()["id"]
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    assert "interface lo0" in applied.json()["diff_text"]
+
+
+@pytest.mark.asyncio
+async def test_l3_svi_without_vlan_id_422(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    resp = await client.post(
+        "/api/requests/l3",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "create", "kind": "svi", "ipv4": "10.0.0.1/24"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_l3_create_without_ipv4_422(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    resp = await client.post(
+        "/api/requests/l3",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "create", "kind": "svi", "vlan_id": 1010},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_l3_read_only_device_403(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, _, router = seeded
+    resp = await client.post(
+        "/api/requests/l3",
+        headers=_bearer(alice),
+        json={
+            "device_id": router.id,
+            "action": "create",
+            "kind": "svi",
+            "vlan_id": 50,
+            "ipv4": "10.0.0.1/24",
+        },
+    )
+    assert resp.status_code == 403
