@@ -42,6 +42,7 @@ from northbound.drivers._protocol_gets import (
 from northbound.drivers.base import (
     Driver,
     DriverError,
+    NotSupported,
     ReachabilityError,
 )
 from northbound.drivers.registry import register
@@ -54,6 +55,7 @@ from northbound.schemas.driver import (
     DeviceFacts,
     DiscoveryResult,
     DriverCapabilities,
+    L3Change,
     L3Interface,
     MacEntry,
     MgmtService,
@@ -338,6 +340,24 @@ class Pica8Driver(Driver):
         return ConfigDiff(
             summary=f"{verb} VLAN {change.vlan_id}",
             raw_before=f"<!-- vlan {change.vlan_id} prior state not captured -->",
+            raw_after=main,
+            commands=(main,),
+            metadata={_TOKEN_KEY: token},
+        )
+
+    async def render_l3_change(self, change: L3Change) -> ConfigDiff:
+        """Render an SVI (VLAN-interface) create/delete via NETCONF.
+
+        Only ``svi`` is grounded against the live schema; ``loopback`` is rejected
+        until its xorplus block is confirmed (rather than guess routed config)."""
+        if change.kind != "svi":
+            raise NotSupported(f"pica8: render_l3_change for {change.kind} not supported yet")
+        token = f"pica8-{uuid.uuid4().hex[:8]}"
+        main = _build_l3_edit_config_xml(change)
+        verb = "Create" if change.action == "create" else "Delete"
+        return ConfigDiff(
+            summary=f"{verb} SVI {change.iface_name}",
+            raw_before=f"<!-- {change.iface_name} prior state not captured -->",
             raw_after=main,
             commands=(main,),
             metadata={_TOKEN_KEY: token},
@@ -1216,6 +1236,9 @@ def _parse_mac_table(text: str) -> tuple[MacEntry, ...]:
 _XORPLUS_IFACE_NS = "http://pica8.com/xorplus/interface"
 _NC_BASE_NS = "urn:ietf:params:xml:ns:netconf:base:1.0"
 _XORPLUS_VLANS_NS = "http://pica8.com/xorplus/vlans"
+# Grounded against a live get-config: the <l3-interface> element (SVIs) lives in
+# the vlan-interface namespace, NOT a "l3-interface" one.
+_XORPLUS_VLAN_IFACE_NS = "http://pica8.com/xorplus/vlan-interface"
 
 
 def _build_edit_config_xml(port: str, change: PortChange) -> str:
@@ -1267,6 +1290,34 @@ def _build_vlan_edit_config_xml(change: VlanChange) -> str:
         vlan_id.set(f"{{{_NC_BASE_NS}}}operation", "delete")
     else:  # create — xorplus requires a name; default it to the id when unset
         etree.SubElement(vlan_id, "vlan-name").text = change.name or str(change.vlan_id)
+    return etree.tostring(cfg, pretty_print=True).decode("utf-8")
+
+
+def _build_l3_edit_config_xml(change: L3Change) -> str:
+    """Render a xorplus ``<l3-interface>`` edit for an SVI create/delete.
+
+    Schema (verified against a live get-config):
+        <l3-interface xmlns="http://pica8.com/xorplus/vlan-interface">
+          <vlan-interface>
+            <name>vlan1010</name>
+            <address><ip>10.10.250.2</ip><prefix-length>16</prefix-length></address>
+          </vlan-interface>
+        </l3-interface>
+    ``<name>`` is the list key. Create merges name+address; delete tags the keyed
+    <vlan-interface> with operation="delete" (run under default-operation="none").
+    Loopback is not yet grounded → :meth:`render_l3_change` rejects it.
+    """
+    cfg = etree.Element("config")
+    l3 = etree.SubElement(cfg, "l3-interface", nsmap={None: _XORPLUS_VLAN_IFACE_NS})
+    vi = etree.SubElement(l3, "vlan-interface")
+    etree.SubElement(vi, "name").text = change.iface_name  # "vlan<id>"
+    if change.action == "delete":
+        vi.set(f"{{{_NC_BASE_NS}}}operation", "delete")
+    else:
+        ip, _, prefix = (change.ipv4 or "").partition("/")
+        addr = etree.SubElement(vi, "address")
+        etree.SubElement(addr, "ip").text = ip
+        etree.SubElement(addr, "prefix-length").text = prefix
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
 
 

@@ -30,6 +30,7 @@ from northbound.schemas.driver import (
     ConfigDiff,
     ConnectionParams,
     Credentials,
+    L3Change,
     PortChange,
     PortState,
     VlanChange,
@@ -262,6 +263,41 @@ async def test_render_vlan_delete_tags_operation() -> None:
     assert vid.findtext("{*}id") == "1234"
     # The literal operation="delete" drives apply_change's default-operation="none".
     assert 'operation="delete"' in diff.commands[0]
+
+
+@pytest.mark.asyncio
+async def test_render_l3_svi_create() -> None:
+    drv, _ = _make_driver()
+    diff = await drv.render_l3_change(
+        L3Change(action="create", kind="svi", vlan_id=1010, ipv4="10.10.250.2/16")
+    )
+    root = etree.fromstring(diff.commands[0].encode())
+    assert root.find(".//{http://pica8.com/xorplus/vlan-interface}l3-interface") is not None
+    assert root.findtext(".//{*}name") == "vlan1010"
+    assert root.findtext(".//{*}ip") == "10.10.250.2"
+    assert root.findtext(".//{*}prefix-length") == "16"
+    assert "SVI vlan1010" in diff.summary
+
+
+@pytest.mark.asyncio
+async def test_render_l3_svi_delete_tags_operation() -> None:
+    drv, _ = _make_driver()
+    diff = await drv.render_l3_change(L3Change(action="delete", kind="svi", vlan_id=1010))
+    vi = etree.fromstring(diff.commands[0].encode()).find(".//{*}vlan-interface")
+    assert vi is not None
+    assert vi.get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation") == "delete"
+    assert 'operation="delete"' in diff.commands[0]
+
+
+@pytest.mark.asyncio
+async def test_render_l3_loopback_not_supported_yet() -> None:
+    from northbound.drivers.base import NotSupported
+
+    drv, _ = _make_driver()
+    with pytest.raises(NotSupported):
+        await drv.render_l3_change(
+            L3Change(action="create", kind="loopback", name="lo0", ipv4="10.0.0.1/32")
+        )
 
 
 def test_render_change_inferred_empty_tagged_is_access() -> None:
