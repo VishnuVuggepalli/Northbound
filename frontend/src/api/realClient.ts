@@ -499,6 +499,18 @@ export async function createRequest(input: CreateRequestInput): Promise<ChangeRe
   return mapRequest(req);
 }
 
+/** File a VLAN-database change request (create/delete a VLAN id). */
+export async function createVlanRequest(input: {
+  device_id: string;
+  action: 'create' | 'delete';
+  vlan_id: number;
+  name?: string;
+  reason?: string;
+}): Promise<ChangeRequest> {
+  const req = await request<RequestOut>('/api/requests/vlan', { method: 'POST', body: input });
+  return mapRequest(req);
+}
+
 export async function approveRequest(id: string, _reviewer: string): Promise<ChangeRequest> {
   const req = await request<RequestOut>(
     `/api/requests/${encodeURIComponent(id)}/approve`,

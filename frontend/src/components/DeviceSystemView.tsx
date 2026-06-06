@@ -1,11 +1,20 @@
 import { useMemo, useState } from 'react';
 import { Activity, ChevronDown, ChevronRight, Cpu, Layers, Loader2, Network, Router, ShieldCheck, Table2 } from 'lucide-react';
-import { useL3Interfaces, useProtocolDetail, useSystemInfo, useVlans } from '@/api/queries';
+import {
+  useCreateVlanRequest,
+  useL3Interfaces,
+  useProtocolDetail,
+  useSystemInfo,
+  useVlans,
+} from '@/api/queries';
 import { Section } from '@/shared/Section';
 import { KV } from '@/shared/KV';
 import { DataTable } from '@/shared/DataTable';
 import { StatusDot } from '@/shared/StatusDot';
 import { Input } from '@/shared/Input';
+import { Button } from '@/shared/Button';
+import { Plus } from 'lucide-react';
+import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
 import type { Device } from '@/models';
 
@@ -32,6 +41,12 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [macFilter, setMacFilter] = useState('');
   const [vlanFilter, setVlanFilter] = useState('');
   const [sub, setSub] = useState<SubTab>('overview');
+  const createVlan = useCreateVlanRequest();
+  const [addingVlan, setAddingVlan] = useState(false);
+  const [newVid, setNewVid] = useState('');
+  const [newName, setNewName] = useState('');
+  // A VLAN write must be filed as a change request; only on a writable device.
+  const canWriteVlan = device.writable !== false && device.writes_enabled !== false;
 
   const vlanRows = useMemo(() => {
     const q = vlanFilter.trim().toLowerCase();
@@ -270,17 +285,95 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
           </SectionTitle>
         }
         right={
-          vlans.length > 0 ? (
-            <Input
-              placeholder="Filter by id / name…"
-              value={vlanFilter}
-              onChange={(e) => setVlanFilter(e.target.value)}
-              className="h-8 w-64 text-xs"
-            />
-          ) : undefined
+          <span className="flex items-center gap-2">
+            {vlans.length > 0 ? (
+              <Input
+                placeholder="Filter by id / name…"
+                value={vlanFilter}
+                onChange={(e) => setVlanFilter(e.target.value)}
+                className="h-8 w-56 text-xs"
+              />
+            ) : null}
+            {canWriteVlan && (
+              <Button
+                kind="outline"
+                size="sm"
+                leftIcon={<Plus size={13} />}
+                onClick={() => setAddingVlan((v) => !v)}
+              >
+                Add VLAN
+              </Button>
+            )}
+          </span>
         }
       >
-        {vlans.length === 0 ? (
+        {addingVlan && (
+          <form
+            className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-accent/30 bg-accent-soft p-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const vid = Number.parseInt(newVid, 10);
+              if (!Number.isFinite(vid) || vid < 1 || vid > 4094) {
+                pushToast({ kind: 'error', title: 'VLAN id must be 1–4094' });
+                return;
+              }
+              createVlan.mutate(
+                { device_id: device.id, action: 'create', vlan_id: vid, name: newName || undefined },
+                {
+                  onSuccess: () => {
+                    pushToast({
+                      kind: 'success',
+                      title: 'VLAN change requested',
+                      message: `Create VLAN ${vid} — pending approval`,
+                    });
+                    setAddingVlan(false);
+                    setNewVid('');
+                    setNewName('');
+                  },
+                  onError: (err: unknown) =>
+                    pushToast({
+                      kind: 'error',
+                      title: 'Could not file request',
+                      message: err instanceof Error ? err.message : 'Failed',
+                    }),
+                },
+              );
+            }}
+          >
+            <label className="flex flex-col gap-1 text-xs text-fg-muted">
+              VLAN id
+              <Input
+                type="number"
+                min={1}
+                max={4094}
+                value={newVid}
+                onChange={(e) => setNewVid(e.target.value)}
+                className="h-8 w-28"
+                autoFocus
+                required
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-fg-muted">
+              Name (optional)
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="h-8 w-48"
+                placeholder="e.g. web-tier"
+              />
+            </label>
+            <Button type="submit" kind="primary" size="sm" disabled={createVlan.isPending}>
+              {createVlan.isPending ? 'Filing…' : 'Request VLAN'}
+            </Button>
+            <Button type="button" kind="ghost" size="sm" onClick={() => setAddingVlan(false)}>
+              Cancel
+            </Button>
+            <span className="basis-full text-[11px] text-fg-subtle">
+              Files a change request — an admin approves &amp; applies it (commit-confirm).
+            </span>
+          </form>
+        )}
+        {vlans.length === 0 && !addingVlan ? (
           <p className="px-1 text-xs text-fg-subtle">No VLANs reported.</p>
         ) : vlanRows.length === 0 ? (
           <p className="px-1 text-xs text-fg-subtle">No matching VLANs.</p>

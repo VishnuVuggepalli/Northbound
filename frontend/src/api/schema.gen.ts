@@ -658,6 +658,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/requests/vlan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Vlan Request
+         * @description File a VLAN-database change request (create/delete a VLAN). 403 if read-only.
+         */
+        post: operations["create_vlan_request_api_requests_vlan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/requests/{request_id}": {
         parameters: {
             query?: never;
@@ -1609,6 +1629,28 @@ export interface components {
             requested_changes?: components["schemas"]["PortChange"] | null;
             /** Reason */
             reason?: string | null;
+        };
+        /**
+         * RequestVlanIn
+         * @description Body of ``POST /api/requests/vlan`` — file a VLAN-database change.
+         */
+        RequestVlanIn: {
+            /** Device Id */
+            device_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "create" | "delete";
+            /** Vlan Id */
+            vlan_id: number;
+            /** Name */
+            name?: string | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
         };
         /**
          * SettingsOut
@@ -2852,6 +2894,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RequestCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_vlan_request_api_requests_vlan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestVlanIn"];
             };
         };
         responses: {
