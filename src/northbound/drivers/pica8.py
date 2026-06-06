@@ -42,7 +42,6 @@ from northbound.drivers._protocol_gets import (
 from northbound.drivers.base import (
     Driver,
     DriverError,
-    NotSupported,
     ReachabilityError,
 )
 from northbound.drivers.registry import register
@@ -346,17 +345,16 @@ class Pica8Driver(Driver):
         )
 
     async def render_l3_change(self, change: L3Change) -> ConfigDiff:
-        """Render an SVI (VLAN-interface) create/delete via NETCONF.
+        """Render an SVI (VLAN-interface) or loopback create/delete via NETCONF.
 
-        Only ``svi`` is grounded against the live schema; ``loopback`` is rejected
-        until its xorplus block is confirmed (rather than guess routed config)."""
-        if change.kind != "svi":
-            raise NotSupported(f"pica8: render_l3_change for {change.kind} not supported yet")
+        Both map to `set l3-interface {vlan-interface|loopback} <name> ...`; an SVI
+        also needs the VLAN l3-interface link (see :func:`_build_l3_edit_config_xml`)."""
         token = f"pica8-{uuid.uuid4().hex[:8]}"
         main = _build_l3_edit_config_xml(change)
         verb = "Create" if change.action == "create" else "Delete"
+        label = "SVI" if change.kind == "svi" else "loopback"
         return ConfigDiff(
-            summary=f"{verb} SVI {change.iface_name}",
+            summary=f"{verb} {label} {change.iface_name}",
             raw_before=f"<!-- {change.iface_name} prior state not captured -->",
             raw_after=main,
             commands=(main,),
@@ -1314,34 +1312,38 @@ def _build_l3_edit_config_xml(change: L3Change) -> str:
     run under default-operation="none"). Loopback is rejected upstream.
     """
     cfg = etree.Element("config")
-    name = change.iface_name  # "vlan<id>"
+    name = change.iface_name  # "vlan<id>" (svi) or the loopback name
 
-    # The VLAN's l3-interface link — this is what instantiates the SVI object.
-    vlans = etree.SubElement(cfg, "vlans", nsmap={None: _XORPLUS_VLANS_NS})
-    vlan_id = etree.SubElement(vlans, "vlan-id")
-    etree.SubElement(vlan_id, "id").text = str(change.vlan_id)
-    link = etree.SubElement(vlan_id, "l3-interface")
-    link.text = name
-    if change.action == "delete":
-        link.set(f"{{{_NC_BASE_NS}}}operation", "delete")
+    # An SVI's interface object is instantiated by the VLAN's l3-interface link;
+    # a loopback is standalone (no VLAN). Emit the link only for SVIs.
+    if change.kind == "svi":
+        vlans = etree.SubElement(cfg, "vlans", nsmap={None: _XORPLUS_VLANS_NS})
+        vlan_id = etree.SubElement(vlans, "vlan-id")
+        etree.SubElement(vlan_id, "id").text = str(change.vlan_id)
+        link = etree.SubElement(vlan_id, "l3-interface")
+        link.text = name
+        if change.action == "delete":
+            link.set(f"{{{_NC_BASE_NS}}}operation", "delete")
 
-    # The addressed vlan-interface.
+    # The addressed interface: <vlan-interface> (SVI) or <loopback>, both under
+    # <l3-interface> (CLI `set l3-interface {vlan-interface|loopback} <name> ...`).
     l3 = etree.SubElement(cfg, "l3-interface", nsmap={None: _XORPLUS_VLAN_IFACE_NS})
-    vi = etree.SubElement(l3, "vlan-interface")
-    etree.SubElement(vi, "name").text = name
+    child = "vlan-interface" if change.kind == "svi" else "loopback"
+    iface = etree.SubElement(l3, child)
+    etree.SubElement(iface, "name").text = name
     if change.action == "delete":
-        vi.set(f"{{{_NC_BASE_NS}}}operation", "delete")
+        iface.set(f"{{{_NC_BASE_NS}}}operation", "delete")
     else:
         ip, _, prefix = (change.ipv4 or "").partition("/")
-        addr = etree.SubElement(vi, "address")
+        addr = etree.SubElement(iface, "address")
         etree.SubElement(addr, "ip").text = ip
         etree.SubElement(addr, "prefix-length").text = prefix
         if change.mtu is not None:
-            etree.SubElement(vi, "mtu").text = str(change.mtu)
+            etree.SubElement(iface, "mtu").text = str(change.mtu)
         if change.enabled is not None:
-            etree.SubElement(vi, "disable").text = "false" if change.enabled else "true"
+            etree.SubElement(iface, "disable").text = "false" if change.enabled else "true"
         if change.dhcp is not None:
-            etree.SubElement(vi, "dhcp").text = "true" if change.dhcp else "false"
+            etree.SubElement(iface, "dhcp").text = "true" if change.dhcp else "false"
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
 
 

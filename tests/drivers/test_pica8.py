@@ -295,14 +295,28 @@ async def test_render_l3_svi_delete_tags_operation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_render_l3_loopback_not_supported_yet() -> None:
-    from northbound.drivers.base import NotSupported
-
+async def test_render_l3_loopback_create() -> None:
     drv, _ = _make_driver()
-    with pytest.raises(NotSupported):
-        await drv.render_l3_change(
-            L3Change(action="create", kind="loopback", name="lo0", ipv4="10.0.0.1/32")
-        )
+    diff = await drv.render_l3_change(
+        L3Change(action="create", kind="loopback", name="lo0", ipv4="10.0.0.1/32")
+    )
+    root = etree.fromstring(diff.commands[0].encode())
+    # Loopback is standalone — NO <vlans> link (that's SVI-only).
+    assert root.find(".//{http://pica8.com/xorplus/vlans}vlan-id") is None
+    lb = root.find(".//{http://pica8.com/xorplus/vlan-interface}loopback")
+    assert lb is not None
+    assert root.findtext(".//{*}name") == "lo0"
+    assert root.findtext(".//{*}ip") == "10.0.0.1"
+    assert "loopback lo0" in diff.summary
+
+
+@pytest.mark.asyncio
+async def test_render_l3_loopback_delete() -> None:
+    drv, _ = _make_driver()
+    diff = await drv.render_l3_change(L3Change(action="delete", kind="loopback", name="lo0"))
+    lb = etree.fromstring(diff.commands[0].encode()).find(".//{*}loopback")
+    assert lb is not None
+    assert lb.get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation") == "delete"
 
 
 def test_render_change_inferred_empty_tagged_is_access() -> None:
