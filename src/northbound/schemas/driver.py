@@ -266,3 +266,15 @@ class PortChange(BaseModel):
     port_mode: Literal["access", "trunk"] | None = None
     mtu: Annotated[int, Field(ge=64, le=16360)] | None = None
     enabled: bool | None = None  # maps to <disable> (disable = not enabled)
+
+
+class VlanChange(BaseModel):
+    """Device-level VLAN-database change (create or delete a VLAN id).
+
+    Unlike :class:`PortChange` this targets the VLAN table, not a switchport.
+    ``name`` is only meaningful for ``create``.
+    """
+
+    action: Literal["create", "delete"]
+    vlan_id: int = Field(ge=1, le=4094)
+    name: str | None = Field(default=None, max_length=64)

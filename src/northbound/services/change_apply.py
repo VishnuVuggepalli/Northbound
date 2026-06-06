@@ -33,7 +33,7 @@ from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus as S
 from northbound.models.user import User
-from northbound.schemas.driver import Credentials, PortChange
+from northbound.schemas.driver import Credentials, PortChange, VlanChange
 from northbound.services import audit, port_state, requests
 from northbound.services.credvault import FernetCredVault, deserialize_credentials
 from northbound.services.device_policy import assert_writable
@@ -134,7 +134,10 @@ async def apply_request(
         # a racing transaction observes ``applying`` rather than ``approved``.
         await session.flush()
 
-        change = PortChange(**request.requested_changes)
+        # The change target is encoded in requested_changes: "_kind" == "vlan"
+        # is a VLAN-table change (render_vlan_change); otherwise a port change.
+        raw_changes = dict(request.requested_changes)
+        change_kind = raw_changes.pop("_kind", "port")
 
         try:
             # 6. Backup current config.
@@ -153,7 +156,10 @@ async def apply_request(
             #    and so bumps ``updated_at`` (onupdate=now) immediately before the long
             #    ``apply_change`` call — the reconciler's CON-3 liveness heartbeat, so a
             #    genuinely-slow apply is not mistaken for a crash-interrupted one.
-            diff = await driver.render_change(request.port_name, change)
+            if change_kind == "vlan":
+                diff = await driver.render_vlan_change(VlanChange(**raw_changes))
+            else:
+                diff = await driver.render_change(request.port_name, PortChange(**raw_changes))
             request.diff_text = diff.raw_after
             request.updated_at = dt.datetime.now(tz=dt.UTC)
             session.add(request)

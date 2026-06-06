@@ -21,12 +21,14 @@ from northbound.models.change_request import ChangeRequest
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus, UserRole
 from northbound.models.user import User
+from northbound.schemas.driver import VlanChange
 from northbound.schemas.request import (
     RequestChangesIn,
     RequestCreateIn,
     RequestOut,
     RequestRejectIn,
     RequestResubmitIn,
+    RequestVlanIn,
 )
 from northbound.services import change_apply, requests
 from northbound.services.change_apply import ApplyError, ApplyFailed, StateDrift
@@ -81,6 +83,27 @@ async def create_request(
         device=device,
         port_name=body.port_name,
         requested_changes=body.requested_changes,
+        reason=body.reason,
+        user=user,
+    )
+    return await _request_out(session, req)
+
+
+@router.post("/vlan", response_model=RequestOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def create_vlan_request(
+    request: Request,
+    body: RequestVlanIn,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """File a VLAN-database change request (create/delete a VLAN). 403 if read-only."""
+    device = await _load_device(session, body.device_id)
+    change = VlanChange(action=body.action, vlan_id=body.vlan_id, name=body.name)
+    req = await requests.create_vlan_request(
+        session,
+        device=device,
+        change=change,
         reason=body.reason,
         user=user,
     )

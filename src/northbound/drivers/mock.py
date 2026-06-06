@@ -29,6 +29,7 @@ from northbound.schemas.driver import (
     PortChange,
     PortState,
     TestResult,
+    VlanChange,
 )
 
 
@@ -178,6 +179,25 @@ class MockDriver(Driver):
         return ConfigDiff(
             summary=summary,
             raw_before=f"interface {port}\n  ! (previous)\n",
+            raw_after="\n".join(cmds) + "\n",
+            commands=tuple(cmds),
+        )
+
+    async def render_vlan_change(self, change: VlanChange) -> ConfigDiff:
+        await asyncio.sleep(0)
+        if change.action == "create":
+            cmds = [f"vlan {change.vlan_id}"]
+            if change.name:
+                cmds.append(f"  name {change.name}")
+            summary = f"Create VLAN {change.vlan_id}"
+            before = f"! VLAN {change.vlan_id} absent\n"
+        else:
+            cmds = [f"no vlan {change.vlan_id}"]
+            summary = f"Delete VLAN {change.vlan_id}"
+            before = f"vlan {change.vlan_id}\n"
+        return ConfigDiff(
+            summary=summary,
+            raw_before=before,
             raw_after="\n".join(cmds) + "\n",
             commands=tuple(cmds),
         )

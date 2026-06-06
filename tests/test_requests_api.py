@@ -405,3 +405,76 @@ async def test_resubmit_from_pending_is_illegal(
     req_id = created.json()["id"]
     resp = await client.post(f"/api/requests/{req_id}/resubmit", headers=_bearer(alice), json={})
     assert resp.status_code == 409
+
+
+# --------------------------------------------------------------------------- #
+# VLAN-database change requests (device-level, not port-scoped)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_vlan_create_full_lifecycle(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """POST /requests/vlan → approve → apply → confirm, on a writable mock device."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/vlan",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "create", "vlan_id": 1010, "name": "web"},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["status"] == "pending"
+    assert body["port_name"] == ""  # device-level, no switchport target
+    rid = body["id"]
+
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    assert applied.status_code == 200
+    # The rendered diff is the VLAN-table change, not a port change.
+    assert "vlan 1010" in applied.json()["diff_text"]
+    confirmed = await client.post(f"/api/requests/{rid}/confirm", headers=_bearer(admin))
+    assert confirmed.json()["status"] == "applied"
+
+
+@pytest.mark.asyncio
+async def test_vlan_delete_renders_removal(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/vlan",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "delete", "vlan_id": 1010},
+    )
+    rid = created.json()["id"]
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    assert "no vlan 1010" in applied.json()["diff_text"]
+
+
+@pytest.mark.asyncio
+async def test_vlan_create_read_only_device_403(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """Read-only device rejects a VLAN request up front (fail fast)."""
+    _, _, alice, _, router = seeded
+    resp = await client.post(
+        "/api/requests/vlan",
+        headers=_bearer(alice),
+        json={"device_id": router.id, "action": "create", "vlan_id": 50},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "READ_ONLY_DEVICE"
+
+
+@pytest.mark.asyncio
+async def test_vlan_id_out_of_range_422(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    resp = await client.post(
+        "/api/requests/vlan",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "create", "vlan_id": 4095},
+    )
+    assert resp.status_code == 422  # 4095 reserved, ge/le validation

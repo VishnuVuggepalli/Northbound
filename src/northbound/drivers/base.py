@@ -24,6 +24,7 @@ from northbound.schemas.driver import (
     ProtocolDetail,
     SystemInfo,
     TestResult,
+    VlanChange,
     VlanInfo,
 )
 
@@ -133,6 +134,14 @@ class Driver(ABC):
 
     async def render_change(self, port: str, change: PortChange) -> ConfigDiff:
         raise NotSupported(f"{self.platform_id}: render_change not supported")
+
+    async def render_vlan_change(self, change: VlanChange) -> ConfigDiff:
+        """Render a VLAN-database create/delete. Default: unsupported.
+
+        Drivers that can write the VLAN table override this; the apply flow maps
+        :class:`NotSupported` to a clear error so unsupported platforms fail
+        cleanly rather than silently no-op."""
+        raise NotSupported(f"{self.platform_id}: render_vlan_change not supported")
 
     async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
         raise NotSupported(f"{self.platform_id}: apply_change not supported")

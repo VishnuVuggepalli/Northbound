@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from northbound.models.change_request import ChangeRequest
@@ -15,6 +17,16 @@ class RequestCreateIn(BaseModel):
     device_id: str = Field(min_length=1, max_length=36)
     port_name: str = Field(min_length=1, max_length=128)
     requested_changes: PortChange
+    reason: str = Field(default="", max_length=2000)
+
+
+class RequestVlanIn(BaseModel):
+    """Body of ``POST /api/requests/vlan`` — file a VLAN-database change."""
+
+    device_id: str = Field(min_length=1, max_length=36)
+    action: Literal["create", "delete"]
+    vlan_id: int = Field(ge=1, le=4094)
+    name: str | None = Field(default=None, max_length=64)
     reason: str = Field(default="", max_length=2000)
 
 
