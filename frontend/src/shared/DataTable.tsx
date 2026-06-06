@@ -1,6 +1,9 @@
+import type { ReactNode } from 'react';
+
 interface DataTableProps {
   columns: string[];
-  rows: string[][];
+  /** Cells may be strings or nodes (e.g. a per-row action button). */
+  rows: ReactNode[][];
   /** Optional per-column className for the cell (by column index). */
   cellClass?: (colIndex: number) => string;
 }

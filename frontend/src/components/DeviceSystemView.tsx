@@ -13,7 +13,7 @@ import { DataTable } from '@/shared/DataTable';
 import { StatusDot } from '@/shared/StatusDot';
 import { Input } from '@/shared/Input';
 import { Button } from '@/shared/Button';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
 import type { Device } from '@/models';
@@ -45,6 +45,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [addingVlan, setAddingVlan] = useState(false);
   const [newVid, setNewVid] = useState('');
   const [newName, setNewName] = useState('');
+  const [deleteVid, setDeleteVid] = useState<number | null>(null);
   // A VLAN write must be filed as a change request; only on a writable device.
   const canWriteVlan = device.writable !== false && device.writes_enabled !== false;
 
@@ -373,6 +374,47 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
             </span>
           </form>
         )}
+        {deleteVid !== null && (
+          <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-danger/40 bg-danger/5 p-3 text-sm">
+            <span className="text-fg">
+              Delete VLAN <span className="nb-mono font-semibold">{deleteVid}</span>? This files a
+              change request for admin approval.
+            </span>
+            <span className="ml-auto flex gap-1.5">
+              <Button kind="ghost" size="sm" onClick={() => setDeleteVid(null)}>
+                Cancel
+              </Button>
+              <Button
+                kind="danger"
+                size="sm"
+                disabled={createVlan.isPending}
+                onClick={() =>
+                  createVlan.mutate(
+                    { device_id: device.id, action: 'delete', vlan_id: deleteVid },
+                    {
+                      onSuccess: () => {
+                        pushToast({
+                          kind: 'success',
+                          title: 'VLAN delete requested',
+                          message: `Delete VLAN ${deleteVid} — pending approval`,
+                        });
+                        setDeleteVid(null);
+                      },
+                      onError: (err: unknown) =>
+                        pushToast({
+                          kind: 'error',
+                          title: 'Could not file request',
+                          message: err instanceof Error ? err.message : 'Failed',
+                        }),
+                    },
+                  )
+                }
+              >
+                Request delete
+              </Button>
+            </span>
+          </div>
+        )}
         {vlans.length === 0 && !addingVlan ? (
           <p className="px-1 text-xs text-fg-subtle">No VLANs reported.</p>
         ) : vlanRows.length === 0 ? (
@@ -380,14 +422,39 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
         ) : (
           <div className="px-1">
             <DataTable
-              columns={['VLAN', 'Name', 'Description', 'L3 (SVI)', 'Ports']}
-              rows={vlanRows.map((v) => [
-                String(v.vlan_id),
-                v.name,
-                v.description,
-                v.l3_interface,
-                String(v.port_count),
-              ])}
+              columns={
+                canWriteVlan
+                  ? ['VLAN', 'Name', 'Description', 'L3 (SVI)', 'Ports', '']
+                  : ['VLAN', 'Name', 'Description', 'L3 (SVI)', 'Ports']
+              }
+              rows={vlanRows.map((v) => {
+                const base = [
+                  String(v.vlan_id),
+                  v.name,
+                  v.description,
+                  v.l3_interface,
+                  String(v.port_count),
+                ];
+                if (!canWriteVlan) return base;
+                return [
+                  ...base,
+                  // VLAN 1 (default) is not deletable on most platforms — hide it.
+                  v.vlan_id === 1 ? (
+                    ''
+                  ) : (
+                    <button
+                      key="del"
+                      type="button"
+                      title={`Delete VLAN ${v.vlan_id}`}
+                      aria-label={`Delete VLAN ${v.vlan_id}`}
+                      onClick={() => setDeleteVid(v.vlan_id)}
+                      className="text-fg-subtle transition-colors hover:text-danger"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  ),
+                ];
+              })}
               cellClass={(j) => (j === 0 ? 'text-fg' : j === 3 ? 'text-link' : 'text-fg-muted')}
             />
           </div>
