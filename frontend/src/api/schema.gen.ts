@@ -1620,6 +1620,8 @@ export interface components {
             enabled?: boolean | null;
             /** Dhcp */
             dhcp?: boolean | null;
+            /** Vrf */
+            vrf?: string | null;
             /**
              * Reason
              * @default

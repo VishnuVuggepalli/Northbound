@@ -137,6 +137,7 @@ async def create_l3_request(
             mtu=body.mtu,
             enabled=body.enabled,
             dhcp=body.dhcp,
+            vrf=body.vrf,
         )
     except ValueError as exc:
         raise HTTPException(

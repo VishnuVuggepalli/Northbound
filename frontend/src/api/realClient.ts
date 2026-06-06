@@ -523,6 +523,7 @@ export async function createL3Request(input: {
   mtu?: number;
   enabled?: boolean;
   dhcp?: boolean;
+  vrf?: string;
   reason?: string;
 }): Promise<ChangeRequest> {
   const req = await request<RequestOut>('/api/requests/l3', { method: 'POST', body: input });

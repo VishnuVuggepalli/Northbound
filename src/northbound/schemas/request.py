@@ -43,6 +43,7 @@ class RequestL3In(BaseModel):
     mtu: int | None = Field(default=None, ge=64, le=16360)
     enabled: bool | None = None
     dhcp: bool | None = None
+    vrf: str | None = Field(default=None, max_length=64)
     reason: str = Field(default="", max_length=2000)
 
 

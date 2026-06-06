@@ -299,6 +299,7 @@ class L3Change(BaseModel):
     mtu: int | None = Field(default=None, ge=64, le=16360)
     enabled: bool | None = None  # maps to <disable> (disable = not enabled)
     dhcp: bool | None = None
+    vrf: str | None = Field(default=None, max_length=64)  # place the interface in a VRF
 
     @model_validator(mode="after")
     def _check(self) -> L3Change:

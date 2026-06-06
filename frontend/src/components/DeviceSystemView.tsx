@@ -55,6 +55,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [l3Name, setL3Name] = useState('');
   const [l3Ip, setL3Ip] = useState('');
   const [l3Mtu, setL3Mtu] = useState('');
+  const [l3Vrf, setL3Vrf] = useState('');
   // A VLAN write must be filed as a change request; only on a writable device.
   const canWriteVlan = device.writable !== false && device.writes_enabled !== false;
 
@@ -256,6 +257,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                     name: l3Kind === 'loopback' ? l3Name || undefined : undefined,
                     ipv4: l3Ip.trim(),
                     mtu: Number.isFinite(mtu) ? mtu : undefined,
+                    vrf: l3Vrf.trim() || undefined,
                   },
                   {
                     onSuccess: () => {
@@ -269,6 +271,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                       setL3Name('');
                       setL3Ip('');
                       setL3Mtu('');
+                      setL3Vrf('');
                     },
                     onError: (err: unknown) =>
                       pushToast({
@@ -336,6 +339,15 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                   onChange={(e) => setL3Mtu(e.target.value)}
                   className="h-8 w-24"
                   placeholder="1500"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                VRF (optional)
+                <Input
+                  value={l3Vrf}
+                  onChange={(e) => setL3Vrf(e.target.value)}
+                  className="h-8 w-32"
+                  placeholder="must already exist"
                 />
               </label>
               <Button type="submit" kind="primary" size="sm" disabled={createL3.isPending}>

@@ -1338,6 +1338,10 @@ def _build_l3_edit_config_xml(change: L3Change) -> str:
         addr = etree.SubElement(iface, "address")
         etree.SubElement(addr, "ip").text = ip
         etree.SubElement(addr, "prefix-length").text = prefix
+        if change.vrf:
+            # `set l3-interface {vlan-interface|loopback} <name> vrf <name>`. The VRF
+            # must already exist on the device; binding to an absent VRF is rejected.
+            etree.SubElement(iface, "vrf").text = change.vrf
         if change.mtu is not None:
             etree.SubElement(iface, "mtu").text = str(change.mtu)
         if change.enabled is not None:

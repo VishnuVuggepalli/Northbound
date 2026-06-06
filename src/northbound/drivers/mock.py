@@ -210,6 +210,8 @@ class MockDriver(Driver):
             cmds = [f"interface {name}"]
             if change.ipv4:
                 cmds.append(f"  ip address {change.ipv4}")
+            if change.vrf:
+                cmds.append(f"  vrf forwarding {change.vrf}")
             summary = f"Create {change.kind} {name}"
             before = f"! {name} absent\n"
         else:

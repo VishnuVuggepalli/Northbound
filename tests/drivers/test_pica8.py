@@ -311,6 +311,15 @@ async def test_render_l3_loopback_create() -> None:
 
 
 @pytest.mark.asyncio
+async def test_render_l3_vrf_binding() -> None:
+    drv, _ = _make_driver()
+    diff = await drv.render_l3_change(
+        L3Change(action="create", kind="svi", vlan_id=1010, ipv4="10.0.0.1/24", vrf="tenant-a")
+    )
+    assert etree.fromstring(diff.commands[0].encode()).findtext(".//{*}vrf") == "tenant-a"
+
+
+@pytest.mark.asyncio
 async def test_render_l3_loopback_delete() -> None:
     drv, _ = _make_driver()
     diff = await drv.render_l3_change(L3Change(action="delete", kind="loopback", name="lo0"))
