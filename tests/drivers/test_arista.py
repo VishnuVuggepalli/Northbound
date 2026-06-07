@@ -225,3 +225,47 @@ async def test_render_change_trunk_commands() -> None:
     assert "switchport mode trunk" in body
     assert "switchport trunk native vlan 100" in body
     assert "switchport trunk allowed vlan 100,200" in body
+
+
+@pytest.mark.asyncio
+async def test_arista_render_vlan_create_delete() -> None:
+    from northbound.schemas.driver import VlanChange
+
+    d = AristaDriver.__new__(AristaDriver)
+    c = await d.render_vlan_change(VlanChange(action="create", vlan_id=1010, name="web"))
+    assert c.commands == ("vlan 1010", "   name web")
+    x = await d.render_vlan_change(VlanChange(action="delete", vlan_id=1010))
+    assert x.commands == ("no vlan 1010",)
+
+
+@pytest.mark.asyncio
+async def test_arista_render_svi_eos_naming() -> None:
+    from northbound.schemas.driver import L3Change
+
+    d = AristaDriver.__new__(AristaDriver)
+    c = await d.render_l3_change(L3Change(action="create", kind="svi", vlan_id=1010, ipv4="10.0.0.1/24"))
+    assert c.commands[0] == "interface Vlan1010"  # EOS capitalised SVI name
+    assert "   ip address 10.0.0.1/24" in c.commands
+
+
+@pytest.mark.asyncio
+async def test_arista_render_vrf_instance() -> None:
+    from northbound.schemas.driver import VrfChange
+
+    d = AristaDriver.__new__(AristaDriver)
+    c = await d.render_vrf_change(VrfChange(action="create", name="tenant-a"))
+    assert c.commands == ("vrf instance tenant-a",)
+
+
+@pytest.mark.asyncio
+async def test_arista_l3_loopback_and_vrf_binding_not_grounded() -> None:
+    from northbound.drivers.base import NotSupported
+    from northbound.schemas.driver import L3Change
+
+    d = AristaDriver.__new__(AristaDriver)
+    with pytest.raises(NotSupported):
+        await d.render_l3_change(L3Change(action="create", kind="loopback", name="Loopback1", ipv4="1.1.1.1/32"))
+    with pytest.raises(NotSupported):
+        await d.render_l3_change(
+            L3Change(action="create", kind="svi", vlan_id=10, ipv4="1.1.1.1/24", vrf="t")
+        )

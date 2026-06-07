@@ -45,10 +45,13 @@ from northbound.schemas.driver import (
     Credentials,
     DiscoveryResult,
     DriverCapabilities,
+    L3Change,
     Neighbor,
     PortChange,
     PortState,
     TestResult,
+    VlanChange,
+    VrfChange,
 )
 
 logger = logging.getLogger("northbound.drivers.arista")
@@ -227,6 +230,51 @@ class AristaDriver(Driver):
             commands=tuple(cmds),
             metadata={_SESSION_KEY: session},
         )
+
+    def _diff(self, summary: str, cmds: list[str]) -> ConfigDiff:
+        return ConfigDiff(
+            summary=summary,
+            raw_before="! (previous state not captured)\n",
+            raw_after="\n".join(cmds) + "\n",
+            commands=tuple(cmds),
+            metadata={_SESSION_KEY: f"nb-{uuid.uuid4().hex[:8]}"},
+        )
+
+    async def render_vlan_change(self, change: VlanChange) -> ConfigDiff:
+        """EOS VLAN-database create/delete (`vlan <id>` / `no vlan <id>`)."""
+        if change.action == "delete":
+            return self._diff(f"Delete VLAN {change.vlan_id}", [f"no vlan {change.vlan_id}"])
+        cmds = [f"vlan {change.vlan_id}"]
+        if change.name:
+            cmds.append(f"   name {change.name}")
+        return self._diff(f"Create VLAN {change.vlan_id}", cmds)
+
+    async def render_l3_change(self, change: L3Change) -> ConfigDiff:
+        """EOS SVI create/delete. The interface is ``Vlan<id>`` (EOS naming, derived
+        from vlan_id). Loopback + VRF-binding deferred for EOS (naming/version
+        grounding pending a vEOS pass) — raise rather than guess routed config."""
+        if change.kind != "svi":
+            raise NotSupported("arista: render_l3_change loopback not grounded yet")
+        if change.vrf:
+            raise NotSupported("arista: SVI vrf-binding keyword not grounded yet")
+        name = f"Vlan{change.vlan_id}"
+        if change.action == "delete":
+            return self._diff(f"Delete SVI {name}", [f"no interface {name}"])
+        cmds = [f"interface {name}", f"   ip address {change.ipv4}"]
+        if change.mtu is not None:
+            cmds.append(f"   mtu {change.mtu}")
+        if change.enabled is not None:
+            cmds.append("   no shutdown" if change.enabled else "   shutdown")
+        return self._diff(f"Create SVI {name}", cmds)
+
+    async def render_vrf_change(self, change: VrfChange) -> ConfigDiff:
+        """EOS VRF create/delete (`vrf instance <name>`, 4.22+)."""
+        if change.action == "delete":
+            return self._diff(f"Delete VRF {change.name}", [f"no vrf instance {change.name}"])
+        cmds = [f"vrf instance {change.name}"]
+        if change.description:
+            cmds.append(f"   description {change.description}")
+        return self._diff(f"Create VRF {change.name}", cmds)
 
     async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
         session = diff.metadata.get(_SESSION_KEY) or f"nb-{uuid.uuid4().hex[:8]}"
