@@ -246,8 +246,10 @@ export function useRequestTimeline(requestId: string, enabled: boolean) {
     queryKey: ['requests', requestId, 'timeline'],
     queryFn: () => api.getRequestTimeline(requestId),
     enabled,
-    // Light polling while the thread is open → near-realtime chat without SSE.
-    refetchInterval: enabled ? 8000 : false,
+    // SSE (`request.timeline`) drives instant refresh on a comment; this is just
+    // a slow safety-net poll (status transitions don't publish; multi-worker SSE
+    // is process-local).
+    refetchInterval: enabled ? 30000 : false,
   });
 }
 

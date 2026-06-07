@@ -36,7 +36,7 @@ from northbound.schemas.request import (
     RequestVlanIn,
     RequestVrfIn,
 )
-from northbound.services import change_apply, requests
+from northbound.services import change_apply, events, requests
 from northbound.services.change_apply import ApplyError, ApplyFailed, StateDrift
 from northbound.services.requests import AlreadyClaimed, IllegalTransition, RequestError
 
@@ -301,7 +301,12 @@ async def add_request_comment(
     req = await _load_request(session, request_id)
     _assert_can_read(req, user)
     event = await requests.add_comment(session, req, user, body.body)
-    return (await _events_out(session, [event]))[0]
+    out = (await _events_out(session, [event]))[0]
+    # Commit BEFORE publishing so a subscriber's SSE-triggered timeline refetch
+    # can't race the write (the get_session dependency's later commit is a no-op).
+    await session.commit()
+    events.hub.publish(events.Event("request.timeline", {"request_id": request_id}))
+    return out
 
 
 @router.post("/{request_id}/approve", response_model=RequestOut)

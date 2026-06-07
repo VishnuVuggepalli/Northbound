@@ -53,12 +53,22 @@ export function useEventStream(enabled: boolean): void {
       void qc.invalidateQueries({ queryKey: queryKeys.allPorts() });
     };
 
+    // `request.timeline` → a comment (or transition) landed on a request: refresh
+    // that request's open thread + the requests list. Powers the live comment thread.
+    const onRequestTimeline = (event: MessageEvent): void => {
+      const id = parseEvent<{ request_id?: string }>(event)?.request_id;
+      if (id) void qc.invalidateQueries({ queryKey: ['requests', id, 'timeline'] });
+      void qc.invalidateQueries({ queryKey: ['requests'] });
+    };
+
     source.addEventListener('device.reachability', onReachability);
     source.addEventListener('device.ports', onPorts);
+    source.addEventListener('request.timeline', onRequestTimeline);
 
     return () => {
       source.removeEventListener('device.reachability', onReachability);
       source.removeEventListener('device.ports', onPorts);
+      source.removeEventListener('request.timeline', onRequestTimeline);
       source.close();
       setStatus('closed');
     };
