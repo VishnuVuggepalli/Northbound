@@ -512,6 +512,24 @@ export async function createVlanRequest(input: {
   return mapRequest(req);
 }
 
+/** File an OSPFv2 config-change request (router-id or interface area/tuning). */
+export async function createOspfRequest(input: {
+  device_id: string;
+  action: 'set' | 'delete';
+  target: 'router-id' | 'interface';
+  router_id?: string;
+  interface?: string;
+  area?: string;
+  cost?: number;
+  hello_interval?: number;
+  dead_interval?: number;
+  passive?: boolean;
+  reason?: string;
+}): Promise<ChangeRequest> {
+  const req = await request<RequestOut>('/api/requests/ospf', { method: 'POST', body: input });
+  return mapRequest(req);
+}
+
 /** File a VRF create/delete change request. */
 export async function createVrfRequest(input: {
   device_id: string;

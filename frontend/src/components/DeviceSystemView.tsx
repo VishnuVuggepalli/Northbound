@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Activity, ChevronDown, ChevronRight, Cpu, Layers, Loader2, Network, Router, ShieldCheck, Table2 } from 'lucide-react';
 import {
   useCreateL3Request,
+  useCreateOspfRequest,
   useCreateVlanRequest,
   useCreateVrfRequest,
   useL3Interfaces,
@@ -59,6 +60,13 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [l3Vrf, setL3Vrf] = useState('');
   const createVrf = useCreateVrfRequest();
   const [addingVrf, setAddingVrf] = useState(false);
+  const createOspf = useCreateOspfRequest();
+  const [addingOspf, setAddingOspf] = useState(false);
+  const [ospfTarget, setOspfTarget] = useState<'interface' | 'router-id'>('interface');
+  const [ospfIface, setOspfIface] = useState('');
+  const [ospfArea, setOspfArea] = useState('0.0.0.0');
+  const [ospfRouterId, setOspfRouterId] = useState('');
+  const [ospfCost, setOspfCost] = useState('');
   const [vrfName, setVrfName] = useState('');
   const [vrfDesc, setVrfDesc] = useState('');
   // A VLAN write must be filed as a change request; only on a writable device.
@@ -244,10 +252,133 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                 >
                   Add L3
                 </Button>
+                <Button
+                  kind="outline"
+                  size="sm"
+                  leftIcon={<Plus size={13} />}
+                  onClick={() => setAddingOspf((v) => !v)}
+                >
+                  OSPF
+                </Button>
               </span>
             ) : undefined
           }
         >
+          {addingOspf && (
+            <form
+              className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-warn/40 bg-warn/5 p-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const cost = Number.parseInt(ospfCost, 10);
+                if (ospfTarget === 'router-id' && !ospfRouterId.trim()) {
+                  pushToast({ kind: 'error', title: 'router-id required' });
+                  return;
+                }
+                if (ospfTarget === 'interface' && (!ospfIface.trim() || !ospfArea.trim())) {
+                  pushToast({ kind: 'error', title: 'interface + area required' });
+                  return;
+                }
+                createOspf.mutate(
+                  {
+                    device_id: device.id,
+                    action: 'set',
+                    target: ospfTarget,
+                    router_id: ospfTarget === 'router-id' ? ospfRouterId.trim() : undefined,
+                    interface: ospfTarget === 'interface' ? ospfIface.trim() : undefined,
+                    area: ospfTarget === 'interface' ? ospfArea.trim() : undefined,
+                    cost:
+                      ospfTarget === 'interface' && Number.isFinite(cost) ? cost : undefined,
+                  },
+                  {
+                    onSuccess: () => {
+                      pushToast({
+                        kind: 'success',
+                        title: 'OSPF change requested',
+                        message: 'pending approval',
+                      });
+                      setAddingOspf(false);
+                      setOspfIface('');
+                      setOspfRouterId('');
+                      setOspfCost('');
+                    },
+                    onError: (err: unknown) =>
+                      pushToast({
+                        kind: 'error',
+                        title: 'Could not file request',
+                        message: err instanceof Error ? err.message : 'Failed',
+                      }),
+                  },
+                );
+              }}
+            >
+              <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                OSPF target
+                <select
+                  value={ospfTarget}
+                  onChange={(e) => setOspfTarget(e.target.value as 'interface' | 'router-id')}
+                  className="h-8 rounded-md border border-border bg-bg-elev-1 px-2 text-xs text-fg"
+                >
+                  <option value="interface">Interface → area</option>
+                  <option value="router-id">Router ID</option>
+                </select>
+              </label>
+              {ospfTarget === 'interface' ? (
+                <>
+                  <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                    Interface
+                    <Input
+                      value={ospfIface}
+                      onChange={(e) => setOspfIface(e.target.value)}
+                      className="h-8 w-32"
+                      placeholder="vlan1010"
+                      required
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                    Area
+                    <Input
+                      value={ospfArea}
+                      onChange={(e) => setOspfArea(e.target.value)}
+                      className="h-8 w-28"
+                      placeholder="0.0.0.0"
+                      required
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                    Cost (optional)
+                    <Input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={ospfCost}
+                      onChange={(e) => setOspfCost(e.target.value)}
+                      className="h-8 w-24"
+                    />
+                  </label>
+                </>
+              ) : (
+                <label className="flex flex-col gap-1 text-xs text-fg-muted">
+                  Router ID
+                  <Input
+                    value={ospfRouterId}
+                    onChange={(e) => setOspfRouterId(e.target.value)}
+                    className="h-8 w-36"
+                    placeholder="10.10.250.2"
+                    required
+                  />
+                </label>
+              )}
+              <Button type="submit" kind="primary" size="sm" disabled={createOspf.isPending}>
+                {createOspf.isPending ? 'Filing…' : 'Request OSPF'}
+              </Button>
+              <Button type="button" kind="ghost" size="sm" onClick={() => setAddingOspf(false)}>
+                Cancel
+              </Button>
+              <span className="basis-full text-[11px] text-fg-subtle">
+                Filing only — OSPF applies touch live routing; an admin reviews before apply.
+              </span>
+            </form>
+          )}
           {addingVrf && (
             <form
               className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-accent/30 bg-accent-soft p-3"

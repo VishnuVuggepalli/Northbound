@@ -257,6 +257,14 @@ export function useCreateVrfRequest() {
   });
 }
 
+export function useCreateOspfRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createOspfRequest,
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
 export function useApproveRequest() {
   const qc = useQueryClient();
   return useMutation({
