@@ -5,7 +5,7 @@
  * field names than the UI's hand-written domain types (`environment` vs `env`,
  * timestamps as ISO strings vs epoch ms, no `model`/`portKind` on devices —
  * those are presentation concerns). These functions translate the generated
- * `schema.gen.ts` shapes into the canonical `@/types`. Keeping the translation
+ * `schema.gen.ts` shapes into the canonical `@/models`. Keeping the translation
  * here means components and the mock client never see the wire shape.
  */
 
@@ -19,7 +19,7 @@ import type {
   PlatformRegistryEntry,
   Port,
   PortKind,
-} from '@/types';
+} from '@/models';
 
 type DeviceOut = components['schemas']['DeviceOut'];
 type PortStateOut = components['schemas']['PortStateOut'];
@@ -36,7 +36,15 @@ export function toEpochMs(value: string | number | null | undefined): number | n
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-const KNOWN_PLATFORMS: readonly Platform[] = ['arista', 'cisco', 'pica8', 'freebsd', 'mock'];
+const KNOWN_PLATFORMS: readonly Platform[] = [
+  'arista',
+  'cisco',
+  'pica8',
+  'mikrotik',
+  'mikrotik_swos',
+  'freebsd',
+  'mock',
+];
 
 /** Coerce the backend's free-form `platform` string into the UI union. */
 export function toPlatform(raw: string): Platform {
@@ -103,7 +111,9 @@ export function mapDevice(d: DeviceOut, portCount = 0): Device {
     model: d.platform,
     portCount,
     portKind: portKindFor(platform),
-    reachable: d.reachable ?? false,
+    reachable: d.reachable ?? null,
+    writable: d.writable,
+    writes_enabled: d.writes_enabled,
     ...(d.ssh_user ? { ssh_user: d.ssh_user } : {}),
   };
 }
@@ -130,15 +140,10 @@ export function mapPort(p: PortStateOut, deviceId: string, index: number): Port 
     host_model: p.host_model ?? '',
     bmc_ip: p.bmc_ip ?? '',
     notes: p.notes ?? '',
-    services: {
-      lldp: services.lldp ?? false,
-      stp: services.stp ?? false,
-      mstp: services.mstp ?? false,
-      lacp: services.lacp ?? false,
-      bgp: services.bgp ?? false,
-      ospf: services.ospf ?? false,
-      erspan: services.erspan ?? false,
-    },
+    // Pass through whatever per-port services the backend reports. Real drivers
+    // (pica8/NETCONF) don't model per-port protocol flags -> {} -> the panel's
+    // Services section hides itself. No synthesized always-false chips.
+    services,
     traffic: 0,
     last_change: toEpochMs(p.last_human_edit_at) ?? Date.now(),
   };
@@ -151,6 +156,7 @@ export function mapRequest(r: RequestOut): ChangeRequest {
     device_id: r.device_id,
     port_name: r.port_name,
     requested_by: r.requested_by,
+    requested_by_username: r.requested_by_username ?? null,
     requested_changes: {
       untagged_vlan: changes.untagged_vlan as number | undefined,
       tagged_vlans: changes.tagged_vlans as number[] | undefined,

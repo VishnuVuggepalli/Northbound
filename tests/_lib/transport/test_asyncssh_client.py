@@ -15,19 +15,40 @@ import pytest
 from northbound._lib.transport.asyncssh_client import SshClient, SshParams
 
 
-def test_known_hosts_arg_accept_new_returns_none() -> None:
+def test_known_hosts_arg_insecure_returns_none() -> None:
+    """'insecure' → known_hosts=None → asyncssh accepts ANY host key (lab)."""
     client = SshClient(
         SshParams(
             host="127.0.0.1",
             username="u",
             password="p",
-            known_hosts_mode="accept-new",
+            known_hosts_mode="insecure",
         )
     )
     assert client._known_hosts_arg() is None
 
 
-def test_known_hosts_arg_strict_returns_empty_tuple() -> None:
+def test_default_mode_is_insecure() -> None:
+    client = SshClient(SshParams(host="127.0.0.1", username="u", password="p"))
+    assert client._known_hosts_arg() is None
+
+
+def test_known_hosts_arg_strict_returns_path_when_set() -> None:
+    """'strict' with a path → real verification against that known_hosts file."""
+    client = SshClient(
+        SshParams(
+            host="127.0.0.1",
+            username="u",
+            password="p",
+            known_hosts_mode="strict",
+            known_hosts_path="/etc/ssh/known_hosts",
+        )
+    )
+    assert client._known_hosts_arg() == "/etc/ssh/known_hosts"
+
+
+def test_known_hosts_arg_strict_without_path_fails_closed() -> None:
+    """'strict' with no path must FAIL CLOSED, not accept-all or reject-all."""
     client = SshClient(
         SshParams(
             host="127.0.0.1",
@@ -36,7 +57,8 @@ def test_known_hosts_arg_strict_returns_empty_tuple() -> None:
             known_hosts_mode="strict",
         )
     )
-    assert client._known_hosts_arg() == ()
+    with pytest.raises(ValueError, match="known_hosts_path"):
+        client._known_hosts_arg()
 
 
 @pytest.mark.asyncio
@@ -77,7 +99,7 @@ async def test_live_ssh_run_returns_real_output() -> None:
             port=int(os.environ.get("NB_LIVE_SSH_PORT", "22")),
             username=os.environ.get("NB_LIVE_SSH_USER", "nbadmin"),
             password=os.environ.get("NB_LIVE_SSH_PASS", "nbsandbox"),
-            known_hosts_mode="accept-new",
+            known_hosts_mode="insecure",
             timeout_seconds=15.0,
         )
     )

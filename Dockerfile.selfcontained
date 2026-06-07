@@ -1,0 +1,81 @@
+# Northbound — SELF-CONTAINED single-image build (no host prerequisites).
+#
+# Unlike the default ./Dockerfile (which copies a host-prebuilt frontend/dist for
+# a faster, leaner build), this variant builds the Vite SPA *inside* the image in
+# a Node stage, so `docker build` works from a clean checkout with nothing
+# installed on the host but Docker itself.
+#
+#   DOCKER_BUILDKIT=1 docker build -f Dockerfile.selfcontained --network=host -t northbound:latest .
+#   # or:  make docker-build-selfcontained
+#
+# REQUIRES BuildKit (DOCKER_BUILDKIT=1): the sibling .dockerignore below is a
+# per-Dockerfile ignore file, which only the BuildKit frontend honours. Without
+# BuildKit the default .dockerignore applies and strips the frontend sources.
+#
+# TRADE-OFF: the in-container `npm ci` + `vite build` needs ~1–2 GB RAM and can be
+# OOM-killed on memory-constrained build hosts (which is exactly why the default
+# Dockerfile builds the SPA on the host instead). Prefer the default unless you
+# specifically want a host-toolchain-free build (CI from a clean image, etc.).
+#
+# `--network=host` is needed where the build daemon has no DNS (npm registry +
+# pip both reach out); drop it if your daemon resolves names normally.
+#
+# A sibling `Dockerfile.selfcontained.dockerignore` keeps frontend sources in the
+# build context (the default .dockerignore strips them, shipping only dist).
+
+# ---------------------------------------------------------------------------
+# Stage 1 — build the SPA in a Node toolchain (produces /app/frontend/dist)
+# ---------------------------------------------------------------------------
+FROM node:22-slim AS frontend-builder
+WORKDIR /app/frontend
+# Install deps from the lockfile first (cached unless the lockfile changes).
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+# Then the sources + build config, and build (tsc -b && vite build → dist/).
+COPY frontend/ ./
+RUN npm run build
+
+# ---------------------------------------------------------------------------
+# Stage 2 — build a venv with all Python deps (+ the northbound package)
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim AS builder
+ENV PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1
+# No apt build deps: every dependency ships a self-contained cp311 manylinux
+# wheel, so pip never compiles.
+WORKDIR /app
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --upgrade pip && pip install .
+
+# ---------------------------------------------------------------------------
+# Stage 3 — slim runtime: venv + migrations + the in-image-built SPA
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim AS runtime
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    NB_ENVIRONMENT=production \
+    NB_FRONTEND_DIST=/app/frontend/dist \
+    NB_DB_URL=sqlite+aiosqlite:////data/northbound.db
+
+WORKDIR /app
+COPY --from=builder /opt/venv /opt/venv
+COPY alembic.ini seed.py ./
+COPY alembic ./alembic
+# SPA built in stage 1 (no host prebuild needed).
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && mkdir -p /data \
+    && useradd --create-home --uid 10001 app \
+    && chown -R app:app /app /data
+USER app
+
+EXPOSE 8090
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8090/health').status==200 else 1)" || exit 1
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["uvicorn", "northbound.main:app", "--host", "0.0.0.0", "--port", "8090"]

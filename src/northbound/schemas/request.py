@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from northbound.models.change_request import ChangeRequest
@@ -18,10 +20,99 @@ class RequestCreateIn(BaseModel):
     reason: str = Field(default="", max_length=2000)
 
 
+class RequestVlanIn(BaseModel):
+    """Body of ``POST /api/requests/vlan`` — file a VLAN-database change."""
+
+    device_id: str = Field(min_length=1, max_length=36)
+    action: Literal["create", "delete"]
+    vlan_id: int = Field(ge=1, le=4094)
+    name: str | None = Field(default=None, max_length=64)
+    description: str | None = Field(default=None, max_length=255)
+    reason: str = Field(default="", max_length=2000)
+
+
+class RequestOspfIn(BaseModel):
+    """Body of ``POST /api/requests/ospf`` — file an OSPFv2 config change."""
+
+    device_id: str = Field(min_length=1, max_length=36)
+    action: Literal["set", "delete"]
+    target: Literal["router-id", "interface"]
+    router_id: str | None = Field(default=None, max_length=15)
+    interface: str | None = Field(default=None, max_length=64)
+    area: str | None = Field(default=None, max_length=15)
+    cost: int | None = Field(default=None, ge=1, le=65535)
+    hello_interval: int | None = Field(default=None, ge=1, le=65535)
+    dead_interval: int | None = Field(default=None, ge=1, le=65535)
+    passive: bool | None = None
+    reason: str = Field(default="", max_length=2000)
+
+
+class RequestVrfIn(BaseModel):
+    """Body of ``POST /api/requests/vrf`` — file a VRF create/delete."""
+
+    device_id: str = Field(min_length=1, max_length=36)
+    action: Literal["create", "delete"]
+    name: str = Field(min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=255)
+    reason: str = Field(default="", max_length=2000)
+
+
+class RequestL3In(BaseModel):
+    """Body of ``POST /api/requests/l3`` — file a routed-interface change."""
+
+    device_id: str = Field(min_length=1, max_length=36)
+    action: Literal["create", "delete"]
+    kind: Literal["svi", "loopback"]
+    name: str | None = Field(default=None, max_length=64)
+    vlan_id: int | None = Field(default=None, ge=1, le=4094)
+    ipv4: str | None = Field(default=None, max_length=43)
+    mtu: int | None = Field(default=None, ge=64, le=16360)
+    enabled: bool | None = None
+    dhcp: bool | None = None
+    vrf: str | None = Field(default=None, max_length=64)
+    reason: str = Field(default="", max_length=2000)
+
+
 class RequestRejectIn(BaseModel):
     """Body of ``POST /api/requests/{id}/reject`` — comment required."""
 
     comment: str = Field(min_length=1, max_length=2000)
+
+
+class RequestChangesIn(BaseModel):
+    """Body of ``POST /api/requests/{id}/request-changes`` — what to revise; required."""
+
+    comment: str = Field(min_length=1, max_length=2000)
+
+
+class RequestCommentIn(BaseModel):
+    """Body of ``POST /api/requests/{id}/comments`` — a free-text comment."""
+
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class RequestEventOut(BaseModel):
+    """One entry of a request's timeline — a status transition or a comment."""
+
+    id: str
+    kind: str  # "comment" | "transition"
+    from_status: str
+    to_status: str
+    actor: str
+    actor_username: str | None = None
+    body: str = ""  # comment text (empty for transitions)
+    created_at: str
+
+
+class RequestResubmitIn(BaseModel):
+    """Body of ``POST /api/requests/{id}/resubmit`` — owner revises and resubmits.
+
+    Both fields optional: omit ``requested_changes`` to resubmit unchanged (e.g.
+    after a back-and-forth in comments), or supply edited changes / reason.
+    """
+
+    requested_changes: PortChange | None = None
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 class RequestOut(BaseModel):
@@ -33,6 +124,10 @@ class RequestOut(BaseModel):
     device_id: str
     port_name: str
     requested_by: str
+    # Human-readable requester username, resolved from ``requested_by`` (a user
+    # id) by the API layer. None if the user no longer exists. Lets the UI show
+    # "who" without the client joining ids→names (non-admins can't list users).
+    requested_by_username: str | None = None
     requested_changes: dict[str, object]
     reason: str
     status: ChangeRequestStatus
@@ -49,12 +144,13 @@ class RequestOut(BaseModel):
     applied_at: str | None = None
 
     @classmethod
-    def from_model(cls, request: ChangeRequest) -> RequestOut:
+    def from_model(cls, request: ChangeRequest, *, username: str | None = None) -> RequestOut:
         return cls(
             id=request.id,
             device_id=request.device_id,
             port_name=request.port_name,
             requested_by=request.requested_by,
+            requested_by_username=username,
             requested_changes=dict(request.requested_changes),
             reason=request.reason,
             status=request.status,

@@ -1,13 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
-import { useDevices, useRequests } from '@/api/queries';
+import { useDevices, useRequests, useSites } from '@/api/queries';
 import { useUIStore } from '@/store/ui';
-import { PlatformIcon } from '@/components/ui/PlatformIcon';
-import { StatusDot } from '@/components/ui/StatusDot';
-import { Badge } from '@/components/ui/Badge';
+import { PlatformIcon } from '@/shared/PlatformIcon';
+import { StatusDot } from '@/shared/StatusDot';
+import { Badge } from '@/shared/Badge';
+import { SkeletonList } from '@/shared/Skeleton';
 import { cn } from '@/lib/cn';
-import type { Device, DeviceRole, Environment } from '@/types';
+import { plural } from '@/lib/format';
+import type { Device, DeviceRole, Environment } from '@/models';
 
 const ROLE_ORDER: DeviceRole[] = ['spine', 'leaf', 'router', 'vpn'];
 const ROLE_LABELS: Record<DeviceRole, string> = {
@@ -24,8 +26,10 @@ interface SidebarProps {
 export function Sidebar({ env }: SidebarProps) {
   const navigate = useNavigate();
   const params = useParams();
-  const { data: devices = [] } = useDevices(env);
+  const { data: devices = [], isLoading: devicesLoading } = useDevices(env);
   const { data: requests = [] } = useRequests();
+  const { data: sites = [] } = useSites();
+  const siteName = sites.find((s) => s.slug === env)?.name ?? env;
   const width = useUIStore((s) => s.sidebarWidth);
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth);
   const selectDevice = useUIStore((s) => s.selectDevice);
@@ -70,12 +74,8 @@ export function Sidebar({ env }: SidebarProps) {
         <div className="border-b border-border px-4 py-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-xs uppercase tracking-wider text-fg-subtle">
-                {env === 'lab' ? 'Lab environment' : 'Datacenter'}
-              </div>
-              <div className="text-sm font-semibold text-fg">
-                {devices.length} devices
-              </div>
+              <div className="text-xs uppercase tracking-wider text-fg-subtle">{siteName}</div>
+              <div className="text-sm font-semibold text-fg">{plural(devices.length, 'device')}</div>
             </div>
             <button
               type="button"
@@ -87,6 +87,24 @@ export function Sidebar({ env }: SidebarProps) {
             </button>
           </div>
         </div>
+
+        {devicesLoading && devices.length === 0 && (
+          <div className="p-3">
+            <SkeletonList rows={4} rowClassName="h-7" />
+          </div>
+        )}
+        {!devicesLoading && devices.length === 0 && (
+          <div className="px-4 py-6 text-center text-xs text-fg-muted">
+            No devices in {siteName} yet.{' '}
+            <button
+              type="button"
+              onClick={() => navigate('/onboard')}
+              className="text-accent hover:underline"
+            >
+              Onboard one
+            </button>
+          </div>
+        )}
 
         {ROLE_ORDER.map((role) => {
           const list = grouped[role];
@@ -125,7 +143,16 @@ export function Sidebar({ env }: SidebarProps) {
                               {pendingCount}
                             </Badge>
                           )}
-                          <StatusDot state={d.reachable ? 'up' : 'down'} />
+                          <StatusDot
+                            state={d.reachable == null ? 'pending' : d.reachable ? 'up' : 'down'}
+                            label={
+                              d.reachable == null
+                                ? 'Reachability unknown'
+                                : d.reachable
+                                  ? 'Reachable'
+                                  : 'Unreachable'
+                            }
+                          />
                         </span>
                       </button>
                     </li>

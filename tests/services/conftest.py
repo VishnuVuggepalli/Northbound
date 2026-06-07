@@ -21,7 +21,7 @@ import northbound.drivers.mock  # noqa: F401  (registers the "mock" platform)
 from northbound.auth.password import hash_password
 from northbound.config import get_settings
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment, UserRole
+from northbound.models.enums import DeviceRole, UserRole
 from northbound.models.user import User
 from northbound.schemas.driver import Credentials
 from northbound.services import port_state
@@ -44,7 +44,7 @@ async def mock_device(db_session: AsyncSession) -> AsyncIterator[Device]:
     vault = FernetCredVault.from_settings()
     device = Device(
         name="lab-mock-1",
-        environment=Environment.LAB,
+        environment="lab",
         platform="mock",
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.5",

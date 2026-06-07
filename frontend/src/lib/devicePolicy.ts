@@ -14,8 +14,8 @@
  * dragging in TanStack Query or React.
  */
 
-import { findPlatformForDevice } from '@/mocks/registry';
-import type { Device, PlatformRegistryEntry } from '@/types';
+import { findPlatformForDevice } from '@/lib/platforms';
+import type { Device, PlatformRegistryEntry } from '@/models';
 
 /**
  * Returns true when no admin write should be possible against this device,

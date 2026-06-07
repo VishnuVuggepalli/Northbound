@@ -21,7 +21,7 @@ from northbound.config import Settings
 from northbound.main import lifespan
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.services import audit, reachability, reconciler, scheduler
 from northbound.services.scheduler import (
     JOB_NIGHTLY_BACKUP,
@@ -98,20 +98,51 @@ def test_build_scheduler_honours_configured_intervals() -> None:
 async def test_lifespan_does_not_start_scheduler_when_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """enable_scheduler=False → build_scheduler is never called (no timers)."""
+    """enable_scheduler=False → the scheduler lease is never constructed (no timers)."""
     called = False
 
     def _spy(*_args: object, **_kwargs: object) -> object:
         nonlocal called
         called = True
-        raise AssertionError("build_scheduler must not run when disabled")
+        raise AssertionError("SchedulerLease must not be created when disabled")
 
-    monkeypatch.setattr("northbound.main.build_scheduler", _spy)
+    monkeypatch.setattr("northbound.main.SchedulerLease", _spy)
     monkeypatch.setattr("northbound.main.get_settings", lambda: Settings(enable_scheduler=False))
 
     async with lifespan(None):  # type: ignore[arg-type]  (app unused by the guard)
         pass
     assert called is False
+
+
+async def test_lifespan_starts_and_stops_lease_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """enable_scheduler=True → the lease is started on entry and stopped on exit.
+
+    Both the lease and the settings-refresh loop are faked so no real APScheduler
+    timers or DB polling spin up (which would hang the suite)."""
+    events: list[str] = []
+
+    class _FakeLease:
+        def __init__(self, *_a: object, **_k: object) -> None:
+            events.append("init")
+
+        async def start(self) -> None:
+            events.append("start")
+
+        async def stop(self) -> None:
+            events.append("stop")
+
+    async def _noop_refresh(*_a: object, **_k: object) -> None:
+        return None
+
+    monkeypatch.setattr("northbound.main.SchedulerLease", _FakeLease)
+    monkeypatch.setattr("northbound.main.runtime_settings.refresh_loop", _noop_refresh)
+    monkeypatch.setattr("northbound.main.get_settings", lambda: Settings(enable_scheduler=True))
+
+    async with lifespan(None):  # type: ignore[arg-type]
+        assert events == ["init", "start"]
+    assert events == ["init", "start", "stop"]
 
 
 # --------------------------------------------------------------------------- #
@@ -145,7 +176,7 @@ async def test_nightly_backup_one_failure_does_not_abort_batch(
     # the job swallows per-device. The mock device must still be backed up.
     broken = Device(
         name="broken-box",
-        environment=Environment.LAB,
+        environment="lab",
         platform="does_not_exist",
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.99",

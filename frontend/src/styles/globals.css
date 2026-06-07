@@ -57,7 +57,10 @@
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --nb-bg: oklch(0.98 var(--nb-bg-chroma) var(--nb-bg-hue));
+  /* Default light theme canvas = lightest hue of blue (raised chroma from
+     shared --nb-bg-chroma so the page reads as palest blue, not flat white).
+     Elev surfaces stay on the neutral shared chroma so cards read crisp. */
+  --nb-bg: oklch(0.985 0.025 var(--nb-bg-hue));
   --nb-bg-elev-1: oklch(0.96 var(--nb-bg-chroma) var(--nb-bg-hue));
   --nb-bg-elev-2: oklch(0.94 var(--nb-bg-chroma) var(--nb-bg-hue));
   --nb-bg-sunken: oklch(0.91 var(--nb-bg-chroma) var(--nb-bg-hue));
@@ -141,22 +144,26 @@ h1 {
     @apply text-accent underline-offset-2 hover:underline;
   }
 
-  /* Scrollbars */
+  /* Scrollbars — visible enough that scrollable areas read as scrollable. */
+  .nb-scroll {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: var(--nb-fg-subtle) transparent;
+  }
   .nb-scroll::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
   }
   .nb-scroll::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--nb-bg-sunken);
   }
   .nb-scroll::-webkit-scrollbar-thumb {
-    background: var(--nb-border-strong);
+    background: var(--nb-fg-subtle);
     border-radius: 999px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
   .nb-scroll::-webkit-scrollbar-thumb:hover {
-    background: var(--nb-fg-subtle);
+    background: var(--nb-fg-muted);
     background-clip: padding-box;
     border: 2px solid transparent;
   }

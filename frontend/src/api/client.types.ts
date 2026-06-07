@@ -7,7 +7,7 @@
  * `index.ts` and the unit tests can reason about one canonical interface.
  */
 
-import type { RequestedChanges, User } from '@/types';
+import type { RequestedChanges, User } from '@/models';
 
 export interface LoginResult {
   user: User;
@@ -35,6 +35,6 @@ export interface DiscoverResult {
 }
 
 export interface ConfirmOnboardResult {
-  device: import('@/types').Device;
+  device: import('@/models').Device;
   ports_seeded: number;
 }

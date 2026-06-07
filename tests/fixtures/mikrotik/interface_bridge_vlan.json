@@ -1,0 +1,4 @@
+[
+  {".id":"*20","bridge":"bridge1","vlan-ids":"200,300","tagged":"ether1,bridge1","untagged":""},
+  {".id":"*21","bridge":"bridge1","vlan-ids":"100","tagged":"bridge1","untagged":"ether2"}
+]

@@ -12,7 +12,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AuthSession, User, UserRole } from '@/types';
+import type { AuthSession, User, UserRole } from '@/models';
 
 interface AuthState {
   user: User | null;
@@ -53,9 +53,12 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'nb-auth',
+      // Deliberately NOT persisting the token: the session lives in the httpOnly
+      // `nb_access`/`nb_refresh` cookies (set by the API, unreadable to JS). Only
+      // the user identity is cached for instant UI; it's re-validated against
+      // /api/users/me on mount and the cookie is the real credential.
       partialize: (s) => ({
         user: s.user,
-        token: s.token,
         isAuthenticated: s.isAuthenticated,
       }),
     },

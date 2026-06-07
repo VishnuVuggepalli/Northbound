@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { Kbd } from '@/components/ui/Kbd';
+import { Kbd } from '@/shared/Kbd';
 import { PortCard } from './PortCard';
 import type { ThemeMode } from '@/lib/palette';
-import type { ChangeRequest, Device, Port } from '@/types';
+import type { ChangeRequest, Device, Port } from '@/models';
 
 interface PortStripProps {
   device: Device;

@@ -1,33 +1,30 @@
 # Northbound — frontend
 
 Production frontend for Northbound, the switch-management portal. It talks to a
-real FastAPI backend, with a fully offline mock client kept behind a flag so dev
-and Playwright E2E run without a server.
+real FastAPI backend; there is no mock client. The dev server proxies `/api/*`
+to the backend so dev and Playwright E2E run same-origin without CORS.
 
-- `src/api/client.ts` — in-memory **mock** client (fixtures + synthetic delays).
-- `src/api/realClient.ts` — **real** `fetch` client against the backend.
-- `src/api/index.ts` — the **selector**: exports `apiClient`, picking mock vs
-  real from `VITE_USE_MOCKS` (default mocks ON). Components and `queries.ts`
-  import from here and never branch on which client is live.
+- `src/api/realClient.ts` — the **only** client: a `fetch` client against the
+  backend (cookie-authed, refresh-on-401).
+- `src/api/index.ts` — re-exports it as `apiClient`; components and `queries.ts`
+  import from here so the call sites never know transport details.
 - `src/api/schema.gen.ts` — TS types generated from the backend OpenAPI by
   `openapi-typescript` (regenerate with `npm run gen:api`, backend must be up).
 - `src/api/mappers.ts` — wire (snake_case) → UI shape translation.
 
-## API client mode + environment variables
+## Environment variables
 
 | Var | Default | Meaning |
 |---|---|---|
-| `VITE_USE_MOCKS` | unset → mocks ON | `"false"` switches to the real client. Anything else keeps mocks (offline). |
-| `VITE_API_BASE` | `""` (same-origin) | Base URL for the real backend. Leave empty in dev and use the Vite proxy. |
+| `VITE_API_BASE` | `""` (same-origin) | Base URL for the backend. Leave empty in dev and use the Vite proxy. |
+| `NB_DEV_API_TARGET` | `http://localhost:8090` | Where the dev server proxies `/api/*` (point at a backend on another host/port). |
 
 ```bash
-# Offline (default) — mock client, no backend needed:
+# Dev against a backend on :8090 (default proxy target):
 npm run dev
 
-# Real backend (same-origin via the dev proxy → http://localhost:8090):
-VITE_USE_MOCKS=false npm run dev
-# point the proxy elsewhere:
-NB_DEV_API_TARGET=http://host:port VITE_USE_MOCKS=false npm run dev
+# Point the proxy at a backend elsewhere:
+NB_DEV_API_TARGET=http://host:port npm run dev
 ```
 
 The dev server proxies `/api/*` to the backend (`vite.config.ts → server.proxy`,

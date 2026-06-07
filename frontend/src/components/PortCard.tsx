@@ -1,9 +1,9 @@
 import { Inbox } from 'lucide-react';
-import { StatusDot } from '@/components/ui/StatusDot';
+import { StatusDot } from '@/shared/StatusDot';
 import { vlanColor, vlanColorMuted } from '@/lib/vlan';
 import type { ThemeMode } from '@/lib/palette';
 import { cn } from '@/lib/cn';
-import type { ChangeRequest, Port } from '@/types';
+import type { ChangeRequest, Port } from '@/models';
 
 interface PortCardProps {
   port: Port;
@@ -50,7 +50,10 @@ export function PortCard({ port, selected, theme, pendingRequests, onClick }: Po
         />
       </header>
       <div className="flex items-baseline gap-1.5">
-        {port.state !== 'down' ? (
+        {/* Untagged VLAN is configuration, not live link state — show it even
+            when the port is down (the card is already de-emphasized for down
+            ports). Only "—" when there is genuinely no access VLAN. */}
+        {port.untagged_vlan != null ? (
           <span className="nb-mono text-2xl font-semibold leading-none" style={{ color }}>
             {port.untagged_vlan}
           </span>

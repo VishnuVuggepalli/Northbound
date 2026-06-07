@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
-import { AlertCircle, Clock, Network, RefreshCw, Send, X } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Section } from '@/components/ui/Section';
-import { StatusDot } from '@/components/ui/StatusDot';
-import { VlanChip } from '@/components/ui/VlanChip';
-import { Kbd } from '@/components/ui/Kbd';
+import { AlertCircle, Clock, Network, Pencil, RefreshCw, Send, X } from 'lucide-react';
+import { Button } from '@/shared/Button';
+import { Input, Textarea } from '@/shared/Input';
+import { Section } from '@/shared/Section';
+import { KV } from '@/shared/KV';
+import { StatusDot } from '@/shared/StatusDot';
+import { VlanChip } from '@/shared/VlanChip';
+import { Kbd } from '@/shared/Kbd';
 import { Diff } from '@/components/Diff';
+import { PortConfigEditor } from '@/components/PortConfigEditor';
 import { VendorActions } from '@/components/VendorActions';
-import { renderConfigSnippet } from '@/lib/config';
 import { portToRequestedChanges, mergeChange } from '@/lib/config';
 import { fmtAge, formatSpeed, timeAgo, timeAgoMin } from '@/lib/format';
 import type { ThemeMode } from '@/lib/palette';
@@ -17,11 +19,47 @@ import type {
   Device,
   Port,
   User,
-} from '@/types';
-import { useApplyRequest, useRejectRequest } from '@/api/queries';
+} from '@/models';
+import {
+  useApplyRequest,
+  usePlatforms,
+  useRejectRequest,
+  useSetPortDescription,
+  useUpdatePortMetadata,
+} from '@/api/queries';
 import { pushToast } from '@/store/toast';
 import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
-import { PLATFORM_REGISTRY } from '@/mocks/registry';
+
+const TAGGED_VLAN_PREVIEW = 12;
+
+/** Tagged VLAN chips, capped to a preview with a "+N more" expander — a trunk
+ *  port can carry dozens (an all-VLANs SwOS trunk has 80+), and an uncapped wall
+ *  of chips buries the rest of the panel. */
+function TaggedVlanList({ vlans, theme }: { vlans: readonly number[]; theme: ThemeMode }) {
+  const [expanded, setExpanded] = useState(false);
+  if (vlans.length === 0) return <span className="text-xs text-fg-muted">none</span>;
+  const shown = expanded ? vlans : vlans.slice(0, TAGGED_VLAN_PREVIEW);
+  const hidden = vlans.length - shown.length;
+  const pill =
+    'rounded-sm border border-border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-fg-muted hover:border-border-strong hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {shown.map((v) => (
+        <VlanChip key={v} vlan={v} theme={theme} />
+      ))}
+      {hidden > 0 && (
+        <button type="button" onClick={() => setExpanded(true)} className={pill}>
+          +{hidden} more
+        </button>
+      )}
+      {expanded && vlans.length > TAGGED_VLAN_PREVIEW && (
+        <button type="button" onClick={() => setExpanded(false)} className={pill}>
+          show less
+        </button>
+      )}
+    </div>
+  );
+}
 
 interface PortPanelProps {
   device: Device;
@@ -69,7 +107,8 @@ export function PortPanel({
   const ageMs = fetchedAt ? Math.max(0, now - fetchedAt) : null;
   const stale = ageMs != null && ageMs > STALE_THRESHOLD_MS;
   const aging = ageMs != null && ageMs > CACHE_TTL_MS && ageMs <= STALE_THRESHOLD_MS;
-  const platform = findPlatformForDevice(device, PLATFORM_REGISTRY);
+  const { data: platforms } = usePlatforms();
+  const platform = findPlatformForDevice(device, platforms ?? []);
   const writeLocked = isWriteLocked(device, platform);
   const isAdmin = user.role === 'admin';
   const showNeighbors =
@@ -84,11 +123,49 @@ export function PortPanel({
 
   const apply = useApplyRequest();
   const reject = useRejectRequest();
+  const updateMeta = useUpdatePortMetadata(device.id);
+
+  // Notes editing (admin-only). Local draft seeded from the port; reset when the
+  // selected port changes (key on the aside remounts, but guard anyway).
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notesDraft, setNotesDraft] = useState(port.notes ?? '');
+  const saveNotes = () => {
+    updateMeta.mutate(
+      { portName: port.name, patch: { notes: notesDraft } },
+      {
+        onSuccess: () => {
+          setEditingNotes(false);
+          pushToast({ kind: 'success', message: 'Notes saved.' });
+        },
+        onError: (e: unknown) =>
+          pushToast({ kind: 'error', message: e instanceof Error ? e.message : 'Save failed.' }),
+      },
+    );
+  };
+
+  // Description editing (admin-only). DIRECT device write — commits immediately,
+  // not a change request. Read-locked devices are rejected by the backend.
+  const setDesc = useSetPortDescription(device.id);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState(port.description ?? '');
+  const saveDesc = () => {
+    setDesc.mutate(
+      { portName: port.name, description: descDraft },
+      {
+        onSuccess: () => {
+          setEditingDesc(false);
+          pushToast({ kind: 'success', message: 'Description written to device.' });
+        },
+        onError: (e: unknown) =>
+          pushToast({ kind: 'error', message: e instanceof Error ? e.message : 'Write failed.' }),
+      },
+    );
+  };
 
   return (
     <aside
       key={`${device.id}:${port.name}`}
-      className="absolute right-0 top-0 z-30 flex h-full w-[480px] max-w-[95vw] flex-col border-l border-border bg-bg/95 shadow-2xl backdrop-blur-md animate-slide-in-right"
+      className="absolute right-0 top-0 z-30 flex h-full w-[480px] max-w-[95vw] flex-col border-l border-border bg-bg-elev-1 shadow-2xl animate-slide-in-right"
     >
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
@@ -160,47 +237,122 @@ export function PortPanel({
       <div className="nb-scroll flex-1 space-y-1 overflow-y-auto px-4">
         <Section title="Overview">
           <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1.5 text-xs">
-            <KV k="Description">
-              <span className="nb-mono text-[11px]">{port.description || '—'}</span>
-            </KV>
-            <KV k="Host model">{port.host_model || '—'}</KV>
-            <KV k="BMC IP">
+            {isAdmin && (
+              <KV label="Description">
+                {editingDesc ? (
+                  <span className="flex items-center gap-1.5">
+                    <Input
+                      value={descDraft}
+                      onChange={(e) => setDescDraft(e.target.value)}
+                      aria-label="Port description"
+                      className="h-7 flex-1 text-[11px]"
+                    />
+                    <Button size="sm" onClick={saveDesc} disabled={setDesc.isPending}>
+                      {setDesc.isPending ? '…' : 'Write'}
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingDesc(false)}
+                      className="text-xs text-fg-subtle hover:text-fg"
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <span className="nb-mono text-[11px]">{port.description || '—'}</span>
+                    <button
+                      type="button"
+                      aria-label="Edit description"
+                      title="Edit description (writes to device)"
+                      onClick={() => {
+                        setDescDraft(port.description ?? '');
+                        setEditingDesc(true);
+                      }}
+                      className="-my-1 rounded p-1.5 text-accent hover:bg-bg-elev-2 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    >
+                      <Pencil size={13} aria-hidden />
+                    </button>
+                  </span>
+                )}
+              </KV>
+            )}
+            <KV label="Host model">{port.host_model || '—'}</KV>
+            <KV label="BMC IP">
               <span className="nb-mono text-[11px]">{port.bmc_ip || '—'}</span>
             </KV>
-            <KV k="MAC">
+            <KV label="MAC">
               <span className="nb-mono text-[11px]">{port.mac || '—'}</span>
             </KV>
-            <KV k="Speed">{formatSpeed(port.speed_mbps)}</KV>
-            <KV k="Duplex">{port.duplex ?? '—'}</KV>
-            <KV k="MTU">{port.mtu}</KV>
+            <KV label="Speed">{formatSpeed(port.speed_mbps)}</KV>
+            <KV label="Duplex">{port.duplex ?? '—'}</KV>
+            <KV label="MTU">{port.mtu}</KV>
           </dl>
           <div className="mt-3 rounded-md border border-border bg-bg-elev-1 p-2.5 text-xs">
-            <div className="text-[10px] uppercase tracking-wider text-fg-subtle">Notes</div>
-            <div className="mt-1 text-fg">{port.notes || <em className="text-fg-subtle">No notes</em>}</div>
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-wider text-fg-subtle">Notes</div>
+              {isAdmin && !editingNotes && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotesDraft(port.notes ?? '');
+                    setEditingNotes(true);
+                  }}
+                  className="flex items-center gap-1 text-[10px] text-accent hover:underline"
+                >
+                  <Pencil size={10} /> Edit
+                </button>
+              )}
+            </div>
+            {editingNotes ? (
+              <div className="mt-1.5 space-y-1.5">
+                <Textarea
+                  value={notesDraft}
+                  onChange={(e) => setNotesDraft(e.target.value)}
+                  rows={3}
+                  placeholder="Operational notes for this port…"
+                  className="text-[11px]"
+                />
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={saveNotes} disabled={updateMeta.isPending}>
+                    {updateMeta.isPending ? 'Saving…' : 'Save'}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingNotes(false)}
+                    className="text-xs text-fg-subtle hover:text-fg"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-1 text-fg">
+                {port.notes || <em className="text-fg-subtle">No notes</em>}
+              </div>
+            )}
           </div>
         </Section>
 
-        <Section title="VLANs">
-          <div className="mb-2 flex items-center gap-3">
-            <span className="w-20 text-[11px] uppercase tracking-wider text-fg-subtle">
-              Untagged
-            </span>
-            <VlanChip vlan={port.untagged_vlan} theme={theme} large />
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="w-20 text-[11px] uppercase tracking-wider text-fg-subtle">
-              Tagged
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {port.tagged_vlans.length === 0 ? (
-                <span className="text-xs text-fg-muted">none</span>
-              ) : (
-                port.tagged_vlans.map((v) => (
-                  <VlanChip key={v} vlan={v} theme={theme} onRemove={isAdmin ? () => undefined : undefined} />
-                ))
-              )}
-            </div>
-          </div>
+        <Section title={isAdmin && !writeLocked ? 'VLANs & port config' : 'VLANs'}>
+          {isAdmin && !writeLocked ? (
+            <PortConfigEditor deviceId={device.id} port={port} />
+          ) : (
+            <>
+              <div className="mb-2 flex items-center gap-3">
+                <span className="w-20 text-[11px] uppercase tracking-wider text-fg-subtle">
+                  Untagged
+                </span>
+                <VlanChip vlan={port.untagged_vlan} theme={theme} large />
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="w-20 text-[11px] uppercase tracking-wider text-fg-subtle">
+                  Tagged
+                </span>
+                <TaggedVlanList vlans={port.tagged_vlans} theme={theme} />
+              </div>
+            </>
+          )}
         </Section>
 
         {showNeighbors && (
@@ -229,40 +381,25 @@ export function PortPanel({
           </Section>
         )}
 
-        <Section
-          title="Live config"
-          right={
-            <button
-              type="button"
-              onClick={onRefetch}
-              className="flex items-center gap-1 text-xs text-accent hover:underline"
-            >
-              <RefreshCw size={12} /> Refetch
-            </button>
-          }
-        >
-          <pre className="nb-mono overflow-x-auto rounded-md border border-border bg-bg-elev-1 p-2.5 text-[11px] leading-relaxed">
-            <code>{renderConfigSnippet(device, port)}</code>
-          </pre>
-        </Section>
-
-        <Section title="Services">
-          <div className="flex flex-wrap gap-1.5">
-            {Object.entries(port.services).map(([k, on]) => (
-              <span
-                key={k}
-                className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${
-                  on
-                    ? 'border-success/30 bg-success/10 text-success'
-                    : 'border-border bg-bg-elev-1 text-fg-subtle'
-                }`}
-              >
-                <StatusDot state={on ? 'up' : 'off'} size={5} />
-                <span>{k.toUpperCase()}</span>
-              </span>
-            ))}
-          </div>
-        </Section>
+        {Object.keys(port.services).length > 0 && (
+          <Section title="Services">
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(port.services).map(([k, on]) => (
+                <span
+                  key={k}
+                  className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${
+                    on
+                      ? 'border-success/30 bg-success/10 text-success'
+                      : 'border-border bg-bg-elev-1 text-fg-subtle'
+                  }`}
+                >
+                  <StatusDot state={on ? 'up' : 'off'} size={5} />
+                  <span>{k.toUpperCase()}</span>
+                </span>
+              ))}
+            </div>
+          </Section>
+        )}
 
         <Section title="Pending requests" defaultOpen={pending.length > 0}>
           {pending.length === 0 ? (
@@ -362,7 +499,6 @@ export function PortPanel({
         <div className="flex items-center gap-2">
         {isAdmin ? (
           <>
-            {/* TODO(M2): admin direct edit — see feature-list F40 */}
             {pending.length > 0 && !writeLocked && (
               <Button
                 kind="success"
@@ -402,11 +538,3 @@ export function PortPanel({
   );
 }
 
-function KV({ k, children }: { k: string; children: React.ReactNode }) {
-  return (
-    <>
-      <dt className="text-[11px] uppercase tracking-wider text-fg-subtle">{k}</dt>
-      <dd className="text-fg">{children}</dd>
-    </>
-  );
-}

@@ -1,220 +1,302 @@
-"""AristaDriver — parser + write-path unit tests.
-
-Transport is mocked via ``httpx.MockTransport``; no live network. Parser
-tests work on canned JSON fixtures under ``tests/fixtures/arista/``.
-"""
+"""AristaDriver (NAPALM-backed) — parser units + write-path via a fake NAPALM
+device. No live network: a fake `napalm` device is injected through the
+driver's `device=` hook, exercising the same code paths NAPALM's eos driver
+would drive."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 
-from northbound._lib.transport.httpx_client import HttpxClient, HttpxParams
 from northbound.drivers.arista import (
     AristaDriver,
-    _build_change_commands,
-    _format_commit_timer,
-    _merge_port_state,
-    _parse_interfaces,
-    _parse_lldp,
-    _parse_switchport,
+    _merge_ports,
+    _parse_allowed,
+    _parse_lldp_detail,
+    _vlans_for,
 )
-from northbound.schemas.driver import (
-    ConnectionParams,
-    Credentials,
-    PortChange,
-    PortState,
-)
-
-_FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "arista"
+from northbound.schemas.driver import ConnectionParams, Credentials, PortChange, PortState
 
 
-def _load(name: str) -> Any:
-    return json.loads((_FIXTURE_DIR / name).read_text())
+# --------------------------------------------------------------------------- #
+# Pure parsers
+# --------------------------------------------------------------------------- #
+def test_vlans_for_access_and_trunk() -> None:
+    acc = {"switchportInfo": {"mode": "access", "accessVlanId": 20}}
+    assert _vlans_for(acc) == (20, ())
+    trk = {
+        "switchportInfo": {
+            "mode": "trunk",
+            "trunkingNativeVlanId": 100,
+            "trunkAllowedVlans": "100,200,300",
+        }
+    }
+    assert _vlans_for(trk) == (100, (100, 200, 300))
+    assert _vlans_for(None) == (None, ())
+    assert _vlans_for({"switchportInfo": {"mode": "routed"}}) == (None, ())
 
 
-# ---------------------------------------------------------------------------
-# Pure parser tests — no transport
-# ---------------------------------------------------------------------------
+def test_parse_allowed_ranges_and_sentinels() -> None:
+    assert _parse_allowed("10,20,30-32") == (10, 20, 30, 31, 32)
+    assert _parse_allowed("ALL") == ()
+    assert _parse_allowed("1-4094") == ()
+    assert _parse_allowed("") == ()
 
 
-def test_parse_interfaces_returns_PortState_list() -> None:
-    payload = _load("show_interfaces.json")
-    result = _parse_interfaces(payload)
-    assert len(result) == 4
-    eth1 = result["Ethernet1"]
-    assert isinstance(eth1, PortState)
-    assert eth1.admin_up is True
-    assert eth1.link_up is True
-    assert eth1.speed_mbps == 10_000  # 10 Gbps → 10000 Mbps
-    assert eth1.description == "to-r720-01"
-    assert eth1.mac == "00:1c:73:aa:bb:01"
-
-    eth3 = result["Ethernet3"]
-    assert eth3.admin_up is False  # interfaceStatus=disabled
-    assert eth3.link_up is False
-
-
-def test_parse_switchport_assigns_vlans() -> None:
-    payload = _load("show_switchport.json")
-    by_name = _parse_switchport(payload)
-    assert by_name["Ethernet1"]["mode"] == "access"
-    assert by_name["Ethernet1"]["access_vlan"] == 10
-    assert by_name["Ethernet4"]["mode"] == "trunk"
-    assert by_name["Ethernet4"]["native_vlan"] == 100
-    assert by_name["Ethernet4"]["trunk_allowed"] == "100,200,300"
-
-
-def test_merge_port_state_overlays_access_vlan() -> None:
-    interfaces = _parse_interfaces(_load("show_interfaces.json"))
-    switchport = _parse_switchport(_load("show_switchport.json"))
-    merged = {p.name: p for p in _merge_port_state(interfaces, switchport)}
-    assert merged["Ethernet1"].untagged_vlan == 10
-    assert merged["Ethernet1"].tagged_vlans == ()
-    eth4 = merged["Ethernet4"]
-    assert eth4.untagged_vlan == 100
-    assert eth4.tagged_vlans == (100, 200, 300)
+def test_merge_ports_maps_interfaces_and_switchport_vlans() -> None:
+    interfaces = {
+        "Ethernet1": {
+            "is_enabled": True,
+            "is_up": True,
+            "description": "to-host",
+            "speed": 10000,
+            "mac_address": "00:1c:73:aa:bb:01",
+            "mtu": 9214,
+        },
+        "Ethernet2": {"is_enabled": False, "is_up": False, "description": ""},
+    }
+    switchports = {
+        "Ethernet1": {"switchportInfo": {"mode": "access", "accessVlanId": 20}},
+        "Ethernet2": {
+            "switchportInfo": {
+                "mode": "trunk",
+                "trunkingNativeVlanId": 1,
+                "trunkAllowedVlans": "10,20",
+            }
+        },
+    }
+    ports = {p.name: p for p in _merge_ports(interfaces, switchports)}
+    assert isinstance(ports["Ethernet1"], PortState)
+    assert ports["Ethernet1"].untagged_vlan == 20 and ports["Ethernet1"].tagged_vlans == ()
+    assert ports["Ethernet1"].admin_up is True and ports["Ethernet1"].speed_mbps == 10000
+    assert ports["Ethernet2"].admin_up is False
+    assert ports["Ethernet2"].untagged_vlan == 1 and ports["Ethernet2"].tagged_vlans == (10, 20)
 
 
-def test_parse_lldp_returns_neighbors() -> None:
-    payload = _load("show_lldp.json")
-    neighbors = _parse_lldp(payload)
-    assert len(neighbors) == 2
-    by_chassis = {n.chassis_id: n for n in neighbors}
-    assert "aa:bb:cc:dd:ee:01" in by_chassis
-    assert by_chassis["aa:bb:cc:dd:ee:01"].system_name == "r720-01"
-    # local-port should be encoded in system_description prefix
-    assert by_chassis["aa:bb:cc:dd:ee:01"].system_description
-    assert "Ethernet1" in (by_chassis["aa:bb:cc:dd:ee:01"].system_description or "")
+def test_parse_lldp_detail_encodes_local_port_prefix() -> None:
+    detail = {
+        "Ethernet1": [
+            {
+                "remote_chassis_id": "aa:bb:cc:dd:ee:01",
+                "remote_port": "Ethernet9",
+                "remote_system_name": "peer-01",
+                "remote_system_description": "Arista EOS",
+            }
+        ]
+    }
+    nbrs = _parse_lldp_detail(detail)
+    assert len(nbrs) == 1
+    assert nbrs[0].chassis_id == "aa:bb:cc:dd:ee:01"
+    assert nbrs[0].port_id == "Ethernet9"
+    assert nbrs[0].system_name == "peer-01"
+    assert nbrs[0].system_description is not None
+    assert nbrs[0].system_description.startswith("[Ethernet1] ")
 
 
-def test_parse_lldp_handles_missing_table() -> None:
-    assert _parse_lldp({}) == []
-    assert _parse_lldp({"lldpNeighbors": "garbage"}) == []
+# --------------------------------------------------------------------------- #
+# Driver via injected fake NAPALM device
+# --------------------------------------------------------------------------- #
+class _FakeNode:
+    """pyeapi node stand-in — only run_commands(show interfaces switchport)."""
+
+    def __init__(self, switchports: dict[str, Any]) -> None:
+        self._sw = switchports
+
+    def run_commands(self, cmds: list[str], encoding: str = "json") -> list[dict[str, Any]]:
+        return [{"switchports": self._sw}]
 
 
-# ---------------------------------------------------------------------------
-# render_change — pure CLI generation
-# ---------------------------------------------------------------------------
+class _FakeNapalm:
+    """Implements the slice of NAPALM's eos driver the AristaDriver calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Any]] = []
+        self.device = _FakeNode(
+            {"Ethernet1": {"switchportInfo": {"mode": "access", "accessVlanId": 10}}}
+        )
+
+    def open(self) -> None:
+        self.calls.append(("open", None))
+
+    def close(self) -> None:
+        self.calls.append(("close", None))
+
+    def is_alive(self) -> dict[str, bool]:
+        return {"is_alive": True}
+
+    def get_facts(self) -> dict[str, str]:
+        return {"vendor": "Arista", "model": "vEOS", "os_version": "4.27.0F", "hostname": "leaf1"}
+
+    def get_config(self, retrieve: str = "all") -> dict[str, str]:
+        return {"running": "! running\nhostname leaf1\n", "candidate": "", "startup": ""}
+
+    def get_interfaces(self) -> dict[str, Any]:
+        return {"Ethernet1": {"is_enabled": True, "is_up": True, "description": "", "mtu": 1500}}
+
+    def get_lldp_neighbors_detail(self) -> dict[str, Any]:
+        return {}
+
+    def load_merge_candidate(self, config: str | None = None) -> None:
+        self.calls.append(("load_merge_candidate", config))
+
+    def commit_config(self, message: str = "", revert_in: int | None = None) -> None:
+        self.calls.append(("commit_config", revert_in))
+
+    def confirm_commit(self) -> None:
+        self.calls.append(("confirm_commit", None))
+
+    def rollback(self) -> None:
+        self.calls.append(("rollback", None))
+
+    def discard_config(self) -> None:
+        self.calls.append(("discard_config", None))
 
 
-def test_render_change_builds_cli_commands() -> None:
-    cmds = _build_change_commands("Ethernet5", PortChange(description="srv-01", untagged_vlan=42))
-    assert cmds[0] == "interface Ethernet5"
-    assert any("description srv-01" in c for c in cmds)
-    assert any("switchport mode access" in c for c in cmds)
-    assert any("switchport access vlan 42" in c for c in cmds)
-
-
-def test_render_change_trunk_with_tagged_and_native() -> None:
-    cmds = _build_change_commands(
-        "Ethernet9",
-        PortChange(untagged_vlan=100, tagged_vlans=[100, 200, 300]),
-    )
-    assert "  switchport mode trunk" in cmds
-    assert "  switchport trunk native vlan 100" in cmds
-    assert "  switchport trunk allowed vlan 100,200,300" in cmds
-
-
-def test_format_commit_timer_renders_h_mm_ss() -> None:
-    assert _format_commit_timer(60) == "0:01:00"
-    assert _format_commit_timer(3725) == "1:02:05"
-    assert _format_commit_timer(0) == "0:00:01"  # clamped to at least 1s
-
-
-@pytest.mark.asyncio
-async def test_render_change_includes_session_name() -> None:
-    drv = _make_driver(handler=lambda _r: httpx.Response(200, json={"result": []}))
-    diff = await drv.render_change("Ethernet1", PortChange(untagged_vlan=10))
-    assert "session_name" in diff.metadata
-    assert diff.metadata["session_name"].startswith("nb-")
-
-
-# ---------------------------------------------------------------------------
-# Write-path tests — mock HttpxClient, observe outgoing JSON-RPC bodies
-# ---------------------------------------------------------------------------
-
-
-def _make_driver(*, handler) -> AristaDriver:  # type: ignore[no-untyped-def]
-    http = HttpxClient(HttpxParams(base_url="https://arista.test", verify_tls=False))
-    http._client._transport = httpx.MockTransport(handler)  # type: ignore[attr-defined]
+def _driver(fake: _FakeNapalm) -> AristaDriver:
     return AristaDriver(
         ConnectionParams(host="127.0.0.1"),
         Credentials(username="admin", password="pw"),
-        http=http,
+        device=fake,
     )
 
 
 @pytest.mark.asyncio
-async def test_apply_change_wraps_in_configure_session() -> None:
-    seen: dict[str, Any] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content.decode())
-        seen["cmds"] = body["params"]["cmds"]
-        return httpx.Response(200, json={"result": [{}] * len(body["params"]["cmds"])})
-
-    drv = _make_driver(handler=handler)
-    diff = await drv.render_change("Ethernet1", PortChange(untagged_vlan=10))
-    result = await drv.apply_change(diff, confirm_seconds=30)
-    assert result.success is True
-    cmds = seen["cmds"]
-    assert any(c.startswith("configure session nb-") for c in cmds)
-    assert "commit timer 0:00:30" in cmds
-    # The session in apply_change must match the one in the diff.
-    session_cmd = next(c for c in cmds if c.startswith("configure session"))
-    assert diff.metadata["session_name"] in session_cmd
+async def test_test_credentials_uses_get_facts() -> None:
+    d = _driver(_FakeNapalm())
+    tr = await d.test_credentials()
+    assert tr.ok is True
+    assert tr.platform_version is not None and "4.27.0F" in tr.platform_version
 
 
 @pytest.mark.asyncio
-async def test_confirm_calls_commit() -> None:
-    seen: dict[str, Any] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content.decode())
-        seen["cmds"] = body["params"]["cmds"]
-        return httpx.Response(200, json={"result": [{}] * len(body["params"]["cmds"])})
-
-    drv = _make_driver(handler=handler)
-    await drv.confirm("nb-deadbeef")
-    assert "configure session nb-deadbeef" in seen["cmds"]
-    assert "commit" in seen["cmds"]
+async def test_get_ports_merges_interfaces_and_switchport() -> None:
+    d = _driver(_FakeNapalm())
+    ports = {p.name: p for p in await d.get_ports()}
+    assert ports["Ethernet1"].untagged_vlan == 10  # from fake switchport
 
 
 @pytest.mark.asyncio
-async def test_revert_calls_abort() -> None:
-    seen: dict[str, Any] = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        body = json.loads(request.content.decode())
-        seen["cmds"] = body["params"]["cmds"]
-        return httpx.Response(200, json={"result": [{}] * len(body["params"]["cmds"])})
-
-    drv = _make_driver(handler=handler)
-    await drv.revert("nb-deadbeef")
-    assert "configure session nb-deadbeef" in seen["cmds"]
-    assert "abort" in seen["cmds"]
-
-
-@pytest.mark.asyncio
-async def test_apply_change_missing_session_returns_failure() -> None:
-    from northbound.schemas.driver import ConfigDiff
-
-    drv = _make_driver(handler=lambda _r: httpx.Response(200, json={"result": []}))
-    diff = ConfigDiff(summary="x", raw_before="", raw_after="", commands=("foo",))
-    result = await drv.apply_change(diff)
-    assert result.success is False
-    assert result.confirm_token is None
-    assert result.error and "session_name" in result.error
+async def test_apply_uses_confirmed_commit_then_confirm() -> None:
+    fake = _FakeNapalm()
+    d = _driver(fake)
+    diff = await d.render_change("Ethernet1", PortChange(untagged_vlan=20))
+    res = await d.apply_change(diff, confirm_seconds=45)
+    assert res.success is True and res.confirm_deadline_at is not None
+    assert res.confirm_token is not None
+    # NAPALM confirmed-commit: load candidate, then commit with revert timer.
+    assert ("load_merge_candidate", "\n".join(diff.commands)) in fake.calls
+    assert ("commit_config", 45) in fake.calls
+    await d.confirm(res.confirm_token)
+    assert ("confirm_commit", None) in fake.calls
 
 
 @pytest.mark.asyncio
-async def test_test_credentials_auth_failure_returns_not_ok() -> None:
-    drv = _make_driver(handler=lambda _r: httpx.Response(401, text="unauthorized"))
-    result = await drv.test_credentials()
-    assert result.ok is False
-    assert result.error is not None
+async def test_revert_calls_rollback() -> None:
+    fake = _FakeNapalm()
+    d = _driver(fake)
+    await d.revert("nb-x")
+    assert ("rollback", None) in fake.calls
+
+
+@pytest.mark.asyncio
+async def test_apply_failure_discards_candidate() -> None:
+    fake = _FakeNapalm()
+
+    def boom(message: str = "", revert_in: int | None = None) -> None:
+        raise RuntimeError("commit failed: invalid command")
+
+    fake.commit_config = boom  # type: ignore[method-assign]
+    d = _driver(fake)
+    diff = await d.render_change("Ethernet1", PortChange(untagged_vlan=20))
+    res = await d.apply_change(diff)
+    assert res.success is False and res.error and "commit failed" in res.error
+    # candidate cleared on failure so the session isn't left dirty
+    assert ("discard_config", None) in fake.calls
+
+
+@pytest.mark.asyncio
+async def test_render_change_trunk_commands() -> None:
+    d = _driver(_FakeNapalm())
+    diff = await d.render_change(
+        "Ethernet9", PortChange(untagged_vlan=100, tagged_vlans=[100, 200])
+    )
+    body = "\n".join(diff.commands)
+    assert "switchport mode trunk" in body
+    assert "switchport trunk native vlan 100" in body
+    assert "switchport trunk allowed vlan 100,200" in body
+
+
+@pytest.mark.asyncio
+async def test_arista_render_vlan_create_delete() -> None:
+    from northbound.schemas.driver import VlanChange
+
+    d = AristaDriver.__new__(AristaDriver)
+    c = await d.render_vlan_change(VlanChange(action="create", vlan_id=1010, name="web"))
+    assert c.commands == ("vlan 1010", "   name web")
+    x = await d.render_vlan_change(VlanChange(action="delete", vlan_id=1010))
+    assert x.commands == ("no vlan 1010",)
+
+
+@pytest.mark.asyncio
+async def test_arista_render_svi_eos_naming() -> None:
+    from northbound.schemas.driver import L3Change
+
+    d = AristaDriver.__new__(AristaDriver)
+    c = await d.render_l3_change(
+        L3Change(action="create", kind="svi", vlan_id=1010, ipv4="10.0.0.1/24")
+    )
+    assert c.commands[0] == "interface Vlan1010"  # EOS capitalised SVI name
+    assert "   ip address 10.0.0.1/24" in c.commands
+
+
+@pytest.mark.asyncio
+async def test_arista_render_vrf_instance() -> None:
+    from northbound.schemas.driver import VrfChange
+
+    d = AristaDriver.__new__(AristaDriver)
+    c = await d.render_vrf_change(VrfChange(action="create", name="tenant-a"))
+    assert c.commands == ("vrf instance tenant-a",)
+
+
+@pytest.mark.asyncio
+async def test_arista_l3_loopback_and_vrf_binding() -> None:
+    from northbound.schemas.driver import L3Change
+
+    d = AristaDriver.__new__(AristaDriver)
+    lb = await d.render_l3_change(
+        L3Change(action="create", kind="loopback", name="Loopback1", ipv4="1.1.1.1/32")
+    )
+    assert lb.commands == ("interface Loopback1", "   ip address 1.1.1.1/32")
+    svi = await d.render_l3_change(
+        L3Change(action="create", kind="svi", vlan_id=10, ipv4="10.0.0.1/24", vrf="tenant")
+    )
+    # vrf forwarding MUST precede ip address (EOS clears the address on vrf change)
+    assert svi.commands.index("   vrf forwarding tenant") < svi.commands.index(
+        "   ip address 10.0.0.1/24"
+    )
+
+
+@pytest.mark.asyncio
+async def test_arista_render_ospf() -> None:
+    from northbound.schemas.driver import OspfChange
+
+    d = AristaDriver.__new__(AristaDriver)
+    rid = await d.render_ospf_change(
+        OspfChange(action="set", target="router-id", router_id="9.9.9.9")
+    )
+    assert rid.commands == ("router ospf 1", "   router-id 9.9.9.9")
+    iff = await d.render_ospf_change(
+        OspfChange(
+            action="set",
+            target="interface",
+            interface="Vlan10",
+            area="0.0.0.0",
+            cost=5,
+            passive=True,
+        )
+    )
+    assert "   ip ospf area 0.0.0.0" in iff.commands  # interface-level area
+    assert "   ip ospf cost 5" in iff.commands
+    # passive lives under router ospf, NOT the interface (EOS model)
+    assert "router ospf 1" in iff.commands and "   passive-interface Vlan10" in iff.commands

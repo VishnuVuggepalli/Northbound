@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from northbound._lib.lldp import (
+    encode_local_port_prefix,
+    local_port_matches,
     normalize_chassis_id,
     normalize_port_id,
     parse_snmp_lldp_table,
@@ -36,6 +38,14 @@ def test_port_id_interface_name_returns_text() -> None:
     assert normalize_port_id(b"Ethernet1", subtype=5) == "Ethernet1"
 
 
+def test_port_id_strips_literal_surrounding_quotes() -> None:
+    # Arista eAPI returns interfaceId wrapped in literal quotes (live on vEOS).
+    assert normalize_port_id('"Ethernet1"') == "Ethernet1"
+    assert normalize_port_id("'Ethernet1'") == "Ethernet1"
+    # Don't strip non-matching / interior quotes.
+    assert normalize_port_id('Eth"1') == 'Eth"1'
+
+
 def test_parse_snmp_lldp_table_builds_neighbors() -> None:
     rows = [
         {
@@ -66,3 +76,22 @@ def test_parse_snmp_lldp_table_builds_neighbors() -> None:
 
 def test_parse_snmp_lldp_table_empty() -> None:
     assert parse_snmp_lldp_table([]) == []
+
+
+def test_encode_local_port_prefix() -> None:
+    assert encode_local_port_prefix("Eth1") == "[Eth1] "
+    assert encode_local_port_prefix("") == ""  # no port → no prefix
+
+
+def test_local_port_matches_is_exact_not_substring() -> None:
+    # The encode/match pair round-trips and disambiguates Eth1 / Eth1/1 / Eth10.
+    desc1 = encode_local_port_prefix("Eth1") + "host-a"
+    desc11 = encode_local_port_prefix("Eth1/1") + "host-b"
+    desc10 = encode_local_port_prefix("Eth10") + "host-c"
+    assert local_port_matches(desc1, "Eth1") is True
+    assert local_port_matches(desc11, "Eth1") is False  # substring would wrongly match
+    assert local_port_matches(desc10, "Eth1") is False
+    assert local_port_matches(desc11, "Eth1/1") is True
+    assert local_port_matches(desc10, "Eth10") is True
+    assert local_port_matches(None, "Eth1") is False
+    assert local_port_matches("no-prefix-desc", "Eth1") is False

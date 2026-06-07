@@ -1,0 +1,14 @@
+Value ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value HW_ADDRESS ([0-9A-Fa-f:]{17})
+Value TYPE (\S+)
+Value INTERFACE (\S+)
+Value AGE (\d+)
+
+Start
+  ^${ADDRESS}\s+${HW_ADDRESS}\s+${TYPE}\s+${INTERFACE}\s+${AGE} -> Record
+  ^Address\s+HW\s+Address
+  ^-+\s+-+
+  ^Aging-time
+  ^Total\s+count
+  ^\s*$$
+  ^\.\s*$$

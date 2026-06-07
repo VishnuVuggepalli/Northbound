@@ -7,7 +7,7 @@
  */
 
 import { create } from 'zustand';
-import type { Environment, Port } from '@/types';
+import type { Environment, Port } from '@/models';
 
 interface UIState {
   env: Environment;

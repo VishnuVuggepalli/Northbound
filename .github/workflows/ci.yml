@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main, real-data-no-mocks]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend gate (ruff · pyright · pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install (runtime + dev deps)
+        run: pip install -e ".[dev]"
+      - name: Lint (ruff)
+        run: ruff check src tests
+      - name: Format check (ruff)
+        run: ruff format --check src tests
+      - name: Type check (pyright)
+        # Point pyright at the interpreter where deps were installed so imports
+        # resolve (matches the local `pyright --pythonpath .venv/bin/python`).
+        run: pyright --pythonpath "$(which python)"
+      - name: Tests (pytest)
+        run: pytest -q
+        # The suite is self-contained: tests that need secrets set their own.
+        # Live-device tests skip unless NB_LIVE_* is set (never in CI).
+
+  migrations-postgres:
+    name: Migrations (Postgres dialect)
+    runs-on: ubuntu-latest
+    # Guards dialect portability: the SQLite-first migrations must also apply
+    # cleanly on Postgres (a real deploy target under multi-worker). This job
+    # exists because live-PG validation caught two silent breaks the SQLite
+    # tests could not — an unnamed FK dropped by the wrong name, and a `DEFAULT 1`
+    # boolean Postgres rejects.
+    #
+    # Forward path only: Postgres deployments roll FORWARD (or restore from
+    # backup), never `alembic downgrade`. Several SQLite-first downgrades use
+    # casts/batch-recreate that Postgres can't run (e.g. varchar→ENUM without a
+    # USING clause), and supporting them has no production value — so they are
+    # intentionally not exercised here.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nb
+          POSTGRES_PASSWORD: nbpass
+          POSTGRES_DB: nbtest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nb -d nbtest"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      NB_ENVIRONMENT: development
+      NB_DB_URL: postgresql+asyncpg://nb:nbpass@localhost:5432/nbtest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install (runtime deps only)
+        run: pip install -e .
+      - name: Upgrade to head (forward path)
+        run: alembic upgrade head
+
+  frontend:
+    name: Frontend gate (tsc · eslint · vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Type check (tsc)
+        run: npx tsc -b --noEmit
+      - name: Lint (eslint)
+        run: npm run lint
+      - name: Tests (vitest)
+        run: npm run test
+
+  docker:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    # Build the deployable image only after both gates pass.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # The image copies a prebuilt SPA (the in-container npm install is OOM-prone
+      # on constrained hosts), so build dist on the runner first.
+      - name: Build SPA
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+      - name: Build image
+        run: docker build -t northbound:ci .

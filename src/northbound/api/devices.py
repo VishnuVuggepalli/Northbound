@@ -14,27 +14,29 @@ from __future__ import annotations
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from northbound.api.deps import get_current_user, require_admin
+from northbound.api.limiter import limiter, write_rate_key, write_rate_limit_provider
 from northbound.db import get_session
 from northbound.drivers.base import AuthError, DriverError, ReachabilityError
 from northbound.drivers.factory import driver_for, driver_from_params
 from northbound.drivers.registry import get_driver_class
 from northbound.models.device import Device
-from northbound.models.enums import Environment
 from northbound.models.user import User
 from northbound.schemas.device import (
     ConnectionTestIn,
     CredentialsRotateIn,
     DeviceCreateIn,
     DeviceOut,
+    DeviceWritesIn,
     DiscoverIn,
     DiscoverOut,
     PortOut,
+    RediscoverOut,
     TestConnectionOut,
 )
 from northbound.schemas.driver import (
@@ -43,10 +45,15 @@ from northbound.schemas.driver import (
     DiscoveryResult,
     PortState,
 )
-from northbound.services import audit, reachability
-from northbound.services.credvault import FernetCredVault, serialize_credentials
+from northbound.services import audit, port_state, reachability
+from northbound.services.credvault import (
+    FernetCredVault,
+    deserialize_credentials,
+    serialize_credentials,
+)
 from northbound.services.device_policy import is_writable
-from northbound.services.onboarding import onboard_device
+from northbound.services.onboarding import onboard_device, rediscover_device
+from northbound.services.sites import site_exists
 
 logger = logging.getLogger("northbound.api.devices")
 
@@ -109,6 +116,7 @@ def _device_out(device: Device, *, reachable: bool | None = None) -> DeviceOut:
         prefer_native_api=device.prefer_native_api,
         capabilities=capabilities,
         writable=is_writable(device),
+        writes_enabled=device.writes_enabled,
         reachable=reachable,
     )
 
@@ -120,11 +128,20 @@ async def _load_device(session: AsyncSession, device_id: str) -> Device:
     return device
 
 
+def _credentials_for(device: Device) -> Credentials:
+    """Decrypt the device's stored credentials (empty bag if none)."""
+    if device.encrypted_credentials is None:
+        return Credentials()
+    return deserialize_credentials(device.encrypted_credentials, FernetCredVault.from_settings())
+
+
 # --------------------------------------------------------------------------- #
 # onboarding probes (stateless — never persist)
 # --------------------------------------------------------------------------- #
 @router.post("/test-connection", response_model=TestConnectionOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def test_connection(
+    request: Request,
     body: ConnectionTestIn,
     _admin: Annotated[User, Depends(require_admin)],
 ) -> TestConnectionOut:
@@ -139,6 +156,8 @@ async def test_connection(
         result = await driver.test_credentials()
     except (AuthError, ReachabilityError) as exc:
         return TestConnectionOut(ok=False, latency_ms=0.0, platform_version=None, error=str(exc))
+    finally:
+        await driver.aclose()
     return TestConnectionOut(
         ok=result.ok,
         latency_ms=result.latency_ms,
@@ -148,7 +167,9 @@ async def test_connection(
 
 
 @router.post("/discover", response_model=DiscoverOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def discover(
+    request: Request,
     body: DiscoverIn,
     _admin: Annotated[User, Depends(require_admin)],
 ) -> DiscoverOut:
@@ -166,6 +187,8 @@ async def discover(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Discovery failed: {exc}",
         ) from exc
+    finally:
+        await driver.aclose()
     return DiscoverOut(
         hostname=result.hostname,
         ports=[_port_out(p) for p in result.ports],
@@ -178,7 +201,9 @@ async def discover(
 # atomic onboard (the only write that creates a device)
 # --------------------------------------------------------------------------- #
 @router.post("", response_model=DeviceOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def create_device(
+    request: Request,
     body: DeviceCreateIn,
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -190,6 +215,11 @@ async def create_device(
     the whole unit back, leaving no orphan device or ports.
     """
     _require_known_platform(body.platform_id)
+    if not await site_exists(session, body.environment):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown site: {body.environment}. Create it first via POST /api/sites.",
+        )
     creds: Credentials = body.credentials.to_credentials()
 
     # Step 6: re-run discovery (outside the transaction). No DB hit on failure.
@@ -205,6 +235,8 @@ async def create_device(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Discovery failed; device not onboarded: {exc}",
         ) from exc
+    finally:
+        await driver.aclose()
 
     vault = FernetCredVault.from_settings()
 
@@ -245,9 +277,9 @@ async def create_device(
 async def list_devices(
     _user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    environment: Environment | None = None,
+    environment: str | None = None,
 ) -> list[DeviceOut]:
-    """List devices (optional ``?environment=`` filter). Never returns creds."""
+    """List devices (optional ``?environment=<site slug>`` filter). Never returns creds."""
     stmt = select(Device).order_by(Device.name)
     if environment is not None:
         stmt = stmt.where(Device.environment == environment)
@@ -271,7 +303,9 @@ async def get_device(
 # rotate credentials (re-test first; old creds retained on failure)
 # --------------------------------------------------------------------------- #
 @router.patch("/{device_id}/credentials", response_model=DeviceOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def rotate_credentials(
+    request: Request,
     device_id: str,
     body: CredentialsRotateIn,
     _admin: Annotated[User, Depends(require_admin)],
@@ -292,6 +326,8 @@ async def rotate_credentials(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"New credentials rejected; not rotated: {exc}",
         ) from exc
+    finally:
+        await driver.aclose()
     if not result.ok:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -306,20 +342,120 @@ async def rotate_credentials(
 
 
 # --------------------------------------------------------------------------- #
-# offboard (cascade ports + backups via FK ondelete=CASCADE)
+# per-device write feature flag (F77) — admin enable/disable config writes
+# --------------------------------------------------------------------------- #
+@router.patch("/{device_id}/writes", response_model=DeviceOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def set_device_writes(
+    request: Request,
+    device_id: str,
+    body: DeviceWritesIn,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DeviceOut:
+    """Enable/disable config writes for a device (gradual rollout / kill-switch).
+
+    Does NOT override intrinsic read-only status (router/vpn role or a
+    non-writable platform) — ``writable`` in the response reflects the combined
+    policy. Audited.
+    """
+    device = await _load_device(session, device_id)
+    before = device.writes_enabled
+    device.writes_enabled = body.enabled
+    session.add(device)
+    await session.flush()
+    await audit.append_audit(
+        session,
+        user_id=admin.id,
+        action="device.writes_set",
+        target_device_id=device.id,
+        before={"writes_enabled": before},
+        after={"writes_enabled": body.enabled},
+        result="ok",
+    )
+    return _device_out(device)
+
+
+# --------------------------------------------------------------------------- #
+# re-discover (F18) — re-run discovery on an EXISTING device to refresh its
+# persisted metadata + config baseline. Read-only on the device, so it works
+# even for read-only platforms (SwOS/FreeBSD).
+# --------------------------------------------------------------------------- #
+@router.post("/{device_id}/rediscover", response_model=RediscoverOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def rediscover(
+    request: Request,
+    device_id: str,
+    admin: Annotated[User, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RediscoverOut:
+    """Re-probe an onboarded device and refresh its stored snapshot.
+
+    Non-destructive: adds metadata rows only for ports seen for the first time
+    (human edits preserved) and writes a fresh baseline backup. 502 on a probe
+    failure. Invalidates the live port-state cache so the next read is fresh.
+    """
+    device = await _load_device(session, device_id)
+    creds = _credentials_for(device)
+    driver = driver_for(device, creds)
+    try:
+        discovery = await driver.discover()
+    except (AuthError, ReachabilityError, DriverError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Re-discovery failed: {exc}"
+        ) from exc
+    finally:
+        await driver.aclose()
+
+    total, added = await rediscover_device(
+        session, device=device, discovery=discovery, actor_user_id=admin.id
+    )
+    port_state.invalidate(device.id)
+    return RediscoverOut(ports_total=total, ports_added=added, hostname=discovery.hostname)
+
+
+# --------------------------------------------------------------------------- #
+# offboard (port_metadata + backups cascade via FK ondelete=CASCADE; a device
+# with change-request history is blocked from hard-delete by FK RESTRICT so the
+# compliance trail is retained — surfaced as 409)
 # --------------------------------------------------------------------------- #
 @router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def delete_device(
+    request: Request,
     device_id: str,
     admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """Offboard a device. port_metadata + backups cascade via FK ondelete."""
+    """Offboard a device.
+
+    port_metadata + backups cascade via FK ondelete=CASCADE (operational data).
+    Change-request history uses FK ondelete=RESTRICT, so a device that has any
+    change requests CANNOT be hard-deleted — the compliance trail must be
+    retained. That case surfaces as 409 Conflict rather than an unhandled 500.
+    """
     device = await _load_device(session, device_id)
     name = device.name
     platform = device.platform
     mgmt_ip = device.mgmt_ip
     await session.delete(device)
+    try:
+        # Force the DELETE now so the FK RESTRICT fires here (not at commit),
+        # letting us attribute the IntegrityError to the retained change trail.
+        await session.flush()
+    except IntegrityError as exc:
+        # INVARIANT: rollback() leaves the session clean; `raise` MUST follow
+        # immediately. Do not add session work between here and the raise —
+        # any add()/flush() after rollback would open a fresh implicit
+        # transaction on a session the caller expects to be aborted.
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "device has change-request history and cannot be hard-deleted; "
+                "the change trail must be retained"
+            ),
+        ) from exc
 
     # Chain the offboard audit row through append_audit so it gets a real
     # row_hash and links to the current tip (was previously written with an

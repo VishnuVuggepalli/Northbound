@@ -1,6 +1,6 @@
 import { cn } from '@/lib/cn';
 import { renderConfigSnippet } from '@/lib/config';
-import type { Device, Port, RequestedChanges } from '@/types';
+import type { Device, Port, RequestedChanges } from '@/models';
 
 interface DiffProps {
   before: Required<RequestedChanges>;

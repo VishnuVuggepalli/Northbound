@@ -12,7 +12,6 @@ interface ImportMetaEnv {
    * (including unset) keeps the in-memory mock client so dev + Playwright E2E
    * stay fully offline. Default: mocks ON.
    */
-  readonly VITE_USE_MOCKS?: string;
 }
 
 interface ImportMeta {

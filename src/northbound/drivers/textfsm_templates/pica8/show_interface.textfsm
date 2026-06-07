@@ -1,0 +1,15 @@
+Value NAME ([\w/.-]+)
+Value ADMIN (Enabled|Disabled)
+Value LINK (Up|Down)
+Value MTU (\d+)
+Value SPEED (\S+)
+Value DUPLEX (\w+)
+Value MAC ([0-9A-Fa-f:]{17})
+
+Start
+  # One multi-line block per physical interface; Record on the address line
+  # (last field in the block). Values set earlier in the block persist until
+  # Record clears them for the next block.
+  ^Physical\s+interface:\s+${NAME},\s+${ADMIN},.*Physical\s+link\s+is\s+${LINK}
+  ^Link-level\s+type:.*MTU:\s+${MTU},\s+Speed:\s+${SPEED},\s+Duplex:\s+${DUPLEX}
+  ^Current\s+address:\s+${MAC} -> Record

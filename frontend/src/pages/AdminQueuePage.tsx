@@ -9,6 +9,7 @@ import {
   useAllPorts,
   useRejectRequest,
   useRequests,
+  useSites,
 } from '@/api/queries';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
@@ -28,11 +29,12 @@ export function AdminQueuePage() {
   const { data: requests = [] } = useRequests();
   const { data: devices = [] } = useDevices();
   const { data: ports = {} } = useAllPorts();
+  const { data: sites = [] } = useSites();
   const approve = useApproveRequest();
   const apply = useApplyRequest();
   const reject = useRejectRequest();
 
-  const [envFilter, setEnvFilter] = useState<'all' | 'lab' | 'dc'>('all');
+  const [envFilter, setEnvFilter] = useState<string>('all');
   const [sort, setSort] = useState<SortKey>('age');
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -83,8 +85,7 @@ export function AdminQueuePage() {
             value={envFilter}
             options={[
               { value: 'all', label: 'All' },
-              { value: 'lab', label: 'Lab' },
-              { value: 'dc', label: 'DC' },
+              ...sites.map((s) => ({ value: s.slug, label: s.name })),
             ]}
             onChange={(v) => setEnvFilter(v)}
           />

@@ -2,7 +2,7 @@ import { Suspense, useMemo, useRef, useCallback } from 'react';
 import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
-import type { Device, TopologyLink } from '@/types';
+import type { Device, TopologyLink } from '@/models';
 import type { ThemeMode } from '@/lib/palette';
 
 interface Topology3DProps {
@@ -18,6 +18,8 @@ const PLATFORM_COLOR: Record<Device['platform'], number> = {
   mock: 0x5a6472,
   arista: 0x1a4cb8,
   pica8: 0x9a4a1a,
+  mikrotik: 0xc4421a,
+  mikrotik_swos: 0xb33a18,
   freebsd: 0x6b4ea8,
 };
 
@@ -44,7 +46,16 @@ function DeviceBox({ device, position, theme, onClick }: DeviceBoxProps) {
     <group position={position}>
       <mesh onClick={onPick}>
         <boxGeometry args={[w, h, d]} />
-        <meshLambertMaterial color={theme === 'dark' ? 0x1c2127 : 0x2a3038} />
+        {/* Node body must read as lighter steel against the near-black dark
+            backdrop (#0c0f12) — same fix as Switch3D's chassis; the prior
+            0x1c2127 sat almost on the background. meshStandardMaterial (low
+            metalness, mid roughness) catches a specular off the key light so
+            the node reads as a solid device, matching Switch3D's chassis. */}
+        <meshStandardMaterial
+          color={theme === 'dark' ? 0x343c46 : 0x2a3038}
+          metalness={0.45}
+          roughness={0.62}
+        />
       </mesh>
       <mesh position={[0, h / 2 + 0.02, 0]}>
         <boxGeometry args={[w * 0.96, 0.06, d * 0.96]} />

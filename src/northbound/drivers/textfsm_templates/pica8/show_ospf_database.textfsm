@@ -1,0 +1,16 @@
+Value Filldown AREA (\d+\.\d+\.\d+\.\d+)
+Value Filldown LS_TYPE (.+?)
+Value LINK_ID (\d+\.\d+\.\d+\.\d+)
+Value ADV_ROUTER (\d+\.\d+\.\d+\.\d+)
+Value AGE (\d+)
+Value SEQ (0x[0-9A-Fa-f]+)
+Value CKSUM (0x[0-9A-Fa-f]+)
+Value LINK_COUNT (\d*)
+
+Start
+  ^\s+${LS_TYPE}\s+Link\s+States\s+\(Area\s+${AREA}\)
+  ^${LINK_ID}\s+${ADV_ROUTER}\s+${AGE}\s+${SEQ}\s+${CKSUM}(\s+${LINK_COUNT})? -> Record
+  ^Link\s+ID\s+ADV\s+Router
+  ^OSPF\s+Router\s+with\s+ID
+  ^\s*$$
+  ^\.\s*$$

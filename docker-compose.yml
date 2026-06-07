@@ -1,0 +1,35 @@
+# Northbound — single-service deployment (SPA + API + scheduler in one image).
+#
+# Quick start:
+#   1. cp .env.example .env   # then fill in the two secrets (see that file)
+#   2. docker compose up --build
+#   3. open http://localhost:8090  (admin password is printed once at first seed)
+#
+# The SQLite DB lives on the named volume `nb-data`, so it survives restarts and
+# image rebuilds. For Postgres, set NB_DB_URL to a postgresql+asyncpg URL.
+
+services:
+  northbound:
+    build: .
+    image: northbound:latest
+    ports:
+      - "8090:8090"
+    environment:
+      NB_ENVIRONMENT: production
+      # REQUIRED — supply via .env (never commit real values).
+      NB_MASTER_KEY: ${NB_MASTER_KEY:?set NB_MASTER_KEY in .env}
+      NB_SECRET_KEY: ${NB_SECRET_KEY:?set NB_SECRET_KEY in .env}
+      NB_DB_URL: sqlite+aiosqlite:////data/northbound.db
+      # Seed the admin/alice users on first boot (idempotent). Set the seed
+      # passwords too, else a random admin password is printed once to the log.
+      NB_SEED: "1"
+      NB_SEED_ADMIN_PASSWORD: ${NB_SEED_ADMIN_PASSWORD:-}
+      NB_SEED_ALICE_PASSWORD: ${NB_SEED_ALICE_PASSWORD:-}
+      # Background jobs (reachability poll, nightly backup, audit verify, reconciler).
+      NB_ENABLE_SCHEDULER: "true"
+    volumes:
+      - nb-data:/data
+    restart: unless-stopped
+
+volumes:
+  nb-data:

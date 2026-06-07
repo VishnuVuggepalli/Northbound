@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { ChangeRequest, Device, PortMap } from '@/types';
+import type { ChangeRequest, Device, PortMap } from '@/models';
 
 interface NocRibbonProps {
   env: string;

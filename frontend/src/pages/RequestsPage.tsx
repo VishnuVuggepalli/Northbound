@@ -2,15 +2,32 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Inbox } from 'lucide-react';
 import { RequestRow } from '@/components/requests/RequestRow';
-import { useApplyRequest, useApproveRequest, useDevices, useAllPorts, useRejectRequest, useRequests } from '@/api/queries';
+import {
+  useApplyRequest,
+  useApproveRequest,
+  useDevices,
+  useAllPorts,
+  useRejectRequest,
+  useRequestChanges,
+  useRequests,
+  useResubmitRequest,
+} from '@/api/queries';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
 import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
 
-type FilterKey = 'all' | 'pending' | 'approved' | 'applied' | 'rejected' | 'failed';
-const FILTERS: FilterKey[] = ['all', 'pending', 'approved', 'applied', 'rejected', 'failed'];
+type FilterKey = 'all' | 'pending' | 'needs_revision' | 'approved' | 'applied' | 'rejected' | 'failed';
+const FILTERS: FilterKey[] = [
+  'all',
+  'pending',
+  'needs_revision',
+  'approved',
+  'applied',
+  'rejected',
+  'failed',
+];
 
 export function RequestsPage() {
   const user = useAuthStore((s) => s.user)!;
@@ -25,35 +42,44 @@ export function RequestsPage() {
   const approve = useApproveRequest();
   const apply = useApplyRequest();
   const reject = useRejectRequest();
+  const requestChanges = useRequestChanges();
+  const resubmit = useResubmitRequest();
 
   const [filter, setFilter] = useState<FilterKey>('all');
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const scope: 'mine' | 'all' = user.role === 'admin' ? 'all' : 'mine';
 
+  // The backend already scopes the list: non-admins get ONLY their own requests
+  // (forced server-side by user id), admins get all. So we trust `requests`
+  // as-is. We must NOT re-filter by `requested_by` here — that field is the
+  // requester's user id (a UUID), while the frontend only knows `user.username`,
+  // so a client-side `requested_by === username` compare matches nothing and
+  // wrongly empties the page. (`scope` still drives the heading copy below.)
   const filtered = useMemo(() => {
-    let list = scope === 'mine' ? requests.filter((r) => r.requested_by === user.username) : requests;
+    let list = requests;
     if (filter !== 'all') list = list.filter((r) => r.status === filter);
     return [...list].sort((a, b) => b.created_at - a.created_at);
-  }, [requests, scope, user.username, filter]);
+  }, [requests, filter]);
 
   const counts = useMemo<Record<FilterKey, number>>(() => {
-    const base = scope === 'mine' ? requests.filter((r) => r.requested_by === user.username) : requests;
+    const base = requests;
     return {
       all: base.length,
       pending: base.filter((r) => r.status === 'pending').length,
+      needs_revision: base.filter((r) => r.status === 'needs_revision').length,
       approved: base.filter((r) => r.status === 'approved').length,
       applied: base.filter((r) => r.status === 'applied').length,
       rejected: base.filter((r) => r.status === 'rejected').length,
       failed: base.filter((r) => r.status === 'failed').length,
     };
-  }, [requests, scope, user.username]);
+  }, [requests]);
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-6">
       <header className="mb-4">
         <div className="text-xs uppercase tracking-wider text-fg-subtle">
-          {scope === 'mine' ? 'Filed by you' : 'Across both environments'}
+          {scope === 'mine' ? 'Filed by you' : 'Across all sites'}
         </div>
         <h1 className="text-2xl font-semibold text-fg">
           {scope === 'mine' ? 'My requests' : 'All requests'}
@@ -73,7 +99,7 @@ export function RequestsPage() {
                 : 'border-border text-fg-muted hover:bg-bg-elev-2 hover:text-fg',
             )}
           >
-            <span className="capitalize">{k}</span>
+            <span className="capitalize">{k.replace('_', ' ')}</span>
             <span className="nb-mono text-[10px] text-fg-subtle">{counts[k]}</span>
           </button>
         ))}
@@ -124,6 +150,28 @@ export function RequestsPage() {
                     {
                       onSuccess: () =>
                         pushToast({ kind: 'info', title: 'Rejected', message: `#${id}` }),
+                    },
+                  )
+                }
+                onRequestChanges={(id, comment) =>
+                  requestChanges.mutate(
+                    { id, comment },
+                    {
+                      onSuccess: () =>
+                        pushToast({
+                          kind: 'info',
+                          title: 'Sent back for revision',
+                          message: `#${id}`,
+                        }),
+                    },
+                  )
+                }
+                onResubmit={(id, input) =>
+                  resubmit.mutate(
+                    { id, requested_changes: { untagged_vlan: input.untagged_vlan }, reason: input.reason },
+                    {
+                      onSuccess: () =>
+                        pushToast({ kind: 'success', title: 'Resubmitted', message: `#${id}` }),
                     },
                   )
                 }

@@ -1,35 +1,42 @@
-"""Arista EOS driver — eAPI (JSON-RPC over HTTPS).
+"""Arista EOS driver — backed by NAPALM (eos / pyeapi).
 
-Write path uses ``configure session <name>`` + ``commit timer 0:<seconds>``
-which is Arista's commit-confirmed equivalent. The session name lives in
-``ConfigDiff.metadata['session_name']`` and is what ``confirm`` / ``revert``
-operate on.
-
-Wire format (eAPI):
-    POST https://<host>/command-api
-    Body: {"jsonrpc": "2.0", "method": "runCmds",
-           "params": {"version": 1, "cmds": [...], "format": "json"|"text"},
-           "id": "nb-..."}
-    Response: {"jsonrpc": "2.0", "result": [...]} OR {"error": {...}}
-
-Only the JSON contract is touched here — every byte of HTTP goes through
-``HttpxClient`` (semaphore, TLS verify, timeout). Driver never imports
-``httpx`` directly.
+We do NOT hand-roll the eAPI JSON-RPC protocol, error handling, or commit-confirm
+machinery: NAPALM's ``eos`` driver owns all of it. This module only:
+  * adapts our :class:`Driver` ABC onto NAPALM's sync API (every call wrapped in
+    ``asyncio.to_thread`` — NAPALM is blocking),
+  * maps NAPALM getters → our ``PortState`` / ``Neighbor`` shapes,
+  * declares the desired change as EOS config and applies it with NAPALM's
+    confirmed-commit (``commit_config(revert_in=…)`` → ``confirm_commit`` /
+    ``rollback``),
+  * translates NAPALM exceptions → our ``AuthError`` / ``ReachabilityError`` /
+    ``DriverError`` taxonomy.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
 import time
 import uuid
-from typing import cast
+from typing import Any
 
-from northbound._lib.transport.httpx_client import HttpxClient, HttpxParams
+from napalm import get_network_driver
+from napalm.base.exceptions import (  # type: ignore[import-untyped]
+    CommandErrorException,
+    ConnectionException,
+    MergeConfigException,
+)
+
+from northbound._lib import lldp
 from northbound.drivers.base import (
     AuthError,
     Driver,
     DriverError,
+    NotSupported,
     ReachabilityError,
 )
+from northbound.drivers.config_templates import render_lines
 from northbound.drivers.registry import register
 from northbound.schemas.driver import (
     ApplyResult,
@@ -39,24 +46,24 @@ from northbound.schemas.driver import (
     Credentials,
     DiscoveryResult,
     DriverCapabilities,
+    L3Change,
     Neighbor,
+    OspfChange,
     PortChange,
     PortState,
     TestResult,
+    VlanChange,
+    VrfChange,
 )
 
-# eAPI error codes that map to AuthError. eAPI returns HTTP 401 for bad
-# basic-auth before JSON-RPC ever runs, but some configurations return
-# 200 + JSON error — handle both.
-_AUTH_ERROR_CODES = {1000, 1001, 1002}  # documented as auth / permission
+logger = logging.getLogger("northbound.drivers.arista")
 
-# ConfigDiff metadata keys (kept here to avoid magic strings).
 _SESSION_KEY = "session_name"
 
 
 @register
 class AristaDriver(Driver):
-    """Arista EOS via eAPI."""
+    """Arista EOS via NAPALM eos (pyeapi/eAPI over HTTPS)."""
 
     platform_id = "arista"
     display_name = "Arista EOS"
@@ -64,7 +71,7 @@ class AristaDriver(Driver):
         writable=True,
         supports_commit_confirm=True,
         native_api_available=True,
-        supports_snmp_read=True,
+        supports_snmp_read=False,
         supports_lldp=True,
         max_concurrency=5,
         auth_methods=[AuthMethod.PASSWORD],
@@ -76,481 +83,398 @@ class AristaDriver(Driver):
         conn: ConnectionParams,
         creds: Credentials,
         *,
-        http: HttpxClient | None = None,
+        device: Any | None = None,
     ) -> None:
         super().__init__(conn, creds)
-        self._http = http if http is not None else self._build_http()
+        self._device = device  # injected NAPALM device (tests); else built lazily
+        self._opened = False
 
-    # ---------- transport plumbing ----------
+    # ---------- NAPALM lifecycle ----------
 
-    def _build_http(self) -> HttpxClient:
-        scheme = "https"
-        port = self._conn.port or 443
-        base_url = f"{scheme}://{self._conn.host}:{port}"
-        return HttpxClient(
-            HttpxParams(
-                base_url=base_url,
-                timeout_seconds=self._conn.timeout_seconds,
-                max_concurrency=self.capabilities.max_concurrency,
-                verify_tls=False,  # lab default; production wires this off conn
-            )
+    def _build_device(self) -> Any:
+        driver = get_network_driver("eos")
+        optional_args = {
+            "transport": "https",
+            "port": self._conn.port or 443,
+            # self-signed lab certs: pyeapi verifies only if a context is set;
+            # default https transport does not verify, which suits lab use.
+        }
+        return driver(
+            hostname=self._conn.host,
+            username=self._creds.username or "",
+            password=self._creds.password or "",
+            timeout=int(self._conn.timeout_seconds) or 30,
+            optional_args=optional_args,
         )
 
-    def _auth_header(self) -> dict[str, str]:
-        username = self._creds.username or ""
-        password = self._creds.password or ""
-        return HttpxClient.basic_auth_header(username, password)
+    async def _open(self) -> Any:
+        if self._device is None:
+            self._device = self._build_device()
+        if not self._opened:
+            try:
+                await asyncio.to_thread(self._device.open)
+            except ConnectionException as exc:
+                raise ReachabilityError(f"arista: cannot connect: {exc}") from exc
+            except Exception as exc:  # auth/SSL/etc. surfaced by pyeapi
+                raise _classify(exc) from exc
+            self._opened = True
+        return self._device
 
-    async def _run_cmds(
-        self,
-        cmds: list[str],
-        *,
-        fmt: str = "json",
-        request_id: str | None = None,
-    ) -> list[object]:
-        """Execute one or more EOS commands. Returns ``result`` list verbatim.
-
-        Raises:
-            AuthError: HTTP 401 or eAPI auth error code.
-            ReachabilityError: connection refused / DNS / timeout.
-            DriverError: any other eAPI failure.
-        """
-        rid = request_id or f"nb-{uuid.uuid4().hex[:8]}"
-        body = {
-            "jsonrpc": "2.0",
-            "method": "runCmds",
-            "params": {"version": 1, "cmds": cmds, "format": fmt},
-            "id": rid,
-        }
+    async def _call(self, fn_name: str, *args: Any, **kwargs: Any) -> Any:
+        dev = await self._open()
+        fn = getattr(dev, fn_name)
         try:
-            response = await self._http.post(
-                "/command-api",
-                headers=self._auth_header(),
-                json=body,
-            )
-        except Exception as exc:  # transport-level failures
-            raise ReachabilityError(f"arista eAPI transport error: {exc}") from exc
+            return await asyncio.to_thread(fn, *args, **kwargs)
+        except (ConnectionException, MergeConfigException, CommandErrorException) as exc:
+            raise _classify(exc) from exc
+        except Exception as exc:
+            raise _classify(exc) from exc
 
-        if response.status_code == 401:
-            raise AuthError("arista eAPI returned 401")
-        if response.status_code >= 400:
-            raise DriverError(f"arista eAPI HTTP {response.status_code}: {response.text}")
+    async def aclose(self) -> None:
+        dev, self._device, opened = self._device, None, self._opened
+        self._opened = False
+        if dev is not None and opened:
+            with contextlib.suppress(Exception):  # close must never raise
+                await asyncio.to_thread(dev.close)
 
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise DriverError(f"arista eAPI: non-dict response: {payload!r}")
-        if "error" in payload:
-            err = payload["error"]
-            code = err.get("code") if isinstance(err, dict) else None
-            msg = err.get("message") if isinstance(err, dict) else str(err)
-            if code in _AUTH_ERROR_CODES:
-                raise AuthError(f"arista eAPI auth error: {msg}")
-            raise DriverError(f"arista eAPI error (code={code}): {msg}")
-        result = payload.get("result")
-        if not isinstance(result, list):
-            raise DriverError(f"arista eAPI: missing 'result' list: {payload!r}")
-        return result
-
-    # ---------- onboarding ----------
+    # ---------- onboarding / read ----------
 
     async def test_credentials(self) -> TestResult:
         start = time.monotonic()
         try:
-            result = await self._run_cmds(["show version"], fmt="json")
+            facts = await self._call("get_facts")
         except AuthError as exc:
             return TestResult(
-                ok=False,
-                latency_ms=(time.monotonic() - start) * 1000.0,
-                platform_version=None,
-                error=str(exc),
+                ok=False, latency_ms=_ms(start), platform_version=None, error=str(exc)
             )
         except (ReachabilityError, DriverError) as exc:
             return TestResult(
-                ok=False,
-                latency_ms=(time.monotonic() - start) * 1000.0,
-                platform_version=None,
-                error=str(exc),
+                ok=False, latency_ms=_ms(start), platform_version=None, error=str(exc)
             )
-        latency = (time.monotonic() - start) * 1000.0
-        version = _extract_version(result[0]) if result else None
-        return TestResult(ok=True, latency_ms=latency, platform_version=version)
-
-    async def discover(self) -> DiscoveryResult:
-        hostname = await self._get_hostname()
-        ports = await self.get_ports()
-        running = await self.get_running_config()
-        return DiscoveryResult(
-            hostname=hostname,
-            ports=tuple(ports),
-            running_config=running,
-            services={"lldp": True},
-        )
-
-    # ---------- read ----------
+        model = facts.get("model") or ""
+        version = facts.get("os_version") or ""
+        ver = f"{facts.get('vendor', 'Arista')} {model} {version}".strip()
+        return TestResult(ok=True, latency_ms=_ms(start), platform_version=ver or version or None)
 
     async def reachable(self) -> bool:
         try:
-            await self._run_cmds(["show version"], fmt="json")
-            return True
+            dev = await self._open()
+            alive = await asyncio.to_thread(dev.is_alive)
+            return bool(alive.get("is_alive", True))
         except (ReachabilityError, AuthError, DriverError):
             return False
 
-    async def _get_hostname(self) -> str:
-        try:
-            result = await self._run_cmds(["show hostname"], fmt="json")
-        except DriverError:
-            return ""
-        if not result or not isinstance(result[0], dict):
-            return ""
-        hostname = result[0].get("hostname")
-        return hostname if isinstance(hostname, str) else ""
+    async def discover(self) -> DiscoveryResult:
+        facts = await self._call("get_facts")
+        ports = await self.get_ports()
+        running = await self.get_running_config()
+        return DiscoveryResult(
+            hostname=facts.get("hostname", ""),
+            ports=tuple(ports),
+            running_config=running,
+            services={"lldp": self.capabilities.supports_lldp},
+        )
 
     async def get_running_config(self) -> str:
-        result = await self._run_cmds(["show running-config"], fmt="text")
-        if not result or not isinstance(result[0], dict):
-            return ""
-        output = result[0].get("output")
-        return output if isinstance(output, str) else ""
+        cfg = await self._call("get_config", retrieve="running")
+        running = cfg.get("running", "") if isinstance(cfg, dict) else ""
+        return running if isinstance(running, str) else ""
 
     async def backup_config(self) -> str:
         cfg = await self.get_running_config()
         return cfg if cfg else "! arista: empty running-config\n"
 
     async def get_ports(self) -> list[PortState]:
-        result = await self._run_cmds(
-            ["show interfaces", "show interfaces switchport"],
-            fmt="json",
-        )
-        if len(result) < 2:
-            return []
-        interfaces = _parse_interfaces(result[0])
-        switchport = _parse_switchport(result[1])
-        return _merge_port_state(interfaces, switchport)
+        interfaces = await self._call("get_interfaces")
+        switchports = await self._switchports()
+        return _merge_ports(interfaces, switchports)
+
+    async def _switchports(self) -> dict[str, dict[str, Any]]:
+        """Per-port access/trunk VLANs via the pyeapi node's structured
+        ``show interfaces switchport`` (NAPALM's get_vlans only lists defined
+        VLANs and misses per-port access/native VLAN — verified live)."""
+        dev = await self._open()
+        try:
+            res = await asyncio.to_thread(
+                dev.device.run_commands,
+                ["show interfaces switchport"],
+                encoding="json",
+            )
+        except Exception:
+            # Don't blank per-port VLANs silently — that masquerades as "no VLANs".
+            logger.warning(
+                "arista switchports query failed; per-port VLANs will be empty",
+                exc_info=True,
+            )
+            return {}
+        sw = res[0].get("switchports", {}) if res and isinstance(res[0], dict) else {}
+        return sw if isinstance(sw, dict) else {}
 
     async def get_neighbors(self, port: str | None = None) -> list[Neighbor]:
         try:
-            result = await self._run_cmds(["show lldp neighbors detail"], fmt="json")
+            detail = await self._call("get_lldp_neighbors_detail")
         except DriverError:
             return []
-        if not result:
-            return []
-        neighbors = _parse_lldp(result[0])
+        neighbors = _parse_lldp_detail(detail)
         if port is None:
             return neighbors
-        # Filter by local port — annotated as Neighbor.port_id when parsing.
-        return [n for n in neighbors if n.system_description and port in n.system_description]
+        return [n for n in neighbors if lldp.local_port_matches(n.system_description, port)]
 
-    # ---------- write ----------
+    # ---------- write (NAPALM confirmed-commit) ----------
 
     async def render_change(self, port: str, change: PortChange) -> ConfigDiff:
-        session_name = f"nb-{uuid.uuid4().hex[:8]}"
+        session = f"nb-{uuid.uuid4().hex[:8]}"
         cmds = _build_change_commands(port, change)
-        raw_before = f"interface {port}\n  ! (previous state not captured)\n"
-        raw_after = "\n".join(cmds) + "\n"
-        summary = f"Update {port}"
         return ConfigDiff(
-            summary=summary,
-            raw_before=raw_before,
-            raw_after=raw_after,
+            summary=f"Update {port}",
+            raw_before=f"interface {port}\n  ! (previous state not captured)\n",
+            raw_after="\n".join(cmds) + "\n",
             commands=tuple(cmds),
-            metadata={_SESSION_KEY: session_name},
+            metadata={_SESSION_KEY: session},
         )
 
-    async def apply_change(
-        self,
-        diff: ConfigDiff,
-        *,
-        confirm_seconds: int = 60,
-    ) -> ApplyResult:
-        session_name = diff.metadata.get(_SESSION_KEY)
-        if not session_name:
-            return ApplyResult(
-                success=False,
-                confirm_token=None,
-                confirm_deadline_at=None,
-                error="ConfigDiff.metadata missing 'session_name'",
-            )
-        # Build the eAPI command list: enter config session, run the change,
-        # then commit with a timer (auto-rollback if not confirmed).
-        timer = _format_commit_timer(confirm_seconds)
-        cmds: list[str] = [
-            "enable",
-            f"configure session {session_name}",
-            *diff.commands,
-            f"commit timer {timer}",
-        ]
+    def _diff(self, summary: str, cmds: list[str]) -> ConfigDiff:
+        return ConfigDiff(
+            summary=summary,
+            raw_before="! (previous state not captured)\n",
+            raw_after="\n".join(cmds) + "\n",
+            commands=tuple(cmds),
+            metadata={_SESSION_KEY: f"nb-{uuid.uuid4().hex[:8]}"},
+        )
+
+    async def render_vlan_change(self, change: VlanChange) -> ConfigDiff:
+        """EOS VLAN-database create/delete — rendered from arista/vlan.j2."""
+        verb = "Delete" if change.action == "delete" else "Create"
+        return self._diff(
+            f"{verb} VLAN {change.vlan_id}", render_lines("arista/vlan.j2", **change.model_dump())
+        )
+
+    async def render_l3_change(self, change: L3Change) -> ConfigDiff:
+        """EOS SVI / loopback create/delete incl. VRF binding — arista/l3.j2.
+
+        SVI interface is ``Vlan<id>`` (EOS-capitalised); loopback uses the given
+        name (e.g. ``Loopback1``). The template emits ``vrf forwarding`` before
+        ``ip address`` (EOS clears the address on a VRF change)."""
+        verb = "Delete" if change.action == "delete" else "Create"
+        label = "SVI" if change.kind == "svi" else "loopback"
+        return self._diff(
+            f"{verb} {label} {change.iface_name}",
+            render_lines("arista/l3.j2", **change.model_dump()),
+        )
+
+    async def render_ospf_change(self, change: OspfChange) -> ConfigDiff:
+        """EOS OSPFv2 change — arista/ospf.j2. Process id defaults to 1; area +
+        cost/timers are interface-level, but ``passive-interface`` is under
+        ``router ospf`` (the EOS model)."""
+        what = "router-id" if change.target == "router-id" else (change.interface or "")
+        return self._diff(
+            f"OSPF {change.action} {what}", render_lines("arista/ospf.j2", **change.model_dump())
+        )
+
+    async def render_vrf_change(self, change: VrfChange) -> ConfigDiff:
+        """EOS VRF create/delete (`vrf instance <name>`, 4.22+) — arista/vrf.j2."""
+        verb = "Delete" if change.action == "delete" else "Create"
+        return self._diff(
+            f"{verb} VRF {change.name}", render_lines("arista/vrf.j2", **change.model_dump())
+        )
+
+    async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
+        session = diff.metadata.get(_SESSION_KEY) or f"nb-{uuid.uuid4().hex[:8]}"
+        config = "\n".join(diff.commands)
+        # NAPALM owns the eAPI session + confirmed-commit: load the candidate,
+        # then commit with a revert timer. If confirm() is not called in time the
+        # device rolls back on its own; revert() rolls back immediately.
         try:
-            await self._run_cmds(cmds, fmt="json")
+            await self._call("load_merge_candidate", config=config)
+            await self._call("commit_config", revert_in=max(1, int(confirm_seconds)))
         except (AuthError, ReachabilityError, DriverError) as exc:
+            with contextlib.suppress(DriverError):
+                await self._call("discard_config")  # clear the loaded candidate
             return ApplyResult(
-                success=False,
-                confirm_token=None,
-                confirm_deadline_at=None,
-                error=str(exc),
+                success=False, confirm_token=None, confirm_deadline_at=None, error=str(exc)
             )
         return ApplyResult(
             success=True,
-            confirm_token=session_name,
+            confirm_token=session,
             confirm_deadline_at=time.time() + confirm_seconds,
             error=None,
         )
 
     async def confirm(self, apply_token: str) -> None:
-        await self._run_cmds(
-            ["enable", f"configure session {apply_token}", "commit"],
-            fmt="json",
-        )
+        # Cancel the revert timer → change becomes permanent.
+        await self._call("confirm_commit")
 
     async def revert(self, apply_token: str) -> None:
-        await self._run_cmds(
-            ["enable", f"configure session {apply_token}", "abort"],
-            fmt="json",
-        )
+        # Roll back the pending (revert_in) commit immediately.
+        await self._call("rollback")
 
 
 # ---------------------------------------------------------------------------
-# parsers — private, pure, easy to unit-test
+# exception mapping + pure helpers
 # ---------------------------------------------------------------------------
 
 
-def _extract_version(show_version_row: object) -> str | None:
-    """Pull ``modelName + version`` out of a ``show version`` JSON row."""
-    if not isinstance(show_version_row, dict):
-        return None
-    model = show_version_row.get("modelName") or show_version_row.get("model")
-    version = show_version_row.get("version")
-    parts = [str(p) for p in (model, version) if p]
-    return " ".join(parts) if parts else None
+def _classify(exc: BaseException) -> DriverError:
+    """Map a NAPALM/pyeapi exception to our taxonomy."""
+    if isinstance(exc, (AuthError, ReachabilityError, NotSupported, DriverError)):
+        return exc
+    msg = str(exc)
+    low = msg.lower()
+    if (
+        isinstance(exc, ConnectionException)
+        or "unreachable" in low
+        or "timed out" in low
+        or "connection" in low
+    ):
+        return ReachabilityError(f"arista: {msg}")
+    if "401" in low or "unauthorized" in low or "authentication" in low or "authorization" in low:
+        return AuthError(f"arista: {msg}")
+    return DriverError(f"arista: {msg}")
 
 
-def _parse_interfaces(payload: object) -> dict[str, PortState]:
-    """Convert ``show interfaces`` JSON into a name → PortState map.
+def _ms(start: float) -> float:
+    return (time.monotonic() - start) * 1000.0
 
-    Switchport (vlan) fields default to None here; they're filled in by
-    ``_parse_switchport`` and merged in ``_merge_port_state``.
+
+def _merge_ports(interfaces: object, switchports: object) -> list[PortState]:
+    """NAPALM get_interfaces + pyeapi ``show interfaces switchport`` → PortState.
+
+    ``switchports`` is ``{name: {"switchportInfo": {"mode", "accessVlanId",
+    "trunkingNativeVlanId", "trunkAllowedVlans"}}}``. access → untagged =
+    accessVlanId; trunk → untagged = native, tagged = allowed list.
     """
-    if not isinstance(payload, dict):
-        return {}
-    interfaces_obj = payload.get("interfaces")
-    if not isinstance(interfaces_obj, dict):
-        return {}
-    out: dict[str, PortState] = {}
-    for name, raw in interfaces_obj.items():
-        if not isinstance(raw, dict):
-            continue
-        line_proto = str(raw.get("lineProtocolStatus", "")).lower()
-        iface_status = str(raw.get("interfaceStatus", "")).lower()
-        link_up = line_proto == "up"
-        admin_up = iface_status != "disabled"
-        # bandwidth is in bits/sec when present
-        bandwidth_raw = raw.get("bandwidth")
-        speed_mbps: int | None = None
-        if isinstance(bandwidth_raw, (int, float)) and bandwidth_raw > 0:
-            speed_mbps = int(bandwidth_raw // 1_000_000)
-        duplex = raw.get("duplex")
-        duplex_norm: str | None = None
-        if isinstance(duplex, str):
-            lower = duplex.lower()
-            if "full" in lower:
-                duplex_norm = "full"
-            elif "half" in lower:
-                duplex_norm = "half"
-        mac = raw.get("physicalAddress")
-        mtu = raw.get("mtu")
-        description = raw.get("description") or ""
-        out[name] = PortState(
-            name=name,
-            admin_up=admin_up,
-            link_up=link_up,
-            speed_mbps=speed_mbps,
-            duplex=cast("None | str", duplex_norm),  # type: ignore[assignment]
-            mac=mac if isinstance(mac, str) else None,
-            mtu=int(mtu) if isinstance(mtu, (int, float)) else None,
-            untagged_vlan=None,
-            tagged_vlans=(),
-            description=description if isinstance(description, str) else "",
-            host_model="",
-            bmc_ip="",
-            notes="",
-            services={},
-        )
-    return out
+    if not isinstance(interfaces, dict):
+        return []
+    sw = switchports if isinstance(switchports, dict) else {}
 
-
-def _parse_switchport(payload: object) -> dict[str, dict[str, object]]:
-    """Pull per-port VLAN info from ``show interfaces switchport``."""
-    if not isinstance(payload, dict):
-        return {}
-    switchports = payload.get("switchports")
-    if not isinstance(switchports, dict):
-        return {}
-    out: dict[str, dict[str, object]] = {}
-    for name, raw in switchports.items():
-        if not isinstance(raw, dict):
-            continue
-        sp = raw.get("switchportInfo")
-        if not isinstance(sp, dict):
-            continue
-        out[name] = {
-            "access_vlan": sp.get("accessVlanId"),
-            "native_vlan": sp.get("trunkingNativeVlanId"),
-            "trunk_allowed": sp.get("trunkAllowedVlans"),
-            "mode": sp.get("mode"),
-        }
-    return out
-
-
-def _merge_port_state(
-    interfaces: dict[str, PortState],
-    switchport: dict[str, dict[str, object]],
-) -> list[PortState]:
-    """Overlay switchport VLAN data onto base interface state."""
     out: list[PortState] = []
-    for name, base in interfaces.items():
-        sp = switchport.get(name)
-        if sp is None:
-            out.append(base)
+    for name, data in interfaces.items():
+        if not isinstance(data, dict):
             continue
-        mode = sp.get("mode")
-        if isinstance(mode, str) and "trunk" in mode.lower():
-            untagged = _coerce_int(sp.get("native_vlan"))
-            tagged = _parse_trunk_allowed(sp.get("trunk_allowed"))
-        else:
-            untagged = _coerce_int(sp.get("access_vlan"))
-            tagged = ()
-        # Frozen dataclass — recreate with overlay.
+        untagged, tagged = _vlans_for(sw.get(name))
+        speed = data.get("speed")
         out.append(
             PortState(
-                name=base.name,
-                admin_up=base.admin_up,
-                link_up=base.link_up,
-                speed_mbps=base.speed_mbps,
-                duplex=base.duplex,
-                mac=base.mac,
-                mtu=base.mtu,
+                name=name,
+                admin_up=bool(data.get("is_enabled", True)),
+                link_up=bool(data.get("is_up", False)),
+                speed_mbps=int(speed) if isinstance(speed, (int, float)) and speed else None,
+                duplex=None,
+                mac=(data.get("mac_address") or None),
+                mtu=(int(data["mtu"]) if isinstance(data.get("mtu"), (int, float)) else None),
                 untagged_vlan=untagged,
                 tagged_vlans=tagged,
-                description=base.description,
-                host_model=base.host_model,
-                bmc_ip=base.bmc_ip,
-                notes=base.notes,
-                services=base.services,
+                description=str(data.get("description") or ""),
+                host_model="",
+                bmc_ip="",
+                notes="",
+                services={},
             )
         )
     return out
 
 
-def _coerce_int(value: object) -> int | None:
-    if isinstance(value, bool):  # bool is int subclass — exclude
+def _vlans_for(entry: object) -> tuple[int | None, tuple[int, ...]]:
+    """Extract (untagged, tagged) from one ``show interfaces switchport`` row."""
+    if not isinstance(entry, dict):
+        return None, ()
+    info = entry.get("switchportInfo")
+    if not isinstance(info, dict):
+        return None, ()
+    mode = str(info.get("mode") or "").lower()
+    if "trunk" in mode:
+        native = _coerce_vlan(info.get("trunkingNativeVlanId"))
+        return native, _parse_allowed(info.get("trunkAllowedVlans"))
+    # access (or default) → the access VLAN is the untagged VLAN
+    return _coerce_vlan(info.get("accessVlanId")), ()
+
+
+def _coerce_vlan(v: object) -> int | None:
+    if isinstance(v, bool):
         return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
+    if isinstance(v, int):
+        return v
+    if isinstance(v, str) and v.strip().isdigit():
+        return int(v.strip())
     return None
 
 
-def _parse_trunk_allowed(value: object) -> tuple[int, ...]:
-    """Parse '1-4,10,20' style trunk-allowed strings into a vlan tuple.
+def _parse_allowed(value: object) -> tuple[int, ...]:
+    """Parse an EOS trunk-allowed string ('10,20,30-32') into a VLAN tuple.
 
-    Returns empty on 'ALL', 'NONE', or unparseable inputs — UI shouldn't
-    pretend it knows the full vlan set.
-    """
+    'ALL' / 'NONE' / the full 1-4094 range → () (the UI shouldn't claim to know
+    the entire VLAN set)."""
     if not isinstance(value, str):
         return ()
-    normalized = value.strip().upper()
-    if normalized in ("ALL", "NONE", ""):
+    norm = value.strip().upper()
+    if norm in ("ALL", "NONE", "1-4094", ""):
         return ()
-    vlans: list[int] = []
-    for token in value.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        if "-" in token:
+    out: list[int] = []
+    for tok in value.split(","):
+        tok = tok.strip()
+        if "-" in tok:
             try:
-                lo, hi = (int(x) for x in token.split("-", 1))
+                lo, hi = (int(x) for x in tok.split("-", 1))
             except ValueError:
                 continue
-            vlans.extend(range(lo, hi + 1))
-        elif token.isdigit():
-            vlans.append(int(token))
-    return tuple(vlans)
+            out.extend(range(lo, hi + 1))
+        elif tok.isdigit():
+            out.append(int(tok))
+    return tuple(out)
 
 
-def _parse_lldp(payload: object) -> list[Neighbor]:
-    """Parse ``show lldp neighbors detail`` JSON.
+def _parse_lldp_detail(detail: object) -> list[Neighbor]:
+    """NAPALM get_lldp_neighbors_detail → Neighbor list.
 
-    The local-port name is stored in ``Neighbor.system_description`` prefix
-    so ``get_neighbors(port=...)`` can filter on it without adding a new
-    schema field. Format: ``[<local_port>] <remote system description>``.
+    Shape: ``{local_port: [ {remote_chassis_id, remote_port,
+    remote_system_name, remote_system_description}, ... ]}``. The local port is
+    encoded into the ``system_description`` ``[<local>] `` prefix (shared
+    convention) so ``get_neighbors(port=...)`` can filter.
     """
-    if not isinstance(payload, dict):
-        return []
-    table = payload.get("lldpNeighbors")
-    if not isinstance(table, dict):
+    if not isinstance(detail, dict):
         return []
     out: list[Neighbor] = []
-    for local_port, raw in table.items():
-        if not isinstance(raw, dict):
+    for local_port, entries in detail.items():
+        if not isinstance(entries, list):
             continue
-        neighbors_list = raw.get("lldpNeighborInfo")
-        if not isinstance(neighbors_list, list):
-            continue
-        for entry in neighbors_list:
-            if not isinstance(entry, dict):
+        for e in entries:
+            if not isinstance(e, dict):
                 continue
-            chassis_raw = entry.get("chassisId")
-            chassis_id = chassis_raw.strip() if isinstance(chassis_raw, str) else ""
-            port_id_raw = entry.get("neighborInterfaceInfo", {})
-            port_id = ""
-            if isinstance(port_id_raw, dict):
-                pid = port_id_raw.get("interfaceId") or port_id_raw.get("interfaceIdName")
-                if isinstance(pid, str):
-                    port_id = pid.strip()
-            sys_name = entry.get("systemName")
-            sys_desc = entry.get("systemDescription")
-            desc_prefix = f"[{local_port}] "
-            desc_body = sys_desc if isinstance(sys_desc, str) else ""
+            chassis = str(e.get("remote_chassis_id") or "").strip()
+            rport = str(e.get("remote_port") or e.get("remote_port_description") or "").strip()
+            sysname = e.get("remote_system_name")
+            sysdesc = str(e.get("remote_system_description") or "").strip()
             out.append(
                 Neighbor(
-                    chassis_id=chassis_id,
-                    port_id=port_id,
-                    system_name=sys_name if isinstance(sys_name, str) else None,
-                    system_description=desc_prefix + desc_body,
+                    chassis_id=lldp.normalize_chassis_id(chassis) if chassis else "",
+                    port_id=lldp.normalize_port_id(rport) if rport else "",
+                    system_name=sysname if isinstance(sysname, str) and sysname else None,
+                    system_description=(lldp.encode_local_port_prefix(str(local_port)) + sysdesc)
+                    or None,
                 )
             )
     return out
 
 
 def _build_change_commands(port: str, change: PortChange) -> list[str]:
-    """CLI command list for a PortChange — order matters on EOS.
+    """EOS config lines for a PortChange (the change intent NAPALM applies).
 
-    Description first (cosmetic, can't fail), then mode (access vs trunk),
-    then the vlan body. Trunk and access are mutually exclusive on a port,
-    so a PortChange specifying both ``untagged_vlan`` and ``tagged_vlans``
-    means: trunk mode, with native = untagged_vlan, allowed = tagged_vlans.
+    ``tagged_vlans`` ⇒ trunk (native = untagged_vlan, allowed = tagged set,
+    replace semantics); else access with the untagged VLAN.
     """
     cmds: list[str] = [f"interface {port}"]
     if change.description is not None:
-        cmds.append(f"  description {change.description}")
+        cmds.append(f"   description {change.description}")
     if change.tagged_vlans is not None:
-        cmds.append("  switchport mode trunk")
+        cmds.append("   switchport mode trunk")
         if change.untagged_vlan is not None:
-            cmds.append(f"  switchport trunk native vlan {change.untagged_vlan}")
+            cmds.append(f"   switchport trunk native vlan {change.untagged_vlan}")
         if change.tagged_vlans:
             allowed = ",".join(str(v) for v in change.tagged_vlans)
-            cmds.append(f"  switchport trunk allowed vlan {allowed}")
+            cmds.append(f"   switchport trunk allowed vlan {allowed}")
         else:
-            cmds.append("  switchport trunk allowed vlan none")
+            cmds.append("   switchport trunk allowed vlan none")
     elif change.untagged_vlan is not None:
-        cmds.append("  switchport mode access")
-        cmds.append(f"  switchport access vlan {change.untagged_vlan}")
+        cmds.append("   switchport mode access")
+        cmds.append(f"   switchport access vlan {change.untagged_vlan}")
     return cmds
-
-
-def _format_commit_timer(seconds: int) -> str:
-    """Render an EOS commit-timer value as ``H:MM:SS``."""
-    s = max(1, int(seconds))
-    hours, rem = divmod(s, 3600)
-    minutes, secs = divmod(rem, 60)
-    return f"{hours}:{minutes:02d}:{secs:02d}"

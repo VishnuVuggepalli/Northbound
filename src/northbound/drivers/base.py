@@ -17,10 +17,19 @@ from northbound.schemas.driver import (
     Credentials,
     DiscoveryResult,
     DriverCapabilities,
+    L3Change,
+    L3Interface,
     Neighbor,
+    OspfChange,
+    OspfInterfaceInfo,
     PortChange,
     PortState,
+    ProtocolDetail,
+    SystemInfo,
     TestResult,
+    VlanChange,
+    VlanInfo,
+    VrfChange,
 )
 
 
@@ -55,6 +64,24 @@ class Driver(ABC):
         self._conn = conn
         self._creds = creds
 
+    # ---------- lifecycle ----------
+
+    async def aclose(self) -> None:
+        """Release any transport the driver holds (http sockets, etc.).
+
+        Default is a no-op for drivers with no persistent transport (e.g.
+        mock, or the connection-per-run SSH path). Drivers that hold an
+        ``HttpxClient`` override this. MUST be idempotent and MUST NOT raise —
+        callers invoke it from ``finally`` blocks.
+        """
+        return None
+
+    async def __aenter__(self) -> Driver:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.aclose()
+
     # ---------- onboarding ----------
 
     @abstractmethod
@@ -87,10 +114,55 @@ class Driver(ABC):
         """LLDP neighbors. Default: none. Override per platform."""
         return []
 
+    async def get_system_info(self) -> SystemInfo:
+        """Live system snapshot: protocols, mgmt services, MAC table.
+
+        Default: empty (no sections, MAC unsupported). Override per platform
+        to fill what the driver's transport can reach.
+        """
+        return SystemInfo()
+
+    async def get_protocol_detail(self, slug: str) -> ProtocolDetail:
+        """Operational detail (named tables) for one protocol. Default: empty."""
+        return ProtocolDetail(slug=slug)
+
+    async def get_vlans(self) -> list[VlanInfo]:
+        """The device's VLAN database (id/name/description/SVI/usage). Default: none."""
+        return []
+
+    async def get_l3_interfaces(self) -> list[L3Interface]:
+        """Addressed/non-switchport interfaces: management, SVIs, LAGs. Default: none."""
+        return []
+
+    async def get_ospf_interfaces(self) -> list[OspfInterfaceInfo]:
+        """OSPF-enabled interfaces (name/area/tuning) from config. Default: none."""
+        return []
+
     # ---------- write (NotSupported if writable=False) ----------
 
     async def render_change(self, port: str, change: PortChange) -> ConfigDiff:
         raise NotSupported(f"{self.platform_id}: render_change not supported")
+
+    async def render_vlan_change(self, change: VlanChange) -> ConfigDiff:
+        """Render a VLAN-database create/delete. Default: unsupported.
+
+        Drivers that can write the VLAN table override this; the apply flow maps
+        :class:`NotSupported` to a clear error so unsupported platforms fail
+        cleanly rather than silently no-op."""
+        raise NotSupported(f"{self.platform_id}: render_vlan_change not supported")
+
+    async def render_l3_change(self, change: L3Change) -> ConfigDiff:
+        """Render a routed-interface (SVI / loopback) create/delete. Default:
+        unsupported — drivers that can write L3 config override this."""
+        raise NotSupported(f"{self.platform_id}: render_l3_change not supported")
+
+    async def render_vrf_change(self, change: VrfChange) -> ConfigDiff:
+        """Render a VRF create/delete. Default: unsupported."""
+        raise NotSupported(f"{self.platform_id}: render_vrf_change not supported")
+
+    async def render_ospf_change(self, change: OspfChange) -> ConfigDiff:
+        """Render an OSPFv2 config change. Default: unsupported."""
+        raise NotSupported(f"{self.platform_id}: render_ospf_change not supported")
 
     async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
         raise NotSupported(f"{self.platform_id}: apply_change not supported")

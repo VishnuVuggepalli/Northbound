@@ -1,0 +1,5 @@
+[
+  {".id":"*50","name":"ssh","disabled":"false","port":"22"},
+  {".id":"*51","name":"www","disabled":"false","port":"80"},
+  {".id":"*52","name":"telnet","disabled":"true","port":"23"}
+]

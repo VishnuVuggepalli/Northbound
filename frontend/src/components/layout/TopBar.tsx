@@ -8,20 +8,22 @@ import {
   LogOut,
   Moon,
   Search,
+  Settings,
   Sun,
 } from 'lucide-react';
-import { Wordmark } from '@/components/ui/Wordmark';
-import { Kbd } from '@/components/ui/Kbd';
-import { Badge } from '@/components/ui/Badge';
+import { Wordmark } from '@/shared/Wordmark';
+import { Kbd } from '@/shared/Kbd';
+import { Badge } from '@/shared/Badge';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
-import { useRequests } from '@/api/queries';
+import { useRequests, useSites } from '@/api/queries';
 import { apiClient } from '@/api';
 import { initials } from '@/lib/format';
 import { PALETTES } from '@/lib/palette';
 import { cn } from '@/lib/cn';
-import type { Environment } from '@/types';
+import { LiveIndicator } from '@/components/layout/LiveIndicator';
+import type { Environment } from '@/models';
 
 export function TopBar() {
   const navigate = useNavigate();
@@ -48,6 +50,7 @@ export function TopBar() {
   }, []);
 
   const { data: requests = [] } = useRequests();
+  const { data: sites = [] } = useSites();
   const pendingCount = requests.filter((r) => r.status === 'pending').length;
 
   const handleEnvSwitch = (next: Environment) => {
@@ -64,19 +67,20 @@ export function TopBar() {
       </Link>
 
       <nav className="flex items-center gap-1 rounded-md bg-bg-elev-1 p-0.5">
-        {(['lab', 'dc'] as const).map((e) => (
+        {sites.map((s) => (
           <button
-            key={e}
+            key={s.slug}
             type="button"
-            onClick={() => handleEnvSwitch(e)}
+            onClick={() => handleEnvSwitch(s.slug)}
+            title={s.name}
             className={cn(
               'rounded-[4px] px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors',
-              env === e
+              env === s.slug
                 ? 'bg-bg-elev-2 text-fg shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset]'
                 : 'text-fg-muted hover:text-fg',
             )}
           >
-            {e === 'lab' ? 'Lab' : 'DC'}
+            {s.name}
           </button>
         ))}
       </nav>
@@ -86,6 +90,7 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-1">
+        <LiveIndicator />
         {user?.role === 'admin' && (
           <Link
             to="/queue"
@@ -99,6 +104,18 @@ export function TopBar() {
             {pendingCount > 0 && <Badge variant="accent">{pendingCount}</Badge>}
           </Link>
         )}
+        {user?.role === 'admin' && (
+          <Link
+            to="/settings"
+            className={cn(
+              'flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm text-fg-muted hover:bg-bg-elev-2 hover:text-fg',
+              location.pathname.startsWith('/settings') && 'bg-bg-elev-2 text-fg',
+            )}
+          >
+            <Settings size={14} />
+            <span>Settings</span>
+          </Link>
+        )}
         <Link
           to="/requests"
           className={cn(
@@ -110,33 +127,37 @@ export function TopBar() {
           <span>{user?.role === 'admin' ? 'All requests' : 'My requests'}</span>
         </Link>
 
-        {/* Role pill — demo affordance, kept inline for the spec */}
-        <div
-          role="group"
-          aria-label="Role"
-          className="ml-1 flex items-center rounded-md border border-border bg-bg-elev-1 p-0.5 text-[11px]"
-        >
-          <button
-            type="button"
-            onClick={() => switchRole('admin')}
-            className={cn(
-              'rounded-[4px] px-2 py-1 uppercase tracking-wider',
-              user?.role === 'admin' ? 'bg-bg-elev-2 text-fg' : 'text-fg-muted hover:text-fg',
-            )}
+        {/* Role pill — DEV-only demo affordance. It flips the client view only
+            (the backend enforces the real role from the JWT), so it would mislead
+            in production; Vite strips this from prod builds via import.meta.env.DEV. */}
+        {import.meta.env.DEV && (
+          <div
+            role="group"
+            aria-label="Role (dev)"
+            className="ml-1 flex items-center rounded-md border border-border bg-bg-elev-1 p-0.5 text-[11px]"
           >
-            admin
-          </button>
-          <button
-            type="button"
-            onClick={() => switchRole('requester')}
-            className={cn(
-              'rounded-[4px] px-2 py-1 uppercase tracking-wider',
-              user?.role === 'requester' ? 'bg-bg-elev-2 text-fg' : 'text-fg-muted hover:text-fg',
-            )}
-          >
-            requester
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => switchRole('admin')}
+              className={cn(
+                'rounded-[4px] px-2 py-1 uppercase tracking-wider',
+                user?.role === 'admin' ? 'bg-bg-elev-2 text-fg' : 'text-fg-muted hover:text-fg',
+              )}
+            >
+              admin
+            </button>
+            <button
+              type="button"
+              onClick={() => switchRole('requester')}
+              className={cn(
+                'rounded-[4px] px-2 py-1 uppercase tracking-wider',
+                user?.role === 'requester' ? 'bg-bg-elev-2 text-fg' : 'text-fg-muted hover:text-fg',
+              )}
+            >
+              requester
+            </button>
+          </div>
+        )}
 
         <div ref={menuRef} className="relative">
           <button

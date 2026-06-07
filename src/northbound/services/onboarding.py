@@ -18,11 +18,12 @@ from __future__ import annotations
 import datetime as dt
 import re
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.models.port_metadata import PortMetadata
 from northbound.schemas.driver import Credentials, DiscoveryResult
 from northbound.services import audit
@@ -58,7 +59,7 @@ async def onboard_device(
     session: AsyncSession,
     *,
     name: str,
-    environment: Environment,
+    environment: str,
     role: DeviceRole,
     platform_id: str,
     mgmt_ip: str,
@@ -128,3 +129,61 @@ async def onboard_device(
     )
     await session.flush()
     return device
+
+
+async def rediscover_device(
+    session: AsyncSession,
+    *,
+    device: Device,
+    discovery: DiscoveryResult,
+    actor_user_id: str | None,
+) -> tuple[int, int]:
+    """Re-run discovery's persistence for an already-onboarded device.
+
+    NON-DESTRUCTIVE: existing ``PortMetadata`` rows are left untouched (human edits
+    — notes/bmc_ip overrides — are preserved). Only ports seen for the FIRST time
+    get a fresh metadata row (description re-parsed), and a new baseline
+    ``ConfigBackup`` is written. The caller owns the transaction.
+
+    Returns ``(ports_total, ports_added)``.
+    """
+    now = dt.datetime.now(tz=dt.UTC)
+    existing = set(
+        await session.scalars(
+            select(PortMetadata.port_name).where(PortMetadata.device_id == device.id)
+        )
+    )
+    added = 0
+    for port in discovery.ports:
+        if port.name in existing:
+            continue
+        host_model, bmc_ip = parse_description(port.description)
+        session.add(
+            PortMetadata(
+                device_id=device.id,
+                port_name=port.name,
+                host_model=port.host_model or host_model,
+                bmc_ip=port.bmc_ip or bmc_ip,
+                notes=port.notes,
+            )
+        )
+        added += 1
+
+    session.add(
+        ConfigBackup(
+            device_id=device.id,
+            config_text=discovery.running_config,
+            fetched_at=now,
+            fetched_by=actor_user_id or "system",
+        )
+    )
+    await audit.append_audit(
+        session,
+        user_id=actor_user_id,
+        action="device.rediscovered",
+        target_device_id=device.id,
+        after={"ports_total": len(discovery.ports), "ports_added": added},
+        result="ok",
+    )
+    await session.flush()
+    return len(discovery.ports), added

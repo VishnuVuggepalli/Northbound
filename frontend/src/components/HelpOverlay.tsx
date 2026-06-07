@@ -1,5 +1,5 @@
-import { Modal } from '@/components/ui/Modal';
-import { Kbd } from '@/components/ui/Kbd';
+import { Modal } from '@/modals/Modal';
+import { Kbd } from '@/shared/Kbd';
 
 interface HelpOverlayProps {
   open: boolean;

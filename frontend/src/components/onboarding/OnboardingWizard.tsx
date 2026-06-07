@@ -8,18 +8,22 @@ import {
   Loader2,
   ShieldAlert,
 } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Input, Textarea } from '@/components/ui/Input';
-import { Badge } from '@/components/ui/Badge';
-import { PlatformIcon } from '@/components/ui/PlatformIcon';
+import { Button } from '@/shared/Button';
+import { Input, Textarea } from '@/shared/Input';
+import { Badge } from '@/shared/Badge';
+import { PlatformIcon } from '@/shared/PlatformIcon';
 import { cn } from '@/lib/cn';
 import {
   usePlatforms,
   useTestConnection,
   useDiscoverDevice,
   useConfirmOnboard,
+  useSites,
+  useCreateSite,
 } from '@/api/queries';
+import { useAuthStore } from '@/store/auth';
 import { pushToast } from '@/store/toast';
+import { isApiError } from '@/api';
 import type {
   AuthMethod,
   DeviceRole,
@@ -27,7 +31,7 @@ import type {
   OnboardingDraft,
   PlatformId,
   PlatformRegistryEntry,
-} from '@/types';
+} from '@/models';
 
 type StepId = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
@@ -334,6 +338,41 @@ interface UpdateFn {
 }
 
 function Step2Identity({ draft, update }: { draft: OnboardingDraft; update: UpdateFn }) {
+  const { data: sites = [] } = useSites();
+  const isAdmin = useAuthStore((s) => s.user?.role) === 'admin';
+  const createSite = useCreateSite();
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
+
+  // Derive a URL-safe slug from the display name (e.g. "Edge DR" -> "edge-dr").
+  const slugify = (s: string) =>
+    s
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+
+  const handleCreateSite = async () => {
+    const name = newName.trim();
+    const slug = slugify(name);
+    if (!slug) {
+      pushToast({ kind: 'error', message: 'Enter a site name first.' });
+      return;
+    }
+    try {
+      const site = await createSite.mutateAsync({ slug, name });
+      update({ env: site.slug });
+      setNewName('');
+      setAdding(false);
+      pushToast({ kind: 'success', message: `Site "${site.name}" created.` });
+    } catch (err: unknown) {
+      pushToast({
+        kind: 'error',
+        message: isApiError(err) ? err.message : 'Could not create site.',
+      });
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Field label="Device name">
@@ -344,15 +383,51 @@ function Step2Identity({ draft, update }: { draft: OnboardingDraft; update: Upda
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Environment">
-          <Segmented<Environment>
-            value={draft.env}
-            options={[
-              { value: 'lab', label: 'Lab' },
-              { value: 'dc', label: 'DC' },
-            ]}
-            onChange={(v) => update({ env: v })}
-          />
+        <Field label="Site">
+          <div className="space-y-2">
+            <Segmented<Environment>
+              value={draft.env}
+              options={sites.map((s) => ({ value: s.slug, label: s.name }))}
+              onChange={(v) => update({ env: v })}
+            />
+            {isAdmin && !adding && (
+              <button
+                type="button"
+                onClick={() => setAdding(true)}
+                className="text-xs text-accent hover:underline"
+              >
+                + New site
+              </button>
+            )}
+            {isAdmin && adding && (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Site name (e.g. Edge DR)"
+                  aria-label="New site name"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void handleCreateSite()}
+                  disabled={createSite.isPending}
+                >
+                  Add
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdding(false);
+                    setNewName('');
+                  }}
+                  className="text-xs text-fg-subtle hover:text-fg"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
         </Field>
         <Field label="Role">
           <Segmented<DeviceRole>

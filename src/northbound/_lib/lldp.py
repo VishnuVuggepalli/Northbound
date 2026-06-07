@@ -62,7 +62,43 @@ def normalize_port_id(raw: bytes | str, subtype: int | None = None) -> str:
     if subtype in (2,) and isinstance(raw, bytes):
         # portComponent often comes back as an ASCII decimal
         return _as_text(raw).strip()
-    return _as_text(raw).strip()
+    return _strip_quotes(_as_text(raw).strip())
+
+
+def _strip_quotes(value: str) -> str:
+    """Strip matching surrounding single/double quotes.
+
+    Arista eAPI returns the LLDP ``interfaceId`` wrapped in literal double
+    quotes (``"Ethernet1"`` — verified live on vEOS), which would otherwise
+    leak into the canonical port id. Only strips when both ends match.
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
+
+
+def encode_local_port_prefix(local_port: str) -> str:
+    """Encode a local-port name as a bracketed prefix for system_description.
+
+    Drivers that lack a dedicated local-port field on :class:`Neighbor` stash
+    the local port in the ``system_description`` as ``"[<local_port>] ..."``
+    so ``get_neighbors(port=...)`` can filter. Returns ``""`` for an empty
+    port (no prefix). Shared by the Cisco and Arista drivers so the encode /
+    match pair is identical.
+    """
+    return f"[{local_port}] " if local_port else ""
+
+
+def local_port_matches(system_description: str | None, port: str) -> bool:
+    """Exact-match a local port against a ``[<local_port>] ...`` prefix.
+
+    Matches the bracketed token EXACTLY — so port ``"Eth1"`` does NOT match a
+    description prefixed ``"[Eth1/1] "`` or ``"[Eth10] "``. A plain substring
+    test would wrongly match all three.
+    """
+    if not system_description:
+        return False
+    return system_description.startswith(f"[{port}] ")
 
 
 def parse_snmp_lldp_table(rows: list[dict[str, Any]]) -> list[Neighbor]:

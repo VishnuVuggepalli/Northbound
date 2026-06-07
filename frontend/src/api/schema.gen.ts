@@ -32,9 +32,58 @@ export interface paths {
         put?: never;
         /**
          * Login
-         * @description Verify credentials and issue a JWT. 401 (generic) on any mismatch.
+         * @description Verify credentials, set session cookies, and return the login body.
+         *
+         *     401 (generic) on any mismatch.
          */
         post: operations["login_api_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register
+         * @description Public self-registration. Always creates a REQUESTER and auto-logs in.
+         *
+         *     The role is forced — the client cannot escalate to admin here (only
+         *     ``POST /api/users`` can, and that is admin-gated). 403 when open
+         *     registration is disabled; 409 on a duplicate username; throttled per
+         *     (ip, username) like login. Returns a JWT so the UI logs in immediately.
+         */
+        post: operations["register_api_auth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh
+         * @description Rotate the session from the refresh cookie: issue a new access + refresh
+         *     pair (rotation) and re-set both cookies. 401 if the refresh cookie is
+         *     missing/invalid/expired or the user is gone.
+         */
+        post: operations["refresh_api_auth_refresh_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -52,7 +101,8 @@ export interface paths {
         put?: never;
         /**
          * Logout
-         * @description Stateless logout: server-side no-op for v1; client discards the token.
+         * @description Clear the session cookies. (Tokens are stateless, so this is the session
+         *     end for cookie clients; Bearer clients simply drop their token.)
          */
         post: operations["logout_api_auth_logout_post"];
         delete?: never;
@@ -154,7 +204,7 @@ export interface paths {
         };
         /**
          * List Devices
-         * @description List devices (optional ``?environment=`` filter). Never returns creds.
+         * @description List devices (optional ``?environment=<site slug>`` filter). Never returns creds.
          */
         get: operations["list_devices_api_devices_get"];
         put?: never;
@@ -189,7 +239,12 @@ export interface paths {
         post?: never;
         /**
          * Delete Device
-         * @description Offboard a device. port_metadata + backups cascade via FK ondelete.
+         * @description Offboard a device.
+         *
+         *     port_metadata + backups cascade via FK ondelete=CASCADE (operational data).
+         *     Change-request history uses FK ondelete=RESTRICT, so a device that has any
+         *     change requests CANNOT be hard-deleted — the compliance trail must be
+         *     retained. That case surfaces as 409 Conflict rather than an unhandled 500.
          */
         delete: operations["delete_device_api_devices__device_id__delete"];
         options?: never;
@@ -217,6 +272,102 @@ export interface paths {
          *     On a failed probe the stored (old) credentials are left untouched — 400.
          */
         patch: operations["rotate_credentials_api_devices__device_id__credentials_patch"];
+        trace?: never;
+    };
+    "/api/devices/{device_id}/writes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Device Writes
+         * @description Enable/disable config writes for a device (gradual rollout / kill-switch).
+         *
+         *     Does NOT override intrinsic read-only status (router/vpn role or a
+         *     non-writable platform) — ``writable`` in the response reflects the combined
+         *     policy. Audited.
+         */
+        patch: operations["set_device_writes_api_devices__device_id__writes_patch"];
+        trace?: never;
+    };
+    "/api/devices/{device_id}/rediscover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rediscover
+         * @description Re-probe an onboarded device and refresh its stored snapshot.
+         *
+         *     Non-destructive: adds metadata rows only for ports seen for the first time
+         *     (human edits preserved) and writes a fresh baseline backup. 502 on a probe
+         *     failure. Invalidates the live port-state cache so the next read is fresh.
+         */
+        post: operations["rediscover_api_devices__device_id__rediscover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sites
+         * @description List every site in the catalog, with live device counts.
+         */
+        get: operations["list_sites_api_sites_get"];
+        put?: never;
+        /**
+         * Create Site
+         * @description Create a new site (admin only). Slug must be unique.
+         */
+        post: operations["create_site_api_sites_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sites/{site_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Site
+         * @description Delete a site (admin only). Blocked if any device is still assigned.
+         */
+        delete: operations["delete_site_api_sites__site_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename Site
+         * @description Rename a site (admin only). The slug is immutable to keep URLs stable.
+         */
+        patch: operations["rename_site_api_sites__site_id__patch"];
         trace?: never;
     };
     "/api/devices/{device_id}/ports": {
@@ -267,6 +418,53 @@ export interface paths {
         patch: operations["patch_port_metadata_api_devices__device_id__ports__port_name__patch"];
         trace?: never;
     };
+    "/api/devices/{device_id}/ports/{port_name}/description": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Port Description
+         * @description Admin-only DIRECT write of the on-device port description.
+         *
+         *     Declared BEFORE the metadata ``:path`` route so ``…/description`` matches
+         *     here, not as a port named ``…/description``.
+         */
+        patch: operations["set_port_description_api_devices__device_id__ports__port_name__description_patch"];
+        trace?: never;
+    };
+    "/api/devices/{device_id}/ports/{port_name}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Port Config
+         * @description Admin-only DIRECT write of device port tunables.
+         *
+         *     Covers port-mode (access/trunk), native/untagged VLAN, tagged VLANs, MTU and
+         *     admin enable/disable. Declared BEFORE the metadata ``:path`` route. Immediate
+         *     commit, no approval gate; 403 for non-admin, 422 if no field is set.
+         */
+        patch: operations["set_port_config_api_devices__device_id__ports__port_name__config_patch"];
+        trace?: never;
+    };
     "/api/devices/{device_id}/config": {
         parameters: {
             query?: never;
@@ -279,6 +477,111 @@ export interface paths {
          * @description Running config (cached). ``?refresh=true`` re-fetches from the device.
          */
         get: operations["get_config_api_devices__device_id__config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Info
+         * @description Live system snapshot: control-plane protocols, mgmt services, MAC table.
+         *
+         *     Sections a driver can't reach come back empty (``mac_supported=false``
+         *     distinguishes an unreadable MAC table from a genuinely empty one).
+         */
+        get: operations["get_system_info_api_devices__device_id__system_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/protocols/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Protocol Detail
+         * @description Operational detail (named tables) for one protocol — e.g. OSPF neighbors
+         *     + link-state database. Parsed from device CLI gets via TextFSM.
+         */
+        get: operations["get_protocol_detail_api_devices__device_id__protocols__slug__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/vlans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Vlans
+         * @description The device's VLAN database: id, name, description, L3 SVI, member-port
+         *     count. Backs the VLANs view and the request VLAN picker.
+         */
+        get: operations["get_vlans_api_devices__device_id__vlans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/l3-interfaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get L3 Interfaces
+         * @description Addressed/non-switchport interfaces: management port, L3 VLAN SVIs, LAGs.
+         */
+        get: operations["get_l3_interfaces_api_devices__device_id__l3_interfaces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/ospf-interfaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ospf Interfaces
+         * @description OSPF-enabled interfaces (name/area/tuning) from the device config.
+         */
+        get: operations["get_ospf_interfaces_api_devices__device_id__ospf_interfaces_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -356,8 +659,11 @@ export interface paths {
         };
         /**
          * List Requests
-         * @description List requests. ``?mine=true`` filters to the caller; ``?request_status=``
-         *     filters by state.
+         * @description List requests.
+         *
+         *     Non-admin callers ALWAYS see only their own requests — the client ``?mine``
+         *     flag is ignored for them so it cannot be used to enumerate others' requests.
+         *     Admins see every request and may narrow with ``?mine`` / ``?request_status``.
          */
         get: operations["list_requests_api_requests_get"];
         put?: never;
@@ -366,6 +672,89 @@ export interface paths {
          * @description File a change request. 403 if the target device is read-only (fail fast).
          */
         post: operations["create_request_api_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/vlan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Vlan Request
+         * @description File a VLAN-database change request (create/delete a VLAN). 403 if read-only.
+         */
+        post: operations["create_vlan_request_api_requests_vlan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/ospf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Ospf Request
+         * @description File an OSPFv2 config-change request. 403 read-only; 422 if inconsistent.
+         */
+        post: operations["create_ospf_request_api_requests_ospf_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/vrf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Vrf Request
+         * @description File a VRF create/delete request. 403 if the device is read-only.
+         */
+        post: operations["create_vrf_request_api_requests_vrf_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/l3": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create L3 Request
+         * @description File a routed-interface change request (SVI / loopback). 403 if read-only.
+         *
+         *     422 if the L3 intent is internally inconsistent (e.g. svi without vlan_id,
+         *     create without ipv4) — validated by the L3Change model.
+         */
+        post: operations["create_l3_request_api_requests_l3_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -382,10 +771,55 @@ export interface paths {
         /**
          * Get Request
          * @description Request detail, including the rendered diff if available.
+         *
+         *     Non-admin callers may only read their own request; a foreign id returns 404
+         *     (object-level authz — see :func:`_assert_can_read`).
          */
         get: operations["get_request_api_requests__request_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{request_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Request Timeline
+         * @description The request's timeline — status transitions + comments, oldest first.
+         *
+         *     Object-level authz: a non-admin may only read their own request (404 else).
+         */
+        get: operations["get_request_timeline_api_requests__request_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{request_id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Request Comment
+         * @description Post a comment to a request (owner or admin — same read authz).
+         */
+        post: operations["add_request_comment_api_requests__request_id__comments_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -426,6 +860,49 @@ export interface paths {
          * @description Reject with a required comment. pending → rejected.
          */
         post: operations["reject_request_api_requests__request_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{request_id}/request-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Changes
+         * @description Ask the requester to revise (instead of rejecting). pending → needs_revision.
+         */
+        post: operations["request_changes_api_requests__request_id__request_changes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{request_id}/resubmit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resubmit Request
+         * @description Owner revises and resubmits after a request-changes. needs_revision → pending.
+         *
+         *     Only the request's owner may resubmit; a foreign id returns 404 (no existence
+         *     leak), mirroring the read-path authz.
+         */
+        post: operations["resubmit_request_api_requests__request_id__resubmit_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -490,6 +967,50 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/events/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream
+         * @description Open the live-state SSE stream (authenticated).
+         */
+        get: operations["stream_api_events_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Runtime Settings
+         * @description Return the current admin-tunable settings.
+         */
+        get: operations["get_runtime_settings_api_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Runtime Settings
+         * @description Update runtime settings (admin). 422 on an invalid rate-limit string.
+         */
+        patch: operations["update_runtime_settings_api_settings_patch"];
         trace?: never;
     };
     "/health": {
@@ -574,7 +1095,7 @@ export interface components {
          * ChangeRequestStatus
          * @enum {string}
          */
-        ChangeRequestStatus: "pending" | "approved" | "rejected" | "applying" | "awaiting_confirm" | "applied" | "failed" | "reverted";
+        ChangeRequestStatus: "pending" | "needs_revision" | "approved" | "rejected" | "applying" | "awaiting_confirm" | "applied" | "failed" | "reverted";
         /**
          * ConfigOut
          * @description Running config snapshot.
@@ -619,6 +1140,8 @@ export interface components {
             api_token?: string | null;
             /** Snmp Community */
             snmp_community?: string | null;
+            /** Enable Secret */
+            enable_secret?: string | null;
         };
         /**
          * CredentialsRotateIn
@@ -634,7 +1157,8 @@ export interface components {
         DeviceCreateIn: {
             /** Name */
             name: string;
-            environment: components["schemas"]["Environment"];
+            /** Environment */
+            environment: string;
             role: components["schemas"]["DeviceRole"];
             /** Platform Id */
             platform_id: string;
@@ -651,6 +1175,44 @@ export interface components {
             prefer_native_api: boolean;
             credentials?: components["schemas"]["CredentialsIn"];
         };
+        /** DeviceFactsOut */
+        DeviceFactsOut: {
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+            /**
+             * Os Version
+             * @default
+             */
+            os_version: string;
+            /**
+             * Serial
+             * @default
+             */
+            serial: string;
+            /**
+             * Uptime
+             * @default
+             */
+            uptime: string;
+            /**
+             * License
+             * @default
+             */
+            license: string;
+            /**
+             * Base Mac
+             * @default
+             */
+            base_mac: string;
+            /**
+             * Released
+             * @default
+             */
+            released: string;
+        };
         /**
          * DeviceOut
          * @description Public view of a device. NEVER includes credentials of any kind.
@@ -660,7 +1222,8 @@ export interface components {
             id: string;
             /** Name */
             name: string;
-            environment: components["schemas"]["Environment"];
+            /** Environment */
+            environment: string;
             role: components["schemas"]["DeviceRole"];
             /** Platform */
             platform: string;
@@ -676,6 +1239,11 @@ export interface components {
              * @default false
              */
             writable: boolean;
+            /**
+             * Writes Enabled
+             * @default true
+             */
+            writes_enabled: boolean;
             /** Reachable */
             reachable?: boolean | null;
         };
@@ -684,6 +1252,14 @@ export interface components {
          * @enum {string}
          */
         DeviceRole: "leaf" | "spine" | "router" | "vpn";
+        /**
+         * DeviceWritesIn
+         * @description Body of ``PATCH /api/devices/{id}/writes`` — the per-device write flag.
+         */
+        DeviceWritesIn: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /**
          * DiscoverIn
          * @description Body of ``POST /api/devices/discover`` — same shape as test-connection.
@@ -743,11 +1319,6 @@ export interface components {
             /** Web Ui Url Template */
             web_ui_url_template?: string | null;
         };
-        /**
-         * Environment
-         * @enum {string}
-         */
-        Environment: "lab" | "dc";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -757,6 +1328,35 @@ export interface components {
         HealthResponse: {
             /** Status */
             status: string;
+        };
+        /** L3InterfaceOut */
+        L3InterfaceOut: {
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Ipv4
+             * @default
+             */
+            ipv4: string;
+            /**
+             * Gateway
+             * @default
+             */
+            gateway: string;
+            /** Mtu */
+            mtu?: number | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
         };
         /**
          * LoginRequest
@@ -784,6 +1384,59 @@ export interface components {
             /** Username */
             username: string;
         };
+        /** MacEntryOut */
+        MacEntryOut: {
+            /** Vlan */
+            vlan?: number | null;
+            /** Mac */
+            mac: string;
+            /** Interface */
+            interface: string;
+            /** Type */
+            type: string;
+            /** Age */
+            age?: string | null;
+        };
+        /** MgmtServiceOut */
+        MgmtServiceOut: {
+            /** Name */
+            name: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Port */
+            port?: number | null;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /**
+             * Configured
+             * @default true
+             */
+            configured: boolean;
+        };
+        /** OspfInterfaceOut */
+        OspfInterfaceOut: {
+            /** Name */
+            name: string;
+            /**
+             * Area
+             * @default
+             */
+            area: string;
+            /** Cost */
+            cost?: number | null;
+            /** Hello Interval */
+            hello_interval?: number | null;
+            /** Dead Interval */
+            dead_interval?: number | null;
+            /**
+             * Passive
+             * @default false
+             */
+            passive: boolean;
+        };
         /** PlatformInfo */
         PlatformInfo: {
             /** Platform Id */
@@ -795,6 +1448,9 @@ export interface components {
         /**
          * PortChange
          * @description User-facing change request payload.
+         *
+         *     VLAN IDs are validated against the 802.1Q valid range 1..4094; 0 and 4095
+         *     are reserved and rejected at this system boundary.
          */
         PortChange: {
             /** Untagged Vlan */
@@ -809,6 +1465,39 @@ export interface components {
             notes?: string | null;
             /** Description */
             description?: string | null;
+            /** Port Mode */
+            port_mode?: ("access" | "trunk") | null;
+            /** Mtu */
+            mtu?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /**
+         * PortConfigIn
+         * @description Admin direct edit of on-device port tunables (config write).
+         *
+         *     All fields optional; at least one must be set. VLAN IDs follow 802.1Q
+         *     (1..4094). ``enabled`` maps to the device's admin shut/no-shut.
+         */
+        PortConfigIn: {
+            /** Port Mode */
+            port_mode?: ("access" | "trunk") | null;
+            /** Untagged Vlan */
+            untagged_vlan?: number | null;
+            /** Tagged Vlans */
+            tagged_vlans?: number[] | null;
+            /** Mtu */
+            mtu?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /**
+         * PortDescriptionIn
+         * @description Admin direct edit of the port's on-device description (config write).
+         */
+        PortDescriptionIn: {
+            /** Description */
+            description: string;
         };
         /**
          * PortDetailOut
@@ -928,6 +1617,96 @@ export interface components {
             last_human_edit_by?: string | null;
         };
         /**
+         * ProtocolDetailOut
+         * @description Operational detail for one protocol — named tables from CLI gets.
+         */
+        ProtocolDetailOut: {
+            /** Slug */
+            slug: string;
+            /** Tables */
+            tables?: components["schemas"]["ProtocolTableOut"][];
+            /** Error */
+            error?: string | null;
+        };
+        /** ProtocolStatusOut */
+        ProtocolStatusOut: {
+            /** Name */
+            name: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Params */
+            params?: [
+                string,
+                string
+            ][];
+            /**
+             * Has Detail
+             * @default false
+             */
+            has_detail: boolean;
+        };
+        /** ProtocolTableOut */
+        ProtocolTableOut: {
+            /** Title */
+            title: string;
+            /** Columns */
+            columns?: string[];
+            /** Rows */
+            rows?: string[][];
+        };
+        /**
+         * RediscoverOut
+         * @description Result of ``POST /api/devices/{id}/rediscover``.
+         */
+        RediscoverOut: {
+            /** Ports Total */
+            ports_total: number;
+            /** Ports Added */
+            ports_added: number;
+            /**
+             * Hostname
+             * @default
+             */
+            hostname: string;
+        };
+        /**
+         * RegisterRequest
+         * @description Body of ``POST /api/auth/register`` (public self-registration).
+         *
+         *     The role is intentionally absent — self-registered accounts are always
+         *     REQUESTER; only an admin can mint privileged users via ``POST /api/users``.
+         *     A longer password floor than login applies because this creates the secret.
+         */
+        RegisterRequest: {
+            /** Username */
+            username: string;
+            /** Password */
+            password: string;
+            /** Email */
+            email?: string | null;
+        };
+        /**
+         * RequestChangesIn
+         * @description Body of ``POST /api/requests/{id}/request-changes`` — what to revise; required.
+         */
+        RequestChangesIn: {
+            /** Comment */
+            comment: string;
+        };
+        /**
+         * RequestCommentIn
+         * @description Body of ``POST /api/requests/{id}/comments`` — a free-text comment.
+         */
+        RequestCommentIn: {
+            /** Body */
+            body: string;
+        };
+        /**
          * RequestCreateIn
          * @description Body of ``POST /api/requests`` — file a change request.
          */
@@ -937,6 +1716,105 @@ export interface components {
             /** Port Name */
             port_name: string;
             requested_changes: components["schemas"]["PortChange"];
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * RequestEventOut
+         * @description One entry of a request's timeline — a status transition or a comment.
+         */
+        RequestEventOut: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** From Status */
+            from_status: string;
+            /** To Status */
+            to_status: string;
+            /** Actor */
+            actor: string;
+            /** Actor Username */
+            actor_username?: string | null;
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /** Created At */
+            created_at: string;
+        };
+        /**
+         * RequestL3In
+         * @description Body of ``POST /api/requests/l3`` — file a routed-interface change.
+         */
+        RequestL3In: {
+            /** Device Id */
+            device_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "create" | "delete";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "svi" | "loopback";
+            /** Name */
+            name?: string | null;
+            /** Vlan Id */
+            vlan_id?: number | null;
+            /** Ipv4 */
+            ipv4?: string | null;
+            /** Mtu */
+            mtu?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Dhcp */
+            dhcp?: boolean | null;
+            /** Vrf */
+            vrf?: string | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * RequestOspfIn
+         * @description Body of ``POST /api/requests/ospf`` — file an OSPFv2 config change.
+         */
+        RequestOspfIn: {
+            /** Device Id */
+            device_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "set" | "delete";
+            /**
+             * Target
+             * @enum {string}
+             */
+            target: "router-id" | "interface";
+            /** Router Id */
+            router_id?: string | null;
+            /** Interface */
+            interface?: string | null;
+            /** Area */
+            area?: string | null;
+            /** Cost */
+            cost?: number | null;
+            /** Hello Interval */
+            hello_interval?: number | null;
+            /** Dead Interval */
+            dead_interval?: number | null;
+            /** Passive */
+            passive?: boolean | null;
             /**
              * Reason
              * @default
@@ -956,6 +1834,8 @@ export interface components {
             port_name: string;
             /** Requested By */
             requested_by: string;
+            /** Requested By Username */
+            requested_by_username?: string | null;
             /** Requested Changes */
             requested_changes: {
                 [key: string]: unknown;
@@ -969,8 +1849,11 @@ export interface components {
             reviewer_comment?: string | null;
             /** Diff Text */
             diff_text?: string | null;
-            /** Confirm Token */
-            confirm_token?: string | null;
+            /**
+             * Awaiting Confirm
+             * @default false
+             */
+            awaiting_confirm: boolean;
             /** Confirm Deadline At */
             confirm_deadline_at?: number | null;
             /** Created At */
@@ -987,6 +1870,136 @@ export interface components {
         RequestRejectIn: {
             /** Comment */
             comment: string;
+        };
+        /**
+         * RequestResubmitIn
+         * @description Body of ``POST /api/requests/{id}/resubmit`` — owner revises and resubmits.
+         *
+         *     Both fields optional: omit ``requested_changes`` to resubmit unchanged (e.g.
+         *     after a back-and-forth in comments), or supply edited changes / reason.
+         */
+        RequestResubmitIn: {
+            requested_changes?: components["schemas"]["PortChange"] | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * RequestVlanIn
+         * @description Body of ``POST /api/requests/vlan`` — file a VLAN-database change.
+         */
+        RequestVlanIn: {
+            /** Device Id */
+            device_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "create" | "delete";
+            /** Vlan Id */
+            vlan_id: number;
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * RequestVrfIn
+         * @description Body of ``POST /api/requests/vrf`` — file a VRF create/delete.
+         */
+        RequestVrfIn: {
+            /** Device Id */
+            device_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "create" | "delete";
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /**
+         * SettingsOut
+         * @description Current admin-tunable runtime settings.
+         */
+        SettingsOut: {
+            /**
+             * Write Rate Limit
+             * @description Write-endpoint rate limit as a slowapi/limits string, e.g. '30/minute'.
+             */
+            write_rate_limit: string;
+        };
+        /**
+         * SettingsPatch
+         * @description Partial update of runtime settings. Only set fields are applied.
+         */
+        SettingsPatch: {
+            /** Write Rate Limit */
+            write_rate_limit?: string | null;
+        };
+        /**
+         * SiteCreateIn
+         * @description Body of ``POST /api/sites`` (admin only).
+         */
+        SiteCreateIn: {
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * SiteOut
+         * @description Public view of a site, with a live device count for the picker.
+         */
+        SiteOut: {
+            /** Id */
+            id: string;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /**
+             * Device Count
+             * @default 0
+             */
+            device_count: number;
+        };
+        /**
+         * SiteUpdateIn
+         * @description Body of ``PATCH /api/sites/{id}`` — rename only (slug is immutable).
+         */
+        SiteUpdateIn: {
+            /** Name */
+            name: string;
+        };
+        /**
+         * SystemInfoOut
+         * @description Live system snapshot: device facts, protocols, mgmt services, MAC table.
+         */
+        SystemInfoOut: {
+            facts?: components["schemas"]["DeviceFactsOut"];
+            /** Protocols */
+            protocols?: components["schemas"]["ProtocolStatusOut"][];
+            /** Services */
+            services?: components["schemas"]["MgmtServiceOut"][];
+            /** Mac Table */
+            mac_table?: components["schemas"]["MacEntryOut"][];
+            /**
+             * Mac Supported
+             * @default false
+             */
+            mac_supported: boolean;
         };
         /**
          * TestConnectionOut
@@ -1046,6 +2059,31 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** VlanInfoOut */
+        VlanInfoOut: {
+            /** Vlan Id */
+            vlan_id: number;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * L3 Interface
+             * @default
+             */
+            l3_interface: string;
+            /**
+             * Port Count
+             * @default 0
+             */
+            port_count: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -1104,6 +2142,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_api_auth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_api_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
                 };
             };
         };
@@ -1268,7 +2359,7 @@ export interface operations {
     list_devices_api_devices_get: {
         parameters: {
             query?: {
-                environment?: components["schemas"]["Environment"] | null;
+                environment?: string | null;
             };
             header?: never;
             path?: never;
@@ -1424,6 +2515,189 @@ export interface operations {
             };
         };
     };
+    set_device_writes_api_devices__device_id__writes_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceWritesIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rediscover_api_devices__device_id__rediscover_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RediscoverOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sites_api_sites_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteOut"][];
+                };
+            };
+        };
+    };
+    create_site_api_sites_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_site_api_sites__site_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_site_api_sites__site_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_ports_api_devices__device_id__ports_get: {
         parameters: {
             query?: {
@@ -1527,6 +2801,82 @@ export interface operations {
             };
         };
     };
+    set_port_description_api_devices__device_id__ports__port_name__description_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+                port_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortDescriptionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_port_config_api_devices__device_id__ports__port_name__config_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+                port_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortConfigIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_config_api_devices__device_id__config_get: {
         parameters: {
             query?: {
@@ -1547,6 +2897,162 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_system_info_api_devices__device_id__system_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemInfoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_protocol_detail_api_devices__device_id__protocols__slug__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProtocolDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_vlans_api_devices__device_id__vlans_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VlanInfoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_l3_interfaces_api_devices__device_id__l3_interfaces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["L3InterfaceOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ospf_interfaces_api_devices__device_id__ospf_interfaces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OspfInterfaceOut"][];
                 };
             };
             /** @description Validation Error */
@@ -1719,6 +3225,138 @@ export interface operations {
             };
         };
     };
+    create_vlan_request_api_requests_vlan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestVlanIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_ospf_request_api_requests_ospf_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestOspfIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_vrf_request_api_requests_vrf_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestVrfIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_l3_request_api_requests_l3_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestL3In"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_request_api_requests__request_id__get: {
         parameters: {
             query?: never;
@@ -1737,6 +3375,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_request_timeline_api_requests__request_id__timeline_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestEventOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_request_comment_api_requests__request_id__comments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestCommentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestEventOut"];
                 };
             };
             /** @description Validation Error */
@@ -1793,6 +3497,76 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RequestRejectIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_changes_api_requests__request_id__request_changes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestChangesIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resubmit_request_api_requests__request_id__resubmit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestResubmitIn"];
             };
         };
         responses: {
@@ -1899,6 +3673,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditEntryOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_api_events_stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_runtime_settings_api_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+        };
+    };
+    update_runtime_settings_api_settings_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
                 };
             };
             /** @description Validation Error */

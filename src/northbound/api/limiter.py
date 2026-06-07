@@ -21,13 +21,35 @@ so the forwarded client IP is used instead — and only from trusted proxy hops.
 from __future__ import annotations
 
 import json
+import os
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
-# Login throttle: 5 attempts / 5 minutes per (ip, username).
-LOGIN_RATE_LIMIT = "5/5minutes"
+# Login throttle: 5 attempts / 5 minutes per (ip, username). Overridable via
+# NB_LOGIN_RATE_LIMIT (e.g. "100/minute" in dev) so local testing isn't locked
+# out after a few mistyped passwords; production keeps the strict default.
+LOGIN_RATE_LIMIT = os.environ.get("NB_LOGIN_RATE_LIMIT", "5/5minutes")
+
+# Registration throttle: bound account-creation spam per (ip, username).
+# Overridable via NB_REGISTER_RATE_LIMIT for local testing.
+REGISTER_RATE_LIMIT = os.environ.get("NB_REGISTER_RATE_LIMIT", "5/hour")
+
+# Write throttle: bound mutation/config-push rate per authenticated user (so a
+# runaway client or a single hostile account can't hammer the devices), with an
+# IP fallback for the rare unauthenticated write path. The value is admin-tunable
+# at runtime (see services.runtime_settings) — write endpoints pass the provider
+# callable below to slowapi, which evaluates it per request. NB_WRITE_RATE_LIMIT
+# seeds the default until an admin overrides it.
+
+
+def write_rate_limit_provider() -> str:
+    """Current write rate-limit string. Slowapi calls this per request, so an
+    admin change via the settings API takes effect on the next request."""
+    from northbound.services.runtime_settings import current_write_rate_limit
+
+    return current_write_rate_limit()
 
 
 def _submitted_username(request: Request) -> str:
@@ -57,4 +79,41 @@ def login_rate_key(request: Request) -> str:
     return f"{get_remote_address(request)}|{_submitted_username(request)}"
 
 
-limiter = Limiter(key_func=get_remote_address)
+def write_rate_key(request: Request) -> str:
+    """Rate-limit key for authenticated write endpoints: ``user:<sub>``.
+
+    Keys on the JWT subject so the budget follows the *user*, not a shared NAT/
+    proxy IP (which would let one user exhaust everyone's budget). Falls back to
+    ``ip:<addr>`` when there is no valid bearer token. Import is local to avoid a
+    module-load cycle (auth.jwt → config → ... ).
+    """
+    auth = request.headers.get("authorization", "")
+    if auth[:7].lower() == "bearer ":
+        from northbound.auth.jwt import InvalidToken, decode_token
+
+        try:
+            return f"user:{decode_token(auth[7:]).sub}"
+        except InvalidToken:
+            pass
+    return f"ip:{get_remote_address(request)}"
+
+
+def build_limiter() -> Limiter:
+    """Construct the shared limiter, wiring shared storage when configured.
+
+    With ``NB_RATELIMIT_STORAGE_URI`` set (e.g. ``redis://redis:6379/0``) all
+    workers share one counter store, so a limit like ``30/minute`` is enforced
+    across the whole deployment. Unset → slowapi's default in-memory storage,
+    which is correct only for a single worker (each process keeps its own
+    counters). Importing the storage backend (e.g. ``redis``) is done lazily by
+    ``limits`` from the URI scheme, so the dependency is needed only when set.
+    """
+    from northbound.config import get_settings
+
+    storage_uri = get_settings().ratelimit_storage_uri
+    if storage_uri:
+        return Limiter(key_func=get_remote_address, storage_uri=storage_uri)
+    return Limiter(key_func=get_remote_address)
+
+
+limiter = build_limiter()

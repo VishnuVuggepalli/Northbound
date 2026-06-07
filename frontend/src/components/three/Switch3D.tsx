@@ -3,7 +3,7 @@ import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, type OrbitControlsProps } from '@react-three/drei';
 import { RotateCcw } from 'lucide-react';
 import * as THREE from 'three';
-import type { Device, Port, PortKind } from '@/types';
+import type { Device, Port, PortKind } from '@/models';
 import { vlanRGB } from '@/lib/vlan';
 import type { ThemeMode } from '@/lib/palette';
 
@@ -48,6 +48,8 @@ const BRAND_COLOR: Record<Device['platform'], number> = {
   mock: 0x5a6472,
   arista: 0x1a4cb8,
   pica8: 0x9a4a1a,
+  mikrotik: 0xc4421a,
+  mikrotik_swos: 0xb33a18,
   freebsd: 0x6b4ea8,
 };
 
@@ -104,9 +106,11 @@ function PortMesh({ port, type, position, selected, onPick }: PortMeshProps) {
 
   return (
     <group position={position} onClick={handlePick}>
+      {/* Port body — solid metallic shroud so the cage reads as a real
+          recessed connector housing, not a flat dark patch. */}
       <mesh>
         <boxGeometry args={[body.w, body.h, 0.18]} />
-        <meshLambertMaterial color={body.color} />
+        <meshStandardMaterial color={body.color} metalness={0.6} roughness={0.5} />
       </mesh>
       <mesh position={[0, 0, 0.07]}>
         <boxGeometry args={[body.w * 0.78, body.h * (type === 'rj45' ? 0.72 : 0.55), 0.06]} />
@@ -165,7 +169,8 @@ function InstancedPortGrid({ ports, positions, type, selected, onPick }: Instanc
     const ledColor = new THREE.Color();
     const stripe = new THREE.Color();
     ports.forEach((port, i) => {
-      const pos = positions[i]!;
+      const pos = positions[i];
+      if (!pos) return; // never index past the positions array
       dummy.position.copy(pos);
       dummy.updateMatrix();
       meshRef.current!.setMatrixAt(i, dummy.matrix);
@@ -224,7 +229,7 @@ function InstancedPortGrid({ ports, positions, type, selected, onPick }: Instanc
         onClick={handlePick}
       >
         <boxGeometry args={[body.w, body.h, 0.18]} />
-        <meshLambertMaterial color={body.color} />
+        <meshStandardMaterial color={body.color} metalness={0.6} roughness={0.5} />
       </instancedMesh>
       <instancedMesh ref={ledRef} args={[undefined, undefined, ports.length]}>
         <boxGeometry args={[1, 1, 1]} />
@@ -255,9 +260,14 @@ interface SceneProps extends Switch3DProps {
 }
 
 function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, isFreebsd }: SceneProps) {
-  const chassisColor = theme === 'dark' ? 0x1c2127 : 0x2a3038;
-  const frontColor = theme === 'dark' ? 0x121518 : 0x1f242b;
-  const topColor = theme === 'dark' ? 0x252b32 : 0x3a4250;
+  // The dark-mode canvas backdrop is near-black (#08090c, see <color> below).
+  // The chassis must read as a *lighter* steel against it — earlier dark values
+  // (0x1c2127 / 0x121518) sat almost on top of the background and the switch
+  // vanished. Lambert + ambient 0.55 darkens these further at render, so they
+  // are pitched well above the backdrop on purpose.
+  const chassisColor = theme === 'dark' ? 0x343c46 : 0x2a3038;
+  const frontColor = theme === 'dark' ? 0x252d35 : 0x1f242b;
+  const topColor = theme === 'dark' ? 0x404a55 : 0x3a4250;
   const brand = BRAND_COLOR[device.platform];
 
   const chassisW = isFreebsd ? 6 : Math.max(6, layout.cols * 0.55 + 2);
@@ -277,20 +287,24 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
       <directionalLight position={[-5, 2, -3]} intensity={0.4} color={0x7fa8ff} />
       <directionalLight position={[0, -3, 6]} intensity={0.18} color={0x9fd0ff} />
 
-      {/* Chassis body */}
-      <mesh>
+      {/* Chassis body — meshStandardMaterial (low metalness, mid roughness) so
+          the flat faces catch a subtle specular off the key/rim lights and
+          read as solid brushed steel rather than flat painted card. */}
+      <mesh castShadow>
         <boxGeometry args={[chassisW, chassisH, chassisD]} />
-        <meshLambertMaterial color={chassisColor} />
+        <meshStandardMaterial color={chassisColor} metalness={0.45} roughness={0.62} />
       </mesh>
-      {/* Top plate (fine bevel suggestion) */}
+      {/* Top plate (fine bevel suggestion) — slightly smoother so the lid edge
+          highlight separates it from the body and gives a dimensional read. */}
       <mesh position={[0, chassisH / 2 + 0.001, 0]}>
         <boxGeometry args={[chassisW * 0.99, 0.08, chassisD * 0.99]} />
-        <meshLambertMaterial color={topColor} />
+        <meshStandardMaterial color={topColor} metalness={0.5} roughness={0.5} />
       </mesh>
-      {/* Front inset */}
+      {/* Front inset — recessed faceplate; a touch rougher/less metallic so it
+          reads as a solid sunken panel the ports sit in, not a void. */}
       <mesh position={[0, 0, chassisD / 2 + 0.025]}>
         <boxGeometry args={[chassisW - 0.4, chassisH - 0.3, 0.05]} />
-        <meshLambertMaterial color={frontColor} />
+        <meshStandardMaterial color={frontColor} metalness={0.35} roughness={0.72} />
       </mesh>
       {/* Brand chip */}
       <mesh position={[-chassisW / 2 + 0.55, 0, chassisD / 2 + 0.05]}>
@@ -309,7 +323,8 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
         />
       ) : (
         ports.map((port, i) => {
-          const p = positions[i]!;
+          const p = positions[i];
+          if (!p) return null; // guard against a short positions array
           return (
             <PortMesh
               key={port.name}
@@ -345,27 +360,24 @@ export function Switch3D({ device, ports, selectedPort, onPick, theme }: Switch3
       }
       return out;
     }
-    const colsW = layout.cols * 0.55;
-    const rowsH = layout.rows * 0.65;
+    // Lay EVERY port out in a `layout.cols`-wide grid, flowing into as many
+    // rows as needed. The faceplate's nominal row count is a hint for sizing,
+    // but real devices can report more ports than rows*cols (e.g. PicOS
+    // breakout sub-interfaces). Capping positions at the faceplate size left
+    // positions[i] === undefined for the overflow and crashed the instanced
+    // renderer — so we never cap: one position per port, always.
+    const cols = Math.max(1, layout.cols);
+    const rowCount = Math.max(layout.rows, Math.ceil(ports.length / cols));
+    const colsW = cols * 0.55;
+    const rowsH = rowCount * 0.65;
     const startX = -colsW / 2 + 0.275 + 0.7;
     const startY = rowsH / 2 - 0.325 - 0.05;
-    let idx = 0;
-    for (let r = 0; r < layout.rows; r++) {
-      for (let c = 0; c < layout.cols; c++) {
-        if (idx >= ports.length) break;
-        const x = startX + c * 0.55;
-        const y = startY - r * 0.65;
-        out.push(new THREE.Vector3(x, y, chassisD / 2 + 0.15));
-        idx++;
-      }
-    }
-    if (layout.extra?.kind === 'sfp') {
-      for (let i = 0; i < layout.extra.count; i++) {
-        if (idx >= ports.length) break;
-        const x = startX + layout.cols * 0.55 + 0.2 + i * 0.55;
-        out.push(new THREE.Vector3(x, 0, chassisD / 2 + 0.15));
-        idx++;
-      }
+    for (let i = 0; i < ports.length; i++) {
+      const r = Math.floor(i / cols);
+      const c = i % cols;
+      const x = startX + c * 0.55;
+      const y = startY - r * 0.65;
+      out.push(new THREE.Vector3(x, y, chassisD / 2 + 0.15));
     }
     return out;
   }, [layout, ports.length, isFreebsd]);
@@ -417,10 +429,11 @@ export function Switch3D({ device, ports, selectedPort, onPick, theme }: Switch3
             const o = orbitRef.current as unknown as { reset?: () => void } | null;
             o?.reset?.();
           }}
-          className="pointer-events-auto rounded-md border border-border-strong bg-bg-elev-1/80 p-1.5 text-fg-muted backdrop-blur-sm hover:text-fg"
+          className="pointer-events-auto rounded-md border border-border-strong bg-bg-elev-1/80 p-1.5 text-fg-muted backdrop-blur-sm hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          aria-label="Reset camera view"
           title="Reset view"
         >
-          <RotateCcw size={14} />
+          <RotateCcw size={14} aria-hidden />
         </button>
       </div>
 

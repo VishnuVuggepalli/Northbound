@@ -1,0 +1,17 @@
+Value LOCAL_PORT (\S+)
+Value CHASSIS_ID ([0-9A-Fa-f:]{17})
+Value PORT_ID (\S+)
+Value MGMT_ADDRESS (\d+\.\d+\.\d+\.\d+)
+Value HOST_NAME (\S+)
+Value CAPABILITY (.*?)
+
+Start
+  # Rows are space-delimited with optional trailing columns. Anchor on the
+  # local port + chassis id; everything after is best-effort optional.
+  ^${LOCAL_PORT}\s+${CHASSIS_ID}(\s+${PORT_ID})?(\s+${MGMT_ADDRESS})?(\s+${HOST_NAME})?(\s+${CAPABILITY})?\s*$$ -> Record
+  ^LocalPort\s+ChassisId
+  ^-+\s+-+
+  ^LLDP\s+Remote
+  ^System\s+Capability
+  ^\s*$$
+  ^\.\s*$$

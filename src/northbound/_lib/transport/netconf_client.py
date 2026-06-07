@@ -16,18 +16,24 @@ class _NetconfManager(Protocol):
     """The slice of ncclient.manager.Manager we use.
 
     Defined narrowly so tests can supply a fake without importing ncclient.
+    The parameter NAMES mirror the real ``ncclient`` operation signatures
+    (``edit_config(config, format, target, default_operation, test_option,
+    error_option)``, ``get_config(source, ...)``, ``commit(confirmed, timeout,
+    ...)``) because we call them by KEYWORD — a positional call mis-maps
+    against the real library (our ``target`` would land in ncclient's
+    ``config`` slot). The Protocol therefore documents the real contract.
     """
 
     def get_config(self, source: str) -> Any: ...
     def edit_config(
         self,
-        target: str,
         config: str,
-        default_operation: str | None,
-        test_option: str | None,
-        error_option: str | None,
+        target: str | None = ...,
+        default_operation: str | None = ...,
+        test_option: str | None = ...,
+        error_option: str | None = ...,
     ) -> Any: ...
-    def commit(self, confirmed: bool, timeout: int | None) -> Any: ...
+    def commit(self, confirmed: bool = ..., timeout: str | None = ...) -> Any: ...
     def discard_changes(self) -> Any: ...
     def close_session(self) -> None: ...
 
@@ -100,18 +106,39 @@ class NetconfClient:
         error_option: str | None = None,
     ) -> Any:
         mgr = await self._ensure_manager()
-        return await asyncio.to_thread(
-            mgr.edit_config,
-            target,
-            config,
-            default_operation,
-            test_option,
-            error_option,
-        )
+        # MUST call by keyword: real ncclient is
+        # edit_config(config, format='xml', target='candidate', default_operation,
+        # test_option, error_option). A positional call would put our ``target``
+        # into ncclient's ``config`` slot and our XML into ``format``. Pass only
+        # the kwargs we set so ncclient defaults (format='xml') stand.
+        kwargs: dict[str, Any] = {"config": config, "target": target}
+        if default_operation is not None:
+            kwargs["default_operation"] = default_operation
+        if test_option is not None:
+            kwargs["test_option"] = test_option
+        if error_option is not None:
+            kwargs["error_option"] = error_option
+        return await asyncio.to_thread(lambda: mgr.edit_config(**kwargs))
 
     async def commit(self, *, confirmed: bool = False, timeout: int | None = None) -> Any:
         mgr = await self._ensure_manager()
-        return await asyncio.to_thread(mgr.commit, confirmed, timeout)
+        # ncclient writes <confirm-timeout>{timeout}</confirm-timeout> via lxml,
+        # which requires str text — passing an int raises
+        # "TypeError: Argument must be bytes or unicode, got 'int'". Coerce here so
+        # callers (drivers) can pass an int seconds value naturally.
+        timeout_str = str(timeout) if timeout is not None else None
+        return await asyncio.to_thread(lambda: mgr.commit(confirmed=confirmed, timeout=timeout_str))
+
+    async def supports(self, capability: str) -> bool:
+        """True if the connected server advertises a NETCONF capability.
+
+        Detects ``:confirmed-commit`` — PicOS/xorplus accepts a plain
+        ``<commit>`` but does NOT advertise confirmed-commit, so callers must
+        fall back to a non-confirmed commit instead of erroring.
+        """
+        mgr = await self._ensure_manager()
+        caps = getattr(mgr, "server_capabilities", None) or []
+        return any(capability in str(c) for c in caps)
 
     async def discard_changes(self) -> Any:
         mgr = await self._ensure_manager()

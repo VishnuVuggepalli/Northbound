@@ -29,11 +29,16 @@ class LoginResponse(BaseModel):
 
 
 class TokenPayload(BaseModel):
-    """Decoded JWT claims. ``sub`` is the user id; ``exp`` is a UNIX timestamp."""
+    """Decoded JWT claims. ``sub`` is the user id; ``exp`` is a UNIX timestamp.
+
+    ``type`` distinguishes access vs refresh tokens; it defaults to ``access`` so
+    legacy tokens minted before the split still validate as access tokens.
+    """
 
     sub: str
     role: UserRole
     exp: int
+    type: str = "access"
 
 
 class UserOut(BaseModel):
@@ -53,4 +58,17 @@ class UserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1)
     role: UserRole
+    email: str | None = Field(default=None, max_length=256)
+
+
+class RegisterRequest(BaseModel):
+    """Body of ``POST /api/auth/register`` (public self-registration).
+
+    The role is intentionally absent — self-registered accounts are always
+    REQUESTER; only an admin can mint privileged users via ``POST /api/users``.
+    A longer password floor than login applies because this creates the secret.
+    """
+
+    username: str = Field(min_length=3, max_length=128)
+    password: str = Field(min_length=8, max_length=256)
     email: str | None = Field(default=None, max_length=256)

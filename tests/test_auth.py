@@ -231,3 +231,141 @@ async def test_login_throttle_keyed_per_username_same_ip(client: AsyncClient) ->
     # Same IP, different username → independent bucket, first attempt allowed.
     other = await client.post("/api/auth/login", json={"username": "alice", "password": "wrong"})
     assert other.status_code == 401  # bad password, NOT 429 (its own budget)
+
+
+# --------------------------------------------------------------------------- #
+# POST /api/auth/register (public self-registration → requester + auto-login)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_register_creates_requester_and_returns_token(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/api/auth/register",
+        json={"username": "bob", "password": "hunter2pw", "email": "bob@example.com"},
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["role"] == "requester"  # always requester, never admin
+    assert body["username"] == "bob"
+    assert body["access_token"]  # auto-login token issued
+    # The issued token decodes to a requester.
+    assert decode_token(body["access_token"], settings=_TEST_SETTINGS).role == UserRole.REQUESTER
+
+
+@pytest.mark.asyncio
+async def test_register_can_login_afterwards(client: AsyncClient) -> None:
+    await client.post("/api/auth/register", json={"username": "carol", "password": "hunter2pw"})
+    login = await client.post(
+        "/api/auth/login", json={"username": "carol", "password": "hunter2pw"}
+    )
+    assert login.status_code == 200
+    assert login.json()["role"] == "requester"
+
+
+@pytest.mark.asyncio
+async def test_register_ignores_role_escalation_attempt(client: AsyncClient) -> None:
+    # An attacker passing role=admin must NOT get admin — the field is unknown to
+    # RegisterRequest and is ignored; the account is still a requester.
+    resp = await client.post(
+        "/api/auth/register",
+        json={"username": "mallory", "password": "hunter2pw", "role": "admin"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["role"] == "requester"
+
+
+@pytest.mark.asyncio
+async def test_register_duplicate_username_409(client: AsyncClient) -> None:
+    resp = await client.post(
+        "/api/auth/register", json={"username": "admin", "password": "hunter2pw"}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Username already exists"
+
+
+@pytest.mark.asyncio
+async def test_register_short_password_422(client: AsyncClient) -> None:
+    resp = await client.post("/api/auth/register", json={"username": "dave", "password": "short"})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_disabled_returns_403(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import northbound.api.auth as auth_module
+
+    disabled = Settings(
+        environment="development",
+        secret_key="unit-test-secret-key",
+        allow_open_registration=False,
+    )
+    monkeypatch.setattr(auth_module, "get_settings", lambda: disabled)
+    resp = await client.post(
+        "/api/auth/register", json={"username": "eve", "password": "hunter2pw"}
+    )
+    assert resp.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# Cookie session + refresh rotation (hardened auth)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_login_sets_httponly_session_cookies(client: AsyncClient) -> None:
+    resp = await client.post("/api/auth/login", json={"username": "admin", "password": "admin-pw"})
+    assert resp.status_code == 200
+    cookies = {c.name: c for c in resp.cookies.jar}
+    assert "nb_access" in cookies and "nb_refresh" in cookies
+    # Set-Cookie must be httpOnly (not JS-readable).
+    set_cookie_headers = "; ".join(resp.headers.get_list("set-cookie")).lower()
+    assert "httponly" in set_cookie_headers
+
+
+@pytest.mark.asyncio
+async def test_cookie_auth_without_bearer_header(client: AsyncClient) -> None:
+    # Log in (client stores cookies), then call a protected route with NO bearer.
+    await client.post("/api/auth/login", json={"username": "admin", "password": "admin-pw"})
+    me = await client.get("/api/users/me")  # cookie only
+    assert me.status_code == 200
+    assert me.json()["username"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_refresh_rotates_session(client: AsyncClient) -> None:
+    login = await client.post("/api/auth/login", json={"username": "admin", "password": "admin-pw"})
+    first_access = login.json()["access_token"]
+    refreshed = await client.post("/api/auth/refresh")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["role"] == "admin"
+    # A fresh access token is issued and the cookies are re-set.
+    assert {c.name for c in refreshed.cookies.jar} >= {"nb_access", "nb_refresh"}
+    # Still authenticated with the rotated session.
+    assert (await client.get("/api/users/me")).status_code == 200
+    assert isinstance(first_access, str) and first_access
+
+
+@pytest.mark.asyncio
+async def test_refresh_without_cookie_401(client: AsyncClient) -> None:
+    resp = await client.post("/api/auth/refresh")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_access_token_in_refresh_cookie(client: AsyncClient) -> None:
+    # An access token must not be usable at /refresh (type claim is checked).
+    from northbound.auth.cookies import REFRESH_COOKIE
+    from northbound.auth.jwt import create_access_token
+
+    access = create_access_token(sub="x", role=UserRole.ADMIN)
+    client.cookies.set(REFRESH_COOKIE, access, path="/api/auth")
+    resp = await client.post("/api/auth/refresh")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_clears_cookies(client: AsyncClient) -> None:
+    await client.post("/api/auth/login", json={"username": "admin", "password": "admin-pw"})
+    out = await client.post("/api/auth/logout")
+    assert out.status_code == 204
+    # Set-Cookie clears (max-age=0 / expires in the past).
+    cleared = "; ".join(out.headers.get_list("set-cookie")).lower()
+    assert "nb_access" in cleared and "nb_refresh" in cleared

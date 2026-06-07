@@ -1,7 +1,7 @@
 """Async database engine, session factory, and declarative base.
 
 Single-worker SQLite in WAL mode for v1 (see principal-engineering.md D9).
-WAL + a short busy timeout + foreign-key enforcement are applied on every
+WAL + a 5s busy timeout + foreign-key enforcement are applied on every
 new connection via an engine event listener. Swapping ``db_url`` to Postgres
 later requires no API changes — the WAL listener simply no-ops off-SQLite.
 """
@@ -36,7 +36,9 @@ def _apply_sqlite_pragmas(dbapi_conn: Any, _rec: Any) -> None:
     cursor = dbapi_conn.cursor()
     try:
         cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA busy_timeout=100")
+        # 5s: WAL still serializes writers, so a 100ms timeout was far too short
+        # under concurrent writes and spuriously raised "database is locked".
+        cursor.execute("PRAGMA busy_timeout=5000")
         cursor.execute("PRAGMA foreign_keys=ON")
     finally:
         cursor.close()

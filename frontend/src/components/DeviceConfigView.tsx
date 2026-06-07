@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { History, RefreshCw, Search } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import { Button } from '@/shared/Button';
+import { Input } from '@/shared/Input';
 import { ConfigDiff } from './Diff';
 import { renderFullConfig } from '@/lib/config';
 import { cn } from '@/lib/cn';
-import type { Device, Port, User } from '@/types';
+import type { Device, Port, User } from '@/models';
 
 interface DeviceConfigViewProps {
   device: Device;
@@ -66,7 +66,7 @@ export function DeviceConfigView({ device, ports, user }: DeviceConfigViewProps)
         </Button>
         <span className="text-xs text-fg-subtle">last backup · 2 h ago</span>
       </header>
-      <div className="flex-1 overflow-auto nb-scroll">
+      <div className="min-h-0 flex-1 overflow-auto nb-scroll pb-16">
         {showDiff && ports.length > 0 ? (
           <div className="p-4">
             <ConfigDiff
@@ -110,6 +110,8 @@ const KEYWORDS: Record<Device['platform'], string[]> = {
   cisco: ['interface', 'description', 'no', 'shutdown', 'switchport', 'mode', 'access', 'trunk', 'native', 'vlan', 'allowed', 'router', 'bgp', 'neighbor', 'hostname'],
   arista: ['interface', 'description', 'no', 'shutdown', 'switchport', 'mode', 'access', 'trunk', 'native', 'vlan', 'allowed', 'router', 'bgp', 'neighbor', 'hostname'],
   pica8: ['set', 'interface', 'description', 'enable', 'disable', 'vlans', 'tagged', 'untagged', 'protocols', 'system'],
+  mikrotik: ['/interface', '/system', '/ip', 'bridge', 'port', 'vlan', 'set', 'find', 'comment', 'pvid', 'disabled', 'address', 'identity'],
+  mikrotik_swos: ['SwOS', 'identity', 'version', 'serial', 'mgmt-ip', 'up', 'enabled', 'disabled', 'read-only'],
   freebsd: ['ifconfig_', 'inet', 'up', 'down', 'mtu', 'pf', 'rc.conf', 'frr', 'router', 'bgp', 'hostname', 'gateway_enable'],
   mock: ['interface', 'vlan', 'hostname'],
 };

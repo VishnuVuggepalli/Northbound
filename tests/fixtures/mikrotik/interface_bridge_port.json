@@ -1,0 +1,5 @@
+[
+  {".id":"*10","bridge":"bridge1","interface":"ether1","pvid":"100"},
+  {".id":"*11","bridge":"bridge1","interface":"ether2","pvid":"1"},
+  {".id":"*19","bridge":"bridge1","interface":"Ethernet1","pvid":"1"}
+]

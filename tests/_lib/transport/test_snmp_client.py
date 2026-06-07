@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +14,17 @@ import pytest
 from northbound._lib.transport.snmp_client import SnmpClient, SnmpV2cParams
 
 
+@dataclass(frozen=True)
+class _FakeVarBind:
+    """Mirrors puresnmp PyVarBind(oid, value)."""
+
+    oid: str
+    value: Any
+
+
 class _FakeTransport:
-    """In-memory async SNMP responder."""
+    """In-memory async SNMP responder mirroring the REAL puresnmp PyWrapper:
+    ``get``/``multiget`` are coroutines, ``walk`` is an async generator."""
 
     def __init__(
         self,
@@ -43,9 +54,11 @@ class _FakeTransport:
         await self._hold()
         return self._values.get(oid, "unknown")
 
-    async def walk(self, oid: str) -> list[tuple[str, Any]]:
+    async def walk(self, oid: str) -> AsyncIterator[_FakeVarBind]:
         await self._hold()
-        return [(k, v) for k, v in self._values.items() if k.startswith(oid)]
+        for k, v in self._values.items():
+            if k.startswith(oid):
+                yield _FakeVarBind(oid=k, value=v)
 
     async def multiget(self, oids: list[str]) -> list[Any]:
         await self._hold()

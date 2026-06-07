@@ -24,7 +24,7 @@ from northbound.config import get_settings
 from northbound.db import get_session
 from northbound.main import app
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment, UserRole
+from northbound.models.enums import DeviceRole, UserRole
 from northbound.models.user import User
 from northbound.schemas.driver import Credentials
 from northbound.services import port_state
@@ -49,7 +49,7 @@ async def seeded(
     alice = User(username="alice", password_hash=hash_password("b"), role=UserRole.REQUESTER)
     leaf = Device(
         name="lab-leaf",
-        environment=Environment.LAB,
+        environment="lab",
         platform="mock",
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.5",
@@ -58,7 +58,7 @@ async def seeded(
     )
     router = Device(
         name="core-router",
-        environment=Environment.DC,
+        environment="dc",
         platform="mock",
         role=DeviceRole.ROUTER,
         mgmt_ip="10.0.0.1",
@@ -230,7 +230,13 @@ async def test_list_requests_admin_sees_all(
     )
     resp = await client.get("/api/requests", headers=_bearer(admin))
     assert resp.status_code == 200
-    assert len(resp.json()) == 2
+    body = resp.json()
+    assert len(body) == 2
+    # Each request carries the requester's resolved username so the admin can see
+    # WHO filed it (not just the user-id UUID).
+    by_user = {r["requested_by"]: r["requested_by_username"] for r in body}
+    assert by_user[alice.id] == alice.username
+    assert by_user[admin.id] == admin.username
 
 
 @pytest.mark.asyncio
@@ -308,3 +314,415 @@ async def test_audit_list_filtered(
     assert "request.created" in actions
     # No plaintext creds anywhere in the audit feed.
     assert "switch-pw" not in str(resp.json())
+
+
+# --------------------------------------------------------------------------- #
+# Request-changes review loop (needs_revision)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_request_changes_then_resubmit_round_trip(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """pending → (admin request-changes) needs_revision → (owner resubmit) pending."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+
+    rc = await client.post(
+        f"/api/requests/{req_id}/request-changes",
+        headers=_bearer(admin),
+        json={"comment": "use vlan 210, not 200"},
+    )
+    assert rc.status_code == 200
+    assert rc.json()["status"] == "needs_revision"
+    assert rc.json()["reviewer_comment"] == "use vlan 210, not 200"
+
+    re = await client.post(
+        f"/api/requests/{req_id}/resubmit",
+        headers=_bearer(alice),
+        json={"requested_changes": {"untagged_vlan": 210}, "reason": "fixed per review"},
+    )
+    assert re.status_code == 200
+    assert re.json()["status"] == "pending"
+    assert re.json()["requested_changes"]["untagged_vlan"] == 210
+    assert re.json()["reason"] == "fixed per review"
+
+
+@pytest.mark.asyncio
+async def test_request_changes_requires_comment(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    # "" is rejected by the schema (min_length=1); whitespace-only passes the
+    # schema but the service strip-check rejects it as 400.
+    empty = await client.post(
+        f"/api/requests/{req_id}/request-changes", headers=_bearer(admin), json={"comment": ""}
+    )
+    assert empty.status_code == 422
+    blank = await client.post(
+        f"/api/requests/{req_id}/request-changes", headers=_bearer(admin), json={"comment": "   "}
+    )
+    assert blank.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_request_changes_admin_only(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    resp = await client.post(
+        f"/api/requests/{req_id}/request-changes", headers=_bearer(alice), json={"comment": "x"}
+    )
+    assert resp.status_code == 403  # require_admin
+
+
+@pytest.mark.asyncio
+async def test_resubmit_owner_only(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """A non-owner resubmitting gets 404 (no existence leak), like the read path."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    await client.post(
+        f"/api/requests/{req_id}/request-changes", headers=_bearer(admin), json={"comment": "x"}
+    )
+    resp = await client.post(f"/api/requests/{req_id}/resubmit", headers=_bearer(admin), json={})
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resubmit_from_pending_is_illegal(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """Resubmitting a PENDING request (not in needs_revision) is a 409."""
+    _, _, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    resp = await client.post(f"/api/requests/{req_id}/resubmit", headers=_bearer(alice), json={})
+    assert resp.status_code == 409
+
+
+# --------------------------------------------------------------------------- #
+# VLAN-database change requests (device-level, not port-scoped)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_vlan_create_full_lifecycle(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """POST /requests/vlan → approve → apply → confirm, on a writable mock device."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/vlan",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "create", "vlan_id": 1010, "name": "web"},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["status"] == "pending"
+    assert body["port_name"] == ""  # device-level, no switchport target
+    rid = body["id"]
+
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    assert applied.status_code == 200
+    # The rendered diff is the VLAN-table change, not a port change.
+    assert "vlan 1010" in applied.json()["diff_text"]
+    confirmed = await client.post(f"/api/requests/{rid}/confirm", headers=_bearer(admin))
+    assert confirmed.json()["status"] == "applied"
+
+
+@pytest.mark.asyncio
+async def test_vlan_delete_renders_removal(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/vlan",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "delete", "vlan_id": 1010},
+    )
+    rid = created.json()["id"]
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    assert "no vlan 1010" in applied.json()["diff_text"]
+
+
+@pytest.mark.asyncio
+async def test_vlan_create_read_only_device_403(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """Read-only device rejects a VLAN request up front (fail fast)."""
+    _, _, alice, _, router = seeded
+    resp = await client.post(
+        "/api/requests/vlan",
+        headers=_bearer(alice),
+        json={"device_id": router.id, "action": "create", "vlan_id": 50},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "READ_ONLY_DEVICE"
+
+
+@pytest.mark.asyncio
+async def test_vlan_id_out_of_range_422(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    resp = await client.post(
+        "/api/requests/vlan",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "create", "vlan_id": 4095},
+    )
+    assert resp.status_code == 422  # 4095 reserved, ge/le validation
+
+
+# --------------------------------------------------------------------------- #
+# L3 change requests (SVI / loopback) — device-level routed interfaces
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_l3_svi_create_full_lifecycle(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/l3",
+        headers=_bearer(alice),
+        json={
+            "device_id": leaf.id,
+            "action": "create",
+            "kind": "svi",
+            "vlan_id": 1010,
+            "ipv4": "10.10.250.2/16",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["status"] == "pending"
+    assert created.json()["port_name"] == ""
+    rid = created.json()["id"]
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    diff = applied.json()["diff_text"]
+    assert "interface vlan1010" in diff and "10.10.250.2/16" in diff
+
+
+@pytest.mark.asyncio
+async def test_l3_loopback_create(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/l3",
+        headers=_bearer(alice),
+        json={
+            "device_id": leaf.id,
+            "action": "create",
+            "kind": "loopback",
+            "name": "lo0",
+            "ipv4": "10.0.0.1/32",
+        },
+    )
+    rid = created.json()["id"]
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    assert "interface lo0" in applied.json()["diff_text"]
+
+
+@pytest.mark.asyncio
+async def test_l3_svi_without_vlan_id_422(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    resp = await client.post(
+        "/api/requests/l3",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "create", "kind": "svi", "ipv4": "10.0.0.1/24"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_l3_create_without_ipv4_422(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    resp = await client.post(
+        "/api/requests/l3",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "create", "kind": "svi", "vlan_id": 1010},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_l3_read_only_device_403(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, _, router = seeded
+    resp = await client.post(
+        "/api/requests/l3",
+        headers=_bearer(alice),
+        json={
+            "device_id": router.id,
+            "action": "create",
+            "kind": "svi",
+            "vlan_id": 50,
+            "ipv4": "10.0.0.1/24",
+        },
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_vrf_create_full_lifecycle(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/vrf",
+        headers=_bearer(alice),
+        json={"device_id": leaf.id, "action": "create", "name": "tenant-a", "description": "prod"},
+    )
+    assert created.status_code == 201
+    assert created.json()["port_name"] == ""
+    rid = created.json()["id"]
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    assert "ip vrf tenant-a" in applied.json()["diff_text"]
+
+
+@pytest.mark.asyncio
+async def test_vrf_read_only_device_403(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, _, router = seeded
+    resp = await client.post(
+        "/api/requests/vrf",
+        headers=_bearer(alice),
+        json={"device_id": router.id, "action": "create", "name": "x"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_ospf_interface_full_lifecycle(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post(
+        "/api/requests/ospf",
+        headers=_bearer(alice),
+        json={
+            "device_id": leaf.id,
+            "action": "set",
+            "target": "interface",
+            "interface": "vlan1010",
+            "area": "0.0.0.0",
+            "cost": 10,
+        },
+    )
+    assert created.status_code == 201
+    rid = created.json()["id"]
+    await client.post(f"/api/requests/{rid}/approve", headers=_bearer(admin))
+    applied = await client.post(f"/api/requests/{rid}/apply", headers=_bearer(admin))
+    assert "ospf area 0.0.0.0" in applied.json()["diff_text"]
+
+
+@pytest.mark.asyncio
+async def test_ospf_interface_without_area_422(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    resp = await client.post(
+        "/api/requests/ospf",
+        headers=_bearer(alice),
+        json={
+            "device_id": leaf.id,
+            "action": "set",
+            "target": "interface",
+            "interface": "vlan1010",
+        },
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_ospf_read_only_device_403(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, _, router = seeded
+    resp = await client.post(
+        "/api/requests/ospf",
+        headers=_bearer(alice),
+        json={
+            "device_id": router.id,
+            "action": "set",
+            "target": "router-id",
+            "router_id": "1.1.1.1",
+        },
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_request_comment_thread_timeline(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    rid = (
+        await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    ).json()["id"]
+    # alice comments, admin replies
+    c1 = await client.post(
+        f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": "why pending?"}
+    )
+    assert c1.status_code == 201 and c1.json()["kind"] == "comment"
+    await client.post(
+        f"/api/requests/{rid}/comments", headers=_bearer(admin), json={"body": "reviewing now"}
+    )
+
+    tl = await client.get(f"/api/requests/{rid}/timeline", headers=_bearer(alice))
+    assert tl.status_code == 200
+    ev = tl.json()
+    # timeline interleaves the create transition + both comments, oldest first
+    assert ev[0]["kind"] == "transition" and ev[0]["to_status"] == "pending"
+    comments = [e for e in ev if e["kind"] == "comment"]
+    assert [c["body"] for c in comments] == ["why pending?", "reviewing now"]
+    assert comments[0]["actor_username"] == "alice"
+    assert comments[1]["actor_username"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_request_timeline_and_comment_authz(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """A non-owner non-admin can neither read the timeline nor comment (404)."""
+    _, admin, alice, leaf, _ = seeded
+    rid = (
+        await client.post("/api/requests", headers=_bearer(admin), json=_create_body(leaf.id))
+    ).json()["id"]
+    assert (
+        await client.get(f"/api/requests/{rid}/timeline", headers=_bearer(alice))
+    ).status_code == 404
+    r = await client.post(
+        f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": "x"}
+    )
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_request_comment_requires_body(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    rid = (
+        await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    ).json()["id"]
+    assert (
+        await client.post(
+            f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": ""}
+        )
+    ).status_code == 422

@@ -28,9 +28,10 @@ from northbound.drivers import registry
 from northbound.drivers.base import Driver, ReachabilityError
 from northbound.main import app
 from northbound.models.audit_log import AuditLog
+from northbound.models.change_request import ChangeRequest
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
-from northbound.models.enums import DeviceRole, Environment, UserRole
+from northbound.models.enums import ChangeRequestStatus, DeviceRole, UserRole
 from northbound.models.port_metadata import PortMetadata
 from northbound.models.user import User
 from northbound.schemas.driver import (
@@ -510,13 +511,54 @@ async def test_delete_requires_admin(
     assert resp.status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_delete_blocked_by_change_request_history_409(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    """A device with change-request history cannot be hard-deleted (FK RESTRICT).
+
+    The compliance trail must be retained, so the delete surfaces as 409 — not
+    an unhandled 500 — and the device and its change request are left intact.
+    """
+    session, admin, _ = seeded
+    created = await client.post("/api/devices", headers=_bearer(admin), json=_onboard_body())
+    device_id = created.json()["id"]
+
+    session.add(
+        ChangeRequest(
+            device_id=device_id,
+            port_name="Ethernet1",
+            requested_by=admin.username,
+            requested_changes={"untagged_vlan": 10},
+            reason="apply test",
+            status=ChangeRequestStatus.APPLIED,
+        )
+    )
+    await session.flush()
+    # The device exists right up to the delete attempt; the change request is the
+    # sole reason the FK RESTRICT trips.
+    assert await session.scalar(select(Device).where(Device.id == device_id)) is not None
+
+    resp = await client.delete(f"/api/devices/{device_id}", headers=_bearer(admin))
+    # 409 (not 500): the IntegrityError from FK RESTRICT is caught and attributed
+    # to the retained compliance trail.
+    assert resp.status_code == 409
+    assert "change trail" in resp.json()["detail"]
+    # NOTE: the endpoint calls session.rollback() on the IntegrityError. In
+    # production each request owns its own committed session, so rollback only
+    # undoes the failed DELETE and the device persists. Here the test shares one
+    # never-committed session across requests, so rollback also discards the
+    # device/CR set up above — asserting post-rollback row state would test the
+    # harness, not the code. The 409 contract is the meaningful guarantee.
+
+
 # --------------------------------------------------------------------------- #
 # assert_writable unit tests
 # --------------------------------------------------------------------------- #
 def _device(role: DeviceRole, platform: str = "mock") -> Device:
     return Device(
         name="x",
-        environment=Environment.LAB,
+        environment="lab",
         platform=platform,
         role=role,
         mgmt_ip="10.0.0.1",
@@ -563,3 +605,89 @@ def test_parse_description_no_vlan_prefix() -> None:
     host_model, bmc_ip = parse_description("Supermicro X11 | 10.0.0.9")
     assert host_model == "Supermicro X11"
     assert bmc_ip == "10.0.0.9"
+
+
+# --------------------------------------------------------------------------- #
+# Per-device write feature flag (F77)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_device_writes_flag_toggles_writable(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    _, admin, _ = seeded
+    created = await client.post("/api/devices", headers=_bearer(admin), json=_onboard_body())
+    assert created.status_code == 201
+    dev = created.json()
+    assert dev["writes_enabled"] is True and dev["writable"] is True
+
+    # Disable writes → writable flips False, flag False.
+    off = await client.patch(
+        f"/api/devices/{dev['id']}/writes", headers=_bearer(admin), json={"enabled": False}
+    )
+    assert off.status_code == 200
+    assert off.json()["writes_enabled"] is False
+    assert off.json()["writable"] is False
+
+    # A config write to the now-disabled device is blocked by the chokepoint (403).
+    blocked = await client.patch(
+        f"/api/devices/{dev['id']}/ports/xe-1%2F1%2F1/config",
+        headers=_bearer(admin),
+        json={"port_mode": "access", "untagged_vlan": 100},
+    )
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"]["code"] == "READ_ONLY_DEVICE"
+
+    # Re-enable → writable again.
+    on = await client.patch(
+        f"/api/devices/{dev['id']}/writes", headers=_bearer(admin), json={"enabled": True}
+    )
+    assert on.status_code == 200 and on.json()["writable"] is True
+
+
+@pytest.mark.asyncio
+async def test_device_writes_flag_requires_admin(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    _, admin, alice = seeded
+    dev = (await client.post("/api/devices", headers=_bearer(admin), json=_onboard_body())).json()
+    resp = await client.patch(
+        f"/api/devices/{dev['id']}/writes", headers=_bearer(alice), json={"enabled": False}
+    )
+    assert resp.status_code == 403
+
+
+# --------------------------------------------------------------------------- #
+# re-discover (F18)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_rediscover_refreshes_existing_device(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    _, admin, _ = seeded
+    dev = (await client.post("/api/devices", headers=_bearer(admin), json=_onboard_body())).json()
+    resp = await client.post(f"/api/devices/{dev['id']}/rediscover", headers=_bearer(admin))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ports_total"] >= 0
+    # All discovered ports already have metadata from onboard → none added again.
+    assert body["ports_added"] == 0
+    assert "hostname" in body
+
+
+@pytest.mark.asyncio
+async def test_rediscover_requires_admin(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    _, admin, alice = seeded
+    dev = (await client.post("/api/devices", headers=_bearer(admin), json=_onboard_body())).json()
+    resp = await client.post(f"/api/devices/{dev['id']}/rediscover", headers=_bearer(alice))
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_rediscover_unknown_device_404(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User]
+) -> None:
+    _, admin, _ = seeded
+    resp = await client.post("/api/devices/does-not-exist/rediscover", headers=_bearer(admin))
+    assert resp.status_code == 404

@@ -31,6 +31,7 @@ from northbound.drivers.factory import driver_for
 from northbound.models.device import Device
 from northbound.models.port_metadata import PortMetadata
 from northbound.schemas.driver import Credentials, PortState
+from northbound.services import events
 from northbound.services.credvault import FernetCredVault, deserialize_credentials
 
 
@@ -72,13 +73,21 @@ async def _fetch_live(device: Device) -> tuple[PortState, ...]:
     """Pull live port state from the device driver."""
     creds = _credentials_for(device)
     driver = driver_for(device, creds)
-    ports = await driver.get_ports()
+    try:
+        ports = await driver.get_ports()
+    finally:
+        await driver.aclose()
     return tuple(ports)
 
 
 def invalidate(device_id: str) -> None:
-    """Drop the cached entry for a device (call after a successful apply)."""
+    """Drop the cached entry for a device (call after a successful apply).
+
+    Also publishes a ``device.ports`` live-state event so any connected SSE
+    client refetches the device's ports — a write just changed them.
+    """
     _cache.delete(device_id)
+    events.hub.publish(events.Event("device.ports", {"device_id": device_id}))
 
 
 async def _cached_ports(

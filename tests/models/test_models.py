@@ -17,7 +17,6 @@ from northbound.models import (
     ConfigBackup,
     Device,
     DeviceRole,
-    Environment,
     PortMetadata,
     User,
     UserRole,
@@ -27,7 +26,7 @@ from northbound.models import (
 async def _make_device(session: AsyncSession, name: str = "lab-leaf-1") -> Device:
     device = Device(
         name=name,
-        environment=Environment.LAB,
+        environment="lab",
         platform="mock",
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.1",
@@ -62,7 +61,7 @@ async def test_device_name_unique(db_session: AsyncSession) -> None:
     db_session.add(
         Device(
             name="sw1",
-            environment=Environment.LAB,
+            environment="lab",
             platform="mock",
             role=DeviceRole.LEAF,
             mgmt_ip="10.0.0.2",
@@ -76,7 +75,7 @@ async def test_device_enum_round_trip(db_session: AsyncSession) -> None:
     await _make_device(db_session)
     await db_session.commit()
     fetched = (await db_session.execute(select(Device))).scalar_one()
-    assert fetched.environment is Environment.LAB
+    assert fetched.environment == "lab"
     assert fetched.role is DeviceRole.LEAF
     assert fetched.prefer_native_api is True
     assert fetched.encrypted_credentials is None

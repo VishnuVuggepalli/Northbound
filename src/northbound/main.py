@@ -1,8 +1,8 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
 from slowapi import _rate_limit_exceeded_handler
@@ -13,13 +13,30 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 # Order is alphabetical to keep /api/platforms output stable.
 import northbound.drivers.arista
 import northbound.drivers.cisco
+import northbound.drivers.mikrotik
+import northbound.drivers.mikrotik_swos
 import northbound.drivers.mock
 import northbound.drivers.pica8  # noqa: F401  (registers)
-from northbound.api import audit, auth, devices, platforms, ports, requests, users
+from northbound.api import (
+    audit,
+    auth,
+    devices,
+    events,
+    platforms,
+    ports,
+    requests,
+    sites,
+    users,
+)
+from northbound.api import settings as settings_api
 from northbound.api.limiter import limiter
 from northbound.api.static_spa import mount_spa
+from northbound.api.versioning import ApiVersionMiddleware
 from northbound.config import get_settings
-from northbound.services.scheduler import build_scheduler
+from northbound.db import async_session_factory, engine
+from northbound.services import runtime_settings
+from northbound.services.scheduler_lease import SchedulerLease
+from northbound.services.sites import ensure_default_sites
 
 logger = logging.getLogger("northbound.main")
 
@@ -41,30 +58,72 @@ def _rate_limit_handler(request: Request, exc: Exception) -> Response:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Start the in-process scheduler on startup; stop it on shutdown.
+    """Start background tasks on startup; stop them on shutdown.
 
-    Gated on ``settings.enable_scheduler`` (forced ``False`` under tests) so the
-    test suite never spawns real APScheduler timers — which would otherwise keep
-    the event loop alive and hang collection. In production the four background
-    jobs (reachability poll, nightly backup, audit verify, reconciler) run here.
+    Two background tasks run only when ``settings.enable_scheduler`` is True
+    (forced ``False`` under tests so the suite never spawns real timers — which
+    would keep the event loop alive and hang collection):
+
+    * A :class:`SchedulerLease` that elects a single leader (Postgres advisory
+      lock) and runs the four jobs (reachability poll, nightly backup, audit
+      verify, reconciler) in exactly ONE worker — never N times under
+      multi-worker. On SQLite the lone process is always the leader.
+    * A runtime-settings refresh loop in EVERY worker, so an admin change made
+      on one worker (e.g. the write rate limit) converges to the others.
     """
     settings = get_settings()
-    scheduler: AsyncIOScheduler | None = None
+
+    # Seed the default Lab/DC sites so a fresh DB has a usable catalog. Idempotent
+    # and resilient: a missing ``sites`` table (migration not yet run) only logs.
+    try:
+        async with async_session_factory() as session, session.begin():
+            await ensure_default_sites(session)
+    except Exception:
+        logger.warning("default-site seed skipped (sites table missing?)", exc_info=True)
+
+    # Seed the runtime-settings cache (e.g. admin-tuned write rate limit) from the
+    # DB. Resilient: a missing table (migration not yet run) only logs; reads fall
+    # back to the env default until then.
+    try:
+        async with async_session_factory() as session:
+            await runtime_settings.load_cache(session)
+    except Exception:
+        logger.warning("runtime-settings cache seed skipped (table missing?)", exc_info=True)
+
+    lease: SchedulerLease | None = None
+    refresh_stop: asyncio.Event | None = None
+    refresh_task: asyncio.Task[None] | None = None
     if settings.enable_scheduler:
-        scheduler = build_scheduler(settings)
-        scheduler.start()
-        logger.info("scheduler started with %d job(s)", len(scheduler.get_jobs()))
+        lease = SchedulerLease(engine, settings)
+        await lease.start()
+        refresh_stop = asyncio.Event()
+        refresh_task = asyncio.create_task(
+            runtime_settings.refresh_loop(
+                async_session_factory,
+                settings.runtime_settings_refresh_seconds,
+                refresh_stop,
+            ),
+            name="runtime-settings-refresh",
+        )
     else:
-        logger.info("scheduler disabled (enable_scheduler=False); no background jobs")
+        logger.info("background tasks disabled (enable_scheduler=False)")
     try:
         yield
     finally:
-        if scheduler is not None:
-            scheduler.shutdown(wait=False)
-            logger.info("scheduler shut down")
+        if refresh_stop is not None:
+            refresh_stop.set()
+        if refresh_task is not None:
+            await refresh_task
+        if lease is not None:
+            await lease.stop()
+            logger.info("scheduler lease stopped")
 
 
 app = FastAPI(title="Northbound", version="0.1.0", lifespan=lifespan)
+
+# API versioning: 406 a request that pins an unsupported version via Accept, and
+# stamp X-API-Version on every response. Added first so it wraps outermost.
+app.add_middleware(ApiVersionMiddleware)
 
 # Reverse-proxy support: only honour X-Forwarded-* (so the rate limiter and
 # logs see the real client IP, not the proxy's) when explicitly enabled and
@@ -83,9 +142,12 @@ app.include_router(platforms.router)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(devices.router)
+app.include_router(sites.router)
 app.include_router(ports.router)
 app.include_router(requests.router)
 app.include_router(audit.router)
+app.include_router(events.router)
+app.include_router(settings_api.router)
 
 
 @app.get("/health", response_model=HealthResponse)

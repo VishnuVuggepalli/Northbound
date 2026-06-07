@@ -1,9 +1,11 @@
 import { useEffect, useMemo } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
-import { Toaster } from '@/components/ui/Toaster';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { Breadcrumbs } from '@/shared/Breadcrumbs';
+import { Toaster } from '@/shared/Toaster';
 import { HelpOverlay } from '@/components/HelpOverlay';
-import { RequestModal } from '@/components/RequestModal';
+import { RequestModal } from '@/modals/RequestModal';
 import { LoginPage } from '@/pages/LoginPage';
 import { EnvPickerPage } from '@/pages/EnvPickerPage';
 import { EnvironmentPage } from '@/pages/EnvironmentPage';
@@ -14,13 +16,15 @@ import { AdminQueuePage } from '@/pages/AdminQueuePage';
 import { OnboardPage } from '@/pages/OnboardPage';
 import { SearchResultsPage } from '@/pages/SearchResultsPage';
 import { AboutPage } from '@/pages/About';
+import { SettingsPage } from '@/pages/SettingsPage';
 import { useAuthStore } from '@/store/auth';
 import { useUIStore } from '@/store/ui';
 import { useThemeStore } from '@/store/theme';
 import { useHotkeys, useSequenceHotkeys } from '@/hooks/useHotkeys';
-import { useCreateRequest, useDevice, usePorts } from '@/api/queries';
+import { useEventStream } from '@/hooks/useEventStream';
+import { useCreateRequest, useDevice, usePorts, useVlans } from '@/api/queries';
 import { pushToast } from '@/store/toast';
-import { apiClient, isApiError, VLANS } from '@/api';
+import { apiClient, isApiError } from '@/api';
 
 /**
  * Validate / refresh the persisted session against `GET /api/users/me` once on
@@ -28,11 +32,14 @@ import { apiClient, isApiError, VLANS } from '@/api';
  * then bounces to /login. Mock client always resolves, so E2E is unaffected.
  */
 function useValidateSession(): void {
-  const token = useAuthStore((s) => s.token);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const setUser = useAuthStore((s) => s.setUser);
   const logout = useAuthStore((s) => s.logout);
   useEffect(() => {
-    if (!token) return;
+    // The session lives in the httpOnly cookie, not JS — so validate by calling
+    // /me (cookie-authed). The request helper silently refreshes once on a 401;
+    // a still-401 means the session is truly gone, so clear it.
+    if (!isAuthenticated) return;
     let cancelled = false;
     apiClient
       .getCurrentUser()
@@ -45,21 +52,36 @@ function useValidateSession(): void {
     return () => {
       cancelled = true;
     };
-  }, [token, setUser, logout]);
+  }, [isAuthenticated, setUser, logout]);
 }
 
 function ProtectedShell() {
   const isAuthed = useAuthStore((s) => s.isAuthenticated);
   const location = useLocation();
   useValidateSession();
+  // Live-state push (F157): open the SSE stream while authenticated so device
+  // reachability + port changes refresh the UI without polling.
+  useEventStream(isAuthed);
   if (!isAuthed) return <Navigate to="/login" replace state={{ from: location }} />;
   // The TopBar renders its own <header>; the rest of the page lives in
   // <main> so screen-reader landmark navigation works (axe `landmark-one-main`).
   return (
     <>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-bg-elev-2 focus:px-3 focus:py-2 focus:text-sm focus:text-fg focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-accent"
+      >
+        Skip to content
+      </a>
       <TopBar />
-      <main id="main-content">
-        <Outlet />
+      <Breadcrumbs />
+      <main id="main-content" tabIndex={-1} className="outline-none">
+        {/* Per-route boundary: a single page's crash shows a recoverable
+            fallback while the shell/nav stays usable. Keyed by pathname so
+            navigating to another route clears a stuck error. */}
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </main>
     </>
   );
@@ -75,6 +97,7 @@ function AppRoutes() {
         <Route path="/onboard" element={<OnboardPage />} />
         <Route path="/requests" element={<RequestsPage />} />
         <Route path="/queue" element={<AdminQueuePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/env/:env" element={<EnvironmentPage />}>
           <Route index element={<EnvironmentTopologyPage />} />
           <Route path="search" element={<SearchResultsPage />} />
@@ -180,6 +203,22 @@ function GlobalDialogs() {
   const user = useAuthStore((s) => s.user);
   const createReq = useCreateRequest();
   const { data: device } = useDevice(selectedDeviceId);
+  const { data: portSnapshot } = usePorts(selectedDeviceId);
+  const { data: vlans = [] } = useVlans(selectedDeviceId);
+
+  // VLAN quick-pick suggestions from REAL data — the device's full VLAN database
+  // (so any defined VLAN is pickable, not only ones already on a port), unioned
+  // with VLANs observed on this device's ports. Sorted unique. The modal's
+  // numeric input still allows any 1–4094.
+  const vlanOptions = useMemo(() => {
+    const seen = new Set<number>();
+    for (const v of vlans) seen.add(v.vlan_id);
+    for (const p of portSnapshot?.ports ?? []) {
+      if (typeof p.untagged_vlan === 'number') seen.add(p.untagged_vlan);
+      for (const v of p.tagged_vlans ?? []) seen.add(v);
+    }
+    return [...seen].sort((a, b) => a - b);
+  }, [vlans, portSnapshot]);
 
   return (
     <>
@@ -189,7 +228,7 @@ function GlobalDialogs() {
         port={requestModal.port}
         device={device ?? null}
         theme={theme}
-        vlanOptions={VLANS}
+        vlanOptions={vlanOptions}
         onClose={closeRequest}
         submitting={createReq.isPending}
         onSubmit={({ changes, reason }) => {
@@ -229,9 +268,13 @@ function GlobalDialogs() {
 export function App() {
   return (
     <BrowserRouter>
-      <GlobalShortcuts />
-      <AppRoutes />
-      <GlobalDialogs />
+      {/* App-root boundary: a catastrophic shell crash falls back to a full
+          reload rather than a blank white screen. */}
+      <ErrorBoundary fullReload title="Northbound hit an unexpected error.">
+        <GlobalShortcuts />
+        <AppRoutes />
+        <GlobalDialogs />
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

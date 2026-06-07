@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.schemas.driver import Credentials, DriverCapabilities
 
 
@@ -22,6 +22,7 @@ class CredentialsIn(BaseModel):
     ssh_private_key: str | None = None
     api_token: str | None = None
     snmp_community: str | None = None
+    enable_secret: str | None = None
 
     def to_credentials(self) -> Credentials:
         """Build the in-process :class:`Credentials` value object."""
@@ -31,6 +32,7 @@ class CredentialsIn(BaseModel):
             ssh_private_key=self.ssh_private_key,
             api_token=self.api_token,
             snmp_community=self.snmp_community,
+            enable_secret=self.enable_secret,
         )
 
 
@@ -52,7 +54,7 @@ class DeviceCreateIn(BaseModel):
     """Body of ``POST /api/devices`` — atomic onboard."""
 
     name: str = Field(min_length=1, max_length=128)
-    environment: Environment
+    environment: str = Field(min_length=1, max_length=64)  # site slug; must exist in catalog
     role: DeviceRole
     platform_id: str = Field(min_length=1, max_length=64)
     mgmt_ip: str = Field(min_length=1, max_length=64)
@@ -111,12 +113,30 @@ class DeviceOut(BaseModel):
 
     id: str
     name: str
-    environment: Environment
+    environment: str  # site slug
     role: DeviceRole
     platform: str
     mgmt_ip: str
     ssh_user: str | None = None
     prefer_native_api: bool
     capabilities: DriverCapabilities | None = None
+    # ``writable`` is the EFFECTIVE policy result (role + platform + the flag).
+    # ``writes_enabled`` is the per-device admin flag alone, so the UI can show
+    # the toggle state separately from intrinsic (role/platform) read-only.
     writable: bool = False
+    writes_enabled: bool = True
     reachable: bool | None = None
+
+
+class DeviceWritesIn(BaseModel):
+    """Body of ``PATCH /api/devices/{id}/writes`` — the per-device write flag."""
+
+    enabled: bool
+
+
+class RediscoverOut(BaseModel):
+    """Result of ``POST /api/devices/{id}/rediscover``."""
+
+    ports_total: int
+    ports_added: int
+    hostname: str = ""

@@ -14,9 +14,11 @@ class UserRole(StrEnum):
     REQUESTER = "requester"
 
 
-class Environment(StrEnum):
-    LAB = "lab"
-    DC = "dc"
+# NOTE: a device's site (formerly the fixed "environment" enum of lab/dc) is now
+# a free-form slug string referencing the runtime-managed ``sites`` catalog
+# (see northbound.models.site.Site) — mirroring how ``platform`` is a free-form
+# string backed by the platforms catalog. Admins add sites at runtime; no enum,
+# no migration per new site.
 
 
 class DeviceRole(StrEnum):
@@ -28,6 +30,9 @@ class DeviceRole(StrEnum):
 
 class ChangeRequestStatus(StrEnum):
     PENDING = "pending"
+    # Admin asked the requester to revise (non-terminal): the requester edits and
+    # resubmits → back to PENDING. The collaborative alternative to a hard reject.
+    NEEDS_REVISION = "needs_revision"
     APPROVED = "approved"
     REJECTED = "rejected"
     APPLYING = "applying"

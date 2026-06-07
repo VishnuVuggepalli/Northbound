@@ -18,7 +18,7 @@ from northbound.models.change_request_event import ChangeRequestEvent
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus as S
-from northbound.models.enums import DeviceRole, Environment
+from northbound.models.enums import DeviceRole
 from northbound.models.user import User
 from northbound.schemas.driver import (
     ApplyResult,
@@ -149,7 +149,7 @@ async def _device(db_session: AsyncSession, platform: str) -> Device:
     vault = FernetCredVault.from_settings()
     device = Device(
         name=f"dev-{platform}",
-        environment=Environment.LAB,
+        environment="lab",
         platform=platform,
         role=DeviceRole.LEAF,
         mgmt_ip="10.0.0.7",
@@ -331,7 +331,7 @@ async def test_apply_failure_persists_through_get_session(
         await seed.flush()
         device = Device(
             name="dev-applyfail-http",
-            environment=Environment.LAB,
+            environment="lab",
             platform="applyfail",
             role=DeviceRole.LEAF,
             mgmt_ip="10.0.0.77",
@@ -393,3 +393,95 @@ async def test_apply_failure_persists_through_get_session(
         # The persisted audit chain must still verify.
         ok, index = await audit.verify_chain(check)
         assert ok is True, f"audit chain broke at index {index}"
+
+
+# ── R3 concurrency: double-apply guard (CON-1) ──────────────────────────────
+
+
+class _CountingConfirmDriver(_BaseTestDriver):
+    """Commit-confirm driver that counts apply_change calls."""
+
+    platform_id = "applycount"
+    display_name = "Counting (test)"
+    capabilities = _BASE_CAPS
+    apply_calls = 0
+
+    async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
+        type(self).apply_calls += 1
+        return ApplyResult(success=True, confirm_token="tok-r3", confirm_deadline_at=9999.0)
+
+
+@pytest.mark.asyncio
+async def test_second_apply_attempt_pushes_config_exactly_once(
+    db_session: AsyncSession, users2: tuple[User, User]
+) -> None:
+    """Two apply_request attempts on the same request → the driver is invoked
+    EXACTLY once; the second attempt (on the now-claimed row) raises
+    AlreadyClaimed and never touches the device. Headline CON-1 proof against
+    double-apply. Attempts run sequentially because a single AsyncSession is not
+    concurrency-safe; in production each request has its own session and the
+    atomic UPDATE...WHERE on the shared DB row is the serialization point, which
+    is exactly what claim_transition implements."""
+    registry.register(_CountingConfirmDriver)
+    _CountingConfirmDriver.apply_calls = 0
+    try:
+        admin, alice = users2
+        device = await _device(db_session, "applycount")
+        request = await _approved_request(db_session, device, alice, admin)
+
+        # First attempt wins the claim, pushes config, ends awaiting_confirm.
+        first = await change_apply.apply_request(db_session, request, device, admin)
+        assert first.status == S.AWAITING_CONFIRM
+
+        # Second attempt on the now-claimed request is rejected BEFORE any
+        # device I/O — the early status guard (no longer approved/pending) or,
+        # in a true race where both observers see APPROVED, the atomic
+        # approved/pending→applying claim matching 0 rows.
+        with pytest.raises((change_apply.ApplyError, requests.AlreadyClaimed)):
+            await change_apply.apply_request(db_session, request, device, admin)
+
+        # Device was pushed exactly once across both attempts.
+        assert _CountingConfirmDriver.apply_calls == 1, (
+            f"double-apply: driver called {_CountingConfirmDriver.apply_calls}x"
+        )
+    finally:
+        registry._REGISTRY.pop(_CountingConfirmDriver.platform_id, None)
+        _CountingConfirmDriver.apply_calls = 0
+
+
+@pytest.mark.asyncio
+async def test_claim_transition_second_caller_rejected(
+    db_session: AsyncSession, users2: tuple[User, User]
+) -> None:
+    """claim_transition is the authoritative guard: the first claim flips
+    approved→applying; a second claim on the now-applying row matches 0 rows
+    and raises AlreadyClaimed (no device I/O happens on that path)."""
+    admin, alice = users2
+    device = await _device(db_session, "applyconfirm")
+    request = await _approved_request(db_session, device, alice, admin)
+
+    await requests.claim_transition(
+        db_session, request, expected=[S.APPROVED, S.PENDING], to_status=S.APPLYING, actor=admin.id
+    )
+    assert request.status == S.APPLYING
+
+    with pytest.raises(requests.AlreadyClaimed):
+        await requests.claim_transition(
+            db_session,
+            request,
+            expected=[S.APPROVED, S.PENDING],
+            to_status=S.APPLYING,
+            actor=admin.id,
+        )
+
+
+def test_apply_stale_seconds_clamped_to_invariant() -> None:
+    """CON-3: reconciler_apply_stale_seconds is clamped up so it comfortably
+    exceeds the commit-confirm window (can't kill a slow-but-live apply)."""
+    from northbound.config import Settings
+
+    s = Settings(commit_confirm_seconds=60, reconciler_apply_stale_seconds=10)
+    assert s.reconciler_apply_stale_seconds >= s.commit_confirm_seconds
+    # A generous value is left untouched.
+    s2 = Settings(commit_confirm_seconds=60, reconciler_apply_stale_seconds=600)
+    assert s2.reconciler_apply_stale_seconds == 600

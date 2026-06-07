@@ -1,0 +1,19 @@
+{% set ifname = ('Vlan' ~ vlan_id) if kind == 'svi' else name %}
+{% if action == 'delete' %}
+no interface {{ ifname }}
+{% else %}
+{% if kind == 'svi' %}
+feature interface-vlan
+{% endif %}
+interface {{ ifname }}
+{% if vrf %}
+  vrf member {{ vrf }}
+{% endif %}
+  ip address {{ ipv4 }}
+{% if mtu is not none %}
+  mtu {{ mtu }}
+{% endif %}
+{% if enabled is not none %}
+  {{ 'no shutdown' if enabled else 'shutdown' }}
+{% endif %}
+{% endif %}

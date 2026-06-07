@@ -12,10 +12,11 @@
  */
 
 import { Copy, ExternalLink, Terminal } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
+import { Button } from '@/shared/Button';
 import { vendorWebUiUrl } from '@/lib/devicePolicy';
 import { pushToast } from '@/store/toast';
-import type { Device, PlatformRegistryEntry } from '@/types';
+import { useAuthStore } from '@/store/auth';
+import type { Device, PlatformRegistryEntry } from '@/models';
 
 interface VendorActionsProps {
   device: Device;
@@ -26,7 +27,10 @@ interface VendorActionsProps {
 }
 
 export function VendorActions({ device, platform, size = 'sm', className }: VendorActionsProps) {
-  if (!platform) return null;
+  const isAdmin = useAuthStore((s) => s.user?.role) === 'admin';
+  // RBAC: the vendor-UI escape hatch + SSH command are privileged. Requesters
+  // file change requests; they don't get a direct line to the device.
+  if (!platform || !isAdmin) return null;
 
   const webUrl = vendorWebUiUrl(device, platform);
   if (webUrl) {

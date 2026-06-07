@@ -24,11 +24,21 @@ import type {
   OnboardingDraft,
   Port,
   PortListSnapshot,
+  L3Interface,
+  OspfInterface,
   PortMap,
+  RequestedChanges,
+  RequestEvent,
+  ProtocolDetail,
+  Site,
+  SystemInfo,
+  TopologyLink,
+  VlanInfo,
   PlatformRegistryEntry,
   User,
-} from '@/types';
+} from '@/models';
 import type { components } from './schema.gen';
+import type { SettingsOut, SettingsPatch } from './schema';
 import { ApiError } from './errors';
 import { clearAuthSession, getAuthToken } from '@/store/auth';
 import {
@@ -51,7 +61,7 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 type LoginResponse = components['schemas']['LoginResponse'];
 type UserOut = components['schemas']['UserOut'];
 type DeviceOut = components['schemas']['DeviceOut'];
-type PortDetailOut = components['schemas']['PortDetailOut'];
+type PortStateOut = components['schemas']['PortStateOut'];
 type RequestOut = components['schemas']['RequestOut'];
 type AuditEntryOut = components['schemas']['AuditEntryOut'];
 type PlatformInfo = components['schemas']['PlatformInfo'];
@@ -94,22 +104,46 @@ async function parseError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message, code);
 }
 
+/** Cookie-based session refresh. Bypasses request() to avoid recursion. */
+async function tryRefresh(): Promise<boolean> {
+  try {
+    const res = await fetch(buildUrl('/api/auth/refresh'), {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      credentials: 'include',
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, query, anonymous } = options;
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (!anonymous) {
-    const token = getAuthToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
+  const send = async (): Promise<Response> => {
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (!anonymous) {
+      // Auth rides in the httpOnly cookie (sent via credentials:'include'). A
+      // legacy in-memory bearer, if any, is still attached for API parity.
+      const token = getAuthToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+    }
+    return fetch(buildUrl(path, query), {
+      method,
+      headers,
+      credentials: 'include',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  };
 
   let res: Response;
   try {
-    res = await fetch(buildUrl(path, query), {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    res = await send();
+    // Access token expired? Try one silent cookie refresh, then replay.
+    if (res.status === 401 && !anonymous) {
+      if (await tryRefresh()) res = await send();
+    }
   } catch (err) {
     throw new ApiError(0, err instanceof Error ? err.message : 'Network error');
   }
@@ -145,6 +179,23 @@ export async function login(username: string, password: string): Promise<LoginRe
   };
 }
 
+export async function register(
+  username: string,
+  password: string,
+  email?: string,
+): Promise<LoginResult> {
+  // Self-registration always yields a requester and a token (auto-login).
+  const res = await request<LoginResponse>('/api/auth/register', {
+    method: 'POST',
+    body: { username, password, ...(email ? { email } : {}) },
+    anonymous: true,
+  });
+  return {
+    access_token: res.access_token,
+    user: { username: res.username, role: res.role, name: res.username },
+  };
+}
+
 export async function getCurrentUser(_username?: string): Promise<User> {
   const me = await request<UserOut>('/api/users/me');
   return { username: me.username, role: me.role, name: me.username };
@@ -161,6 +212,43 @@ export async function logout(): Promise<void> {
 export async function listUsers(): Promise<User[]> {
   const users = await request<UserOut[]>('/api/users');
   return users.map((u) => ({ username: u.username, role: u.role, name: u.username }));
+}
+
+/* -------------------------------------------------------------------------
+ * Sites (the runtime-managed location/environment catalog)
+ * ------------------------------------------------------------------------- */
+
+interface SiteOut {
+  id: string;
+  slug: string;
+  name: string;
+  device_count: number;
+}
+
+function mapSite(s: SiteOut): Site {
+  return { id: s.id, slug: s.slug, name: s.name, deviceCount: s.device_count };
+}
+
+export async function listSites(): Promise<Site[]> {
+  const sites = await request<SiteOut[]>('/api/sites');
+  return sites.map(mapSite);
+}
+
+export async function createSite(input: { slug: string; name: string }): Promise<Site> {
+  const site = await request<SiteOut>('/api/sites', { method: 'POST', body: input });
+  return mapSite(site);
+}
+
+export async function renameSite(id: string, name: string): Promise<Site> {
+  const site = await request<SiteOut>(`/api/sites/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: { name },
+  });
+  return mapSite(site);
+}
+
+export async function deleteSite(id: string): Promise<void> {
+  await request<void>(`/api/sites/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 /* -------------------------------------------------------------------------
@@ -188,7 +276,60 @@ export async function getDevice(id: string): Promise<Device> {
   return mapDevice(d);
 }
 
-export async function listLinks(_env?: Environment): Promise<ReadonlyArray<never>> {
+export interface RediscoverResult {
+  ports_total: number;
+  ports_added: number;
+  hostname: string;
+}
+
+/** Re-probe an onboarded device, refresh its stored snapshot (admin; F18). */
+export async function rediscoverDevice(id: string): Promise<RediscoverResult> {
+  return request<RediscoverResult>(`/api/devices/${encodeURIComponent(id)}/rediscover`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * Offboard a device (admin). 204 on success. A device with change-request
+ * history can't be hard-deleted (compliance trail) → backend returns 409, which
+ * surfaces here as an ApiError(409) the caller can message.
+ */
+export async function deleteDevice(id: string): Promise<void> {
+  await request<void>(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** Enable/disable config writes for a device (admin; F77 per-device flag). */
+export async function setDeviceWrites(id: string, enabled: boolean): Promise<Device> {
+  const d = await request<DeviceOut>(`/api/devices/${encodeURIComponent(id)}/writes`, {
+    method: 'PATCH',
+    body: { enabled },
+  });
+  return mapDevice(d);
+}
+
+export async function getSystemInfo(id: string): Promise<SystemInfo> {
+  return request<SystemInfo>(`/api/devices/${encodeURIComponent(id)}/system`);
+}
+
+export async function getProtocolDetail(id: string, slug: string): Promise<ProtocolDetail> {
+  return request<ProtocolDetail>(
+    `/api/devices/${encodeURIComponent(id)}/protocols/${encodeURIComponent(slug)}`,
+  );
+}
+
+export async function getVlans(id: string): Promise<VlanInfo[]> {
+  return request<VlanInfo[]>(`/api/devices/${encodeURIComponent(id)}/vlans`);
+}
+
+export async function getL3Interfaces(id: string): Promise<L3Interface[]> {
+  return request<L3Interface[]>(`/api/devices/${encodeURIComponent(id)}/l3-interfaces`);
+}
+
+export async function getOspfInterfaces(id: string): Promise<OspfInterface[]> {
+  return request<OspfInterface[]>(`/api/devices/${encodeURIComponent(id)}/ospf-interfaces`);
+}
+
+export async function listLinks(_env?: Environment): Promise<readonly TopologyLink[]> {
   // The backend does not model topology links; the 3D topology view falls back
   // to an empty link set when running against the real API.
   return [];
@@ -202,16 +343,96 @@ export async function listPortsForDevice(
   deviceId: string,
   options: { refresh?: boolean } = {},
 ): Promise<PortListSnapshot> {
-  const ports = await request<PortDetailOut[]>(
+  // Backend GET /api/devices/{id}/ports returns a flat PortStateOut[] (see
+  // backend api/ports.py response_model=list[PortStateOut]); it is NOT the
+  // single-port PortDetailOut shape, so each element maps directly.
+  const ports = await request<PortStateOut[]>(
     `/api/devices/${encodeURIComponent(deviceId)}/ports`,
     { query: options.refresh ? { refresh: true } : undefined },
   );
   return {
     device_id: deviceId,
-    ports: ports.map((detail, i) => mapPort(detail.port, deviceId, i)),
+    ports: ports.map((p, i) => mapPort(p, deviceId, i)),
     fetched_at: Date.now(),
     cache_ttl_seconds: 30,
   };
+}
+
+export async function updatePortMetadata(
+  deviceId: string,
+  portName: string,
+  patch: { host_model?: string; bmc_ip?: string; notes?: string },
+): Promise<Port> {
+  const p = await request<PortStateOut>(
+    `/api/devices/${encodeURIComponent(deviceId)}/ports/${encodeURIComponent(portName)}`,
+    { method: 'PATCH', body: patch },
+  );
+  return mapPort(p, deviceId, 0);
+}
+
+export async function setPortDescription(
+  deviceId: string,
+  portName: string,
+  description: string,
+): Promise<{ port_name: string; description: string }> {
+  // Raw port name (slashes) so the `/description` suffix matches the :path route.
+  return request<{ port_name: string; description: string }>(
+    `/api/devices/${encodeURIComponent(deviceId)}/ports/${portName}/description`,
+    { method: 'PATCH', body: { description } },
+  );
+}
+
+/** Admin direct edit of on-device port tunables. Only set fields are sent. */
+export interface PortConfigPatch {
+  port_mode?: 'access' | 'trunk';
+  untagged_vlan?: number;
+  tagged_vlans?: number[];
+  mtu?: number;
+  enabled?: boolean;
+}
+
+export async function setPortConfig(
+  deviceId: string,
+  portName: string,
+  patch: PortConfigPatch,
+): Promise<{ port_name: string } & PortConfigPatch> {
+  // Raw port name (slashes) so the `/config` suffix matches the :path route.
+  return request<{ port_name: string } & PortConfigPatch>(
+    `/api/devices/${encodeURIComponent(deviceId)}/ports/${portName}/config`,
+    { method: 'PATCH', body: patch },
+  );
+}
+
+// One slow/unreachable device must neither blank nor STALL the whole env-wide
+// port view. A plain Promise.all with a per-item try/catch still waits for the
+// slowest fetch (a backend that hangs polling a dead device), so the topology
+// shows "0 ports" and search goes blank until that one device finally errors.
+// Cap each device fetch with a deadline so the aggregate is bounded.
+const PER_DEVICE_PORTS_TIMEOUT_MS = 7000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
+/** Ports for one device — resilient: never rejects, never hangs the caller. */
+async function portsForDeviceResilient(deviceId: string): Promise<Port[]> {
+  try {
+    const snap = await withTimeout(
+      listPortsForDevice(deviceId),
+      PER_DEVICE_PORTS_TIMEOUT_MS,
+      `ports for device ${deviceId}`,
+    );
+    return snap.ports;
+  } catch (err) {
+    // Surfaced (not swallowed); the device simply contributes no ports.
+    console.error(`listAllPorts: failed to load ports for device ${deviceId}`, err);
+    return [];
+  }
 }
 
 export async function listAllPorts(): Promise<PortMap> {
@@ -219,12 +440,7 @@ export async function listAllPorts(): Promise<PortMap> {
   const map: PortMap = {};
   await Promise.all(
     devices.map(async (d) => {
-      try {
-        const snap = await listPortsForDevice(d.id);
-        map[d.id] = snap.ports;
-      } catch {
-        map[d.id] = [];
-      }
+      map[d.id] = await portsForDeviceResilient(d.id);
     }),
   );
   return map;
@@ -240,8 +456,10 @@ export async function searchPorts(
   const results: Array<{ device: Device; port: Port }> = [];
   await Promise.all(
     devices.map(async (device) => {
-      const snap = await listPortsForDevice(device.id);
-      for (const port of snap.ports) {
+      // Resilient per device: one unreachable device must not fail the whole
+      // search (and must not stall it past the deadline).
+      const ports = await portsForDeviceResilient(device.id);
+      for (const port of ports) {
         if (
           port.name.toLowerCase().includes(q) ||
           port.description.toLowerCase().includes(q) ||
@@ -287,6 +505,80 @@ export async function createRequest(input: CreateRequestInput): Promise<ChangeRe
   return mapRequest(req);
 }
 
+/** A request's timeline — status transitions + comments, oldest first. */
+export async function getRequestTimeline(id: string): Promise<RequestEvent[]> {
+  return request<RequestEvent[]>(`/api/requests/${encodeURIComponent(id)}/timeline`);
+}
+
+/** Post a comment to a request's thread. */
+export async function addRequestComment(id: string, body: string): Promise<RequestEvent> {
+  return request<RequestEvent>(`/api/requests/${encodeURIComponent(id)}/comments`, {
+    method: 'POST',
+    body: { body },
+  });
+}
+
+/** File a VLAN-database change request (create/delete a VLAN id). */
+export async function createVlanRequest(input: {
+  device_id: string;
+  action: 'create' | 'delete';
+  vlan_id: number;
+  name?: string;
+  description?: string;
+  reason?: string;
+}): Promise<ChangeRequest> {
+  const req = await request<RequestOut>('/api/requests/vlan', { method: 'POST', body: input });
+  return mapRequest(req);
+}
+
+/** File an OSPFv2 config-change request (router-id or interface area/tuning). */
+export async function createOspfRequest(input: {
+  device_id: string;
+  action: 'set' | 'delete';
+  target: 'router-id' | 'interface';
+  router_id?: string;
+  interface?: string;
+  area?: string;
+  cost?: number;
+  hello_interval?: number;
+  dead_interval?: number;
+  passive?: boolean;
+  reason?: string;
+}): Promise<ChangeRequest> {
+  const req = await request<RequestOut>('/api/requests/ospf', { method: 'POST', body: input });
+  return mapRequest(req);
+}
+
+/** File a VRF create/delete change request. */
+export async function createVrfRequest(input: {
+  device_id: string;
+  action: 'create' | 'delete';
+  name: string;
+  description?: string;
+  reason?: string;
+}): Promise<ChangeRequest> {
+  const req = await request<RequestOut>('/api/requests/vrf', { method: 'POST', body: input });
+  return mapRequest(req);
+}
+
+/** File a routed-interface (SVI / loopback) change request. */
+export async function createL3Request(input: {
+  device_id: string;
+  action: 'create' | 'delete';
+  kind: 'svi' | 'loopback';
+  name?: string;
+  vlan_id?: number;
+  ipv4?: string;
+  mtu?: number;
+  enabled?: boolean;
+  dhcp?: boolean;
+  vrf?: string;
+  reason?: string;
+}): Promise<ChangeRequest> {
+  const req = await request<RequestOut>('/api/requests/l3', { method: 'POST', body: input });
+  return mapRequest(req);
+}
+
 export async function approveRequest(id: string, _reviewer: string): Promise<ChangeRequest> {
   const req = await request<RequestOut>(
     `/api/requests/${encodeURIComponent(id)}/approve`,
@@ -303,6 +595,27 @@ export async function rejectRequest(
   const req = await request<RequestOut>(
     `/api/requests/${encodeURIComponent(id)}/reject`,
     { method: 'POST', body: { comment } },
+  );
+  return mapRequest(req);
+}
+
+/** Admin asks the requester to revise (pending → needs_revision). Comment required. */
+export async function requestChanges(id: string, comment: string): Promise<ChangeRequest> {
+  const req = await request<RequestOut>(
+    `/api/requests/${encodeURIComponent(id)}/request-changes`,
+    { method: 'POST', body: { comment } },
+  );
+  return mapRequest(req);
+}
+
+/** Owner revises + resubmits (needs_revision → pending). Both fields optional. */
+export async function resubmitRequest(
+  id: string,
+  input: { requested_changes?: RequestedChanges; reason?: string },
+): Promise<ChangeRequest> {
+  const req = await request<RequestOut>(
+    `/api/requests/${encodeURIComponent(id)}/resubmit`,
+    { method: 'POST', body: input },
   );
   return mapRequest(req);
 }
@@ -408,8 +721,11 @@ export async function confirmOnboard(draft: OnboardingDraft): Promise<ConfirmOnb
   try {
     const snap = await listPortsForDevice(created.id);
     portCount = snap.ports.length;
-  } catch {
-    /* device created but ports not yet pollable — report zero */
+  } catch (err: unknown) {
+    // Expected best-effort: the device is created but ports may not be
+    // pollable on the first beat. Report zero, but log so a persistent
+    // seeding failure is diagnosable rather than silently hidden.
+    console.error(`onboardDevice: initial port poll failed for ${created.id}`, err);
   }
   return { device: mapDevice(created, portCount), ports_seeded: portCount };
 }
@@ -417,4 +733,17 @@ export async function confirmOnboard(draft: OnboardingDraft): Promise<ConfirmOnb
 /* -------------------------------------------------------------------------
  * Reference data
  * ------------------------------------------------------------------------- */
-export { VLANS } from '@/mocks/fixtures';
+
+/* -------------------------------------------------------------------------
+ * Runtime settings (admin) — types sourced from the generated OpenAPI schema
+ * (schema.gen.ts) so they track the backend contract automatically.
+ * ------------------------------------------------------------------------- */
+export type RuntimeSettings = SettingsOut;
+
+export async function getSettings(): Promise<RuntimeSettings> {
+  return request<RuntimeSettings>('/api/settings');
+}
+
+export async function updateSettings(patch: SettingsPatch): Promise<RuntimeSettings> {
+  return request<RuntimeSettings>('/api/settings', { method: 'PATCH', body: patch });
+}

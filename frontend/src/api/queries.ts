@@ -12,7 +12,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { apiClient as api } from './index';
-import type { ChangeRequestStatus, Environment } from '@/types';
+import type { ChangeRequestStatus, Environment } from '@/models';
 
 export const queryKeys = {
   platforms: () => ['platforms'] as const,
@@ -26,7 +26,27 @@ export const queryKeys = {
   audit: (deviceId?: string, port?: string) =>
     ['audit', deviceId ?? 'all', port ?? 'all'] as const,
   users: () => ['users'] as const,
+  sites: () => ['sites'] as const,
+  system: (deviceId: string) => ['devices', deviceId, 'system'] as const,
+  protocol: (deviceId: string, slug: string) =>
+    ['devices', deviceId, 'protocol', slug] as const,
+  vlans: (deviceId: string) => ['devices', deviceId, 'vlans'] as const,
+  l3: (deviceId: string) => ['devices', deviceId, 'l3-interfaces'] as const,
+  settings: () => ['settings'] as const,
 } as const;
+
+export function useSettings() {
+  return useQuery({ queryKey: queryKeys.settings(), queryFn: () => api.getSettings() });
+}
+
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial<import('./realClient').RuntimeSettings>) =>
+      api.updateSettings(patch),
+    onSuccess: (data) => qc.setQueryData(queryKeys.settings(), data),
+  });
+}
 
 export function useDevices(env?: Environment) {
   return useQuery({
@@ -40,6 +60,40 @@ export function useDevice(id: string | null | undefined) {
     queryKey: queryKeys.device(id ?? ''),
     queryFn: () => api.getDevice(id as string),
     enabled: !!id,
+  });
+}
+
+export function useSetDeviceWrites(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => api.setDeviceWrites(deviceId, enabled),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['devices'] });
+    },
+  });
+}
+
+export function useDeleteDevice(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.deleteDevice(deviceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['devices'] });
+      qc.invalidateQueries({ queryKey: queryKeys.allPorts() });
+    },
+  });
+}
+
+export function useRediscoverDevice(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.rediscoverDevice(deviceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.ports(deviceId) });
+      qc.invalidateQueries({ queryKey: queryKeys.allPorts() });
+      qc.invalidateQueries({ queryKey: ['devices', deviceId, 'config'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
   });
 }
 
@@ -78,7 +132,100 @@ export function usePlatforms() {
   return useQuery({ queryKey: queryKeys.platforms(), queryFn: () => api.listPlatforms() });
 }
 
+export function useSites() {
+  return useQuery({ queryKey: queryKeys.sites(), queryFn: () => api.listSites() });
+}
+
+export function useSystemInfo(deviceId: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.system(deviceId ?? ''),
+    queryFn: () => api.getSystemInfo(deviceId!),
+    enabled: !!deviceId,
+  });
+}
+
+export function useProtocolDetail(deviceId: string, slug: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.protocol(deviceId, slug),
+    queryFn: () => api.getProtocolDetail(deviceId, slug),
+    enabled,
+  });
+}
+
+export function useVlans(deviceId: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.vlans(deviceId ?? ''),
+    queryFn: () => api.getVlans(deviceId!),
+    enabled: !!deviceId,
+  });
+}
+
+export function useL3Interfaces(deviceId: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.l3(deviceId ?? ''),
+    queryFn: () => api.getL3Interfaces(deviceId!),
+    enabled: !!deviceId,
+  });
+}
+
+export function useOspfInterfaces(deviceId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['devices', deviceId ?? '', 'ospf-interfaces'],
+    queryFn: () => api.getOspfInterfaces(deviceId!),
+    enabled: !!deviceId,
+  });
+}
+
 /* ------------------------------------ mutations ------------------------------------ */
+
+export function useCreateSite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { slug: string; name: string }) => api.createSite(input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.sites() }),
+  });
+}
+
+export function useUpdatePortMetadata(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      portName: string;
+      patch: { host_model?: string; bmc_ip?: string; notes?: string };
+    }) => api.updatePortMetadata(deviceId, input.portName, input.patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.ports(deviceId) });
+      qc.invalidateQueries({ queryKey: queryKeys.allPorts() });
+    },
+  });
+}
+
+export function useSetPortDescription(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { portName: string; description: string }) =>
+      api.setPortDescription(deviceId, input.portName, input.description),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.ports(deviceId) });
+      qc.invalidateQueries({ queryKey: queryKeys.allPorts() });
+      qc.invalidateQueries({ queryKey: ['devices', deviceId, 'config'] });
+    },
+  });
+}
+
+export function useSetPortConfig(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { portName: string; patch: import('./realClient').PortConfigPatch }) =>
+      api.setPortConfig(deviceId, input.portName, input.patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.ports(deviceId) });
+      qc.invalidateQueries({ queryKey: queryKeys.allPorts() });
+      qc.invalidateQueries({ queryKey: queryKeys.vlans(deviceId) });
+      qc.invalidateQueries({ queryKey: ['devices', deviceId, 'config'] });
+    },
+  });
+}
 
 function invalidateRequestsAndPorts(qc: QueryClient, deviceId: string) {
   qc.invalidateQueries({ queryKey: ['requests'] });
@@ -90,6 +237,58 @@ export function useCreateRequest() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: api.createRequest,
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
+export function useRequestTimeline(requestId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['requests', requestId, 'timeline'],
+    queryFn: () => api.getRequestTimeline(requestId),
+    enabled,
+    // SSE (`request.timeline`) drives instant refresh on a comment; this is just
+    // a slow safety-net poll (status transitions don't publish; multi-worker SSE
+    // is process-local).
+    refetchInterval: enabled ? 30000 : false,
+  });
+}
+
+export function useAddRequestComment(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: string) => api.addRequestComment(requestId, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['requests', requestId, 'timeline'] }),
+  });
+}
+
+export function useCreateVlanRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createVlanRequest,
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
+export function useCreateL3Request() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createL3Request,
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
+export function useCreateVrfRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createVrfRequest,
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
+export function useCreateOspfRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createOspfRequest,
     onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
   });
 }
@@ -108,6 +307,30 @@ export function useRejectRequest() {
   return useMutation({
     mutationFn: ({ id, reviewer, comment }: { id: string; reviewer: string; comment: string }) =>
       api.rejectRequest(id, reviewer, comment),
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
+export function useRequestChanges() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, comment }: { id: string; comment: string }) =>
+      api.requestChanges(id, comment),
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
+export function useResubmitRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...input
+    }: {
+      id: string;
+      requested_changes?: import('@/models').RequestedChanges;
+      reason?: string;
+    }) => api.resubmitRequest(id, input),
     onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
   });
 }

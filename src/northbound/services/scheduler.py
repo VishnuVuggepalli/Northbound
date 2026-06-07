@@ -43,7 +43,7 @@ from northbound.drivers.factory import driver_for
 from northbound.models.config_backup import ConfigBackup
 from northbound.models.device import Device
 from northbound.schemas.driver import Credentials
-from northbound.services import audit, reachability, reconciler
+from northbound.services import audit, events, reachability, reconciler
 from northbound.services.audit import verify_chain
 from northbound.services.credvault import FernetCredVault, deserialize_credentials
 
@@ -94,14 +94,27 @@ async def poll_reachability() -> None:
         reachable = False
         try:
             driver = driver_for(device, _credentials_for(device))
-            reachable = await asyncio.wait_for(
-                driver.reachable(),
-                timeout=settings.reachability_timeout_seconds,
-            )
+            try:
+                reachable = await asyncio.wait_for(
+                    driver.reachable(),
+                    timeout=settings.reachability_timeout_seconds,
+                )
+            finally:
+                await driver.aclose()
         except Exception as exc:
             logger.debug("poll_reachability: %s unreachable: %s", device.name, exc)
             reachable = False
-        reachability.record(device.id, reachable=reachable, checked_at=checked_at)
+        if reachability.record(device.id, reachable=reachable, checked_at=checked_at):
+            events.hub.publish(
+                events.Event(
+                    "device.reachability",
+                    {
+                        "device_id": device.id,
+                        "reachable": reachable,
+                        "checked_at": checked_at.isoformat(),
+                    },
+                )
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -125,7 +138,10 @@ async def nightly_backup() -> None:
         try:
             async with async_session_factory() as session:
                 driver = driver_for(device, _credentials_for(device))
-                config_text = await driver.backup_config()
+                try:
+                    config_text = await driver.backup_config()
+                finally:
+                    await driver.aclose()
                 session.add(
                     ConfigBackup(
                         device_id=device.id,

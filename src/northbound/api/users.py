@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from northbound.api.deps import get_current_user, require_admin
+from northbound.api.limiter import limiter, write_rate_key, write_rate_limit_provider
 from northbound.auth.password import hash_password
 from northbound.db import get_session
 from northbound.models.user import User
@@ -40,7 +41,9 @@ async def list_users(
 
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def create_user(
+    request: Request,
     body: UserCreate,
     _admin: Annotated[User, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],

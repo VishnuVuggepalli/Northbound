@@ -157,7 +157,7 @@ async def test_chain_valid_after_onboard_and_request_lifecycle(
     from northbound.auth.password import hash_password
     from northbound.drivers.factory import driver_from_params
     from northbound.models.device import Device
-    from northbound.models.enums import DeviceRole, Environment, UserRole
+    from northbound.models.enums import DeviceRole, UserRole
     from northbound.models.user import User
     from northbound.schemas.driver import ConnectionParams, Credentials, PortChange
     from northbound.services import change_apply, requests
@@ -178,7 +178,7 @@ async def test_chain_valid_after_onboard_and_request_lifecycle(
     device: Device = await onboard_device(
         db_session,
         name="lab-leaf-chain",
-        environment=Environment.LAB,
+        environment="lab",
         role=DeviceRole.LEAF,
         platform_id="mock",
         mgmt_ip="10.0.0.9",

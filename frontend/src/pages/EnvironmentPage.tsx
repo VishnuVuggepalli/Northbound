@@ -2,25 +2,23 @@ import { Outlet, useParams } from 'react-router-dom';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { useUIStore } from '@/store/ui';
 import { useEffect } from 'react';
-import type { Environment } from '@/types';
+import type { Environment } from '@/models';
 
 export function EnvironmentPage() {
   const { env } = useParams<{ env: Environment }>();
   const setEnv = useUIStore((s) => s.setEnv);
 
   useEffect(() => {
-    if (env === 'lab' || env === 'dc') setEnv(env);
+    if (env) setEnv(env);
   }, [env, setEnv]);
 
-  if (env !== 'lab' && env !== 'dc') return null;
+  if (!env) return null;
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)]">
+    // viewport − TopBar (3.5rem) − Breadcrumb bar (2rem)
+    <div className="flex h-[calc(100vh-3.5rem-2rem)]">
       <Sidebar env={env} />
-      <section
-        aria-label={env === 'lab' ? 'Lab environment' : 'Datacenter environment'}
-        className="relative flex-1 overflow-hidden"
-      >
+      <section aria-label={`${env} site`} className="relative flex-1 overflow-hidden">
         <Outlet />
       </section>
     </div>

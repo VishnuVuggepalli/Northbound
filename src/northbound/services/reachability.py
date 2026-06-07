@@ -34,9 +34,16 @@ class ReachabilityStatus:
 _MAP: dict[str, ReachabilityStatus] = {}
 
 
-def record(device_id: str, *, reachable: bool, checked_at: dt.datetime) -> None:
-    """Store (replace) the reachability snapshot for a device."""
+def record(device_id: str, *, reachable: bool, checked_at: dt.datetime) -> bool:
+    """Store (replace) the reachability snapshot for a device.
+
+    Returns ``True`` when the ``reachable`` value transitioned (including the
+    first-ever observation), so a caller can publish a live-state event only on
+    change rather than on every poll tick.
+    """
+    previous = _MAP.get(device_id)
     _MAP[device_id] = ReachabilityStatus(reachable=reachable, checked_at=checked_at)
+    return previous is None or previous.reachable != reachable
 
 
 def get(device_id: str) -> ReachabilityStatus | None:

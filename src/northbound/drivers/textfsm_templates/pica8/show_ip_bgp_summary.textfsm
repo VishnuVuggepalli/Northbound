@@ -1,0 +1,24 @@
+Value NEIGHBOR (\S+)
+Value VERSION (\d+)
+Value AS (\d+)
+Value MSG_RCVD (\d+)
+Value MSG_SENT (\d+)
+Value TBL_VER (\d+)
+Value IN_Q (\d+)
+Value OUT_Q (\d+)
+Value UP_DOWN (\S+)
+Value STATE_PFXRCD (\S+)
+
+Start
+  # FRR `show ip bgp summary` neighbor rows. State/PfxRcd is a prefix count
+  # when Established, else a state word (Active/Idle/Connect) or "(Policy)".
+  ^${NEIGHBOR}\s+${VERSION}\s+${AS}\s+${MSG_RCVD}\s+${MSG_SENT}\s+${TBL_VER}\s+${IN_Q}\s+${OUT_Q}\s+${UP_DOWN}\s+${STATE_PFXRCD} -> Record
+  ^Neighbor\s+V\s+AS
+  ^BGP\s+router\s+identifier
+  ^BGP\s+table\s+version
+  ^RIB\s+entries
+  ^Peers\s+
+  ^IPv\d\s+Unicast\s+Summary
+  ^Total\s+number\s+of\s+neighbors
+  ^\s*$$
+  ^\.\s*$$
