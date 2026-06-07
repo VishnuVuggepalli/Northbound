@@ -33,7 +33,7 @@ from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus as S
 from northbound.models.user import User
 from northbound.schemas.driver import L3Change, OspfChange, PortChange, VlanChange, VrfChange
-from northbound.services import audit, port_state
+from northbound.services import audit, events, port_state
 from northbound.services.device_policy import assert_writable
 
 # ---------------------------------------------------------------------------
@@ -121,6 +121,10 @@ async def record_transition(
         )
     )
     await session.flush()
+    # Push the new transition to any open thread (SSE). Pre-commit: worst case on
+    # a later rollback is a spurious refetch (which just re-reads the real state);
+    # the timeline query's safety-net poll covers the tiny commit-visibility gap.
+    events.hub.publish(events.Event("request.timeline", {"request_id": request.id}))
 
 
 async def claim_transition(
