@@ -901,8 +901,14 @@ async def test_render_ospf_interface_and_router_id() -> None:
     drv, _ = _make_driver()
     c = await drv.render_ospf_change(
         OspfChange(
-            action="set", target="interface", interface="vlan1010", area="0.0.0.0",
-            cost=10, hello_interval=5, dead_interval=20, passive=True,
+            action="set",
+            target="interface",
+            interface="vlan1010",
+            area="0.0.0.0",
+            cost=10,
+            hello_interval=5,
+            dead_interval=20,
+            passive=True,
         )
     )
     root = etree.fromstring(c.commands[0].encode())
@@ -914,10 +920,14 @@ async def test_render_ospf_interface_and_router_id() -> None:
     assert root.findtext(".//{*}dead-interval") == "20"
     assert root.findtext(".//{*}passive") == "true"
 
-    r = await drv.render_ospf_change(OspfChange(action="set", target="router-id", router_id="9.9.9.9"))
+    r = await drv.render_ospf_change(
+        OspfChange(action="set", target="router-id", router_id="9.9.9.9")
+    )
     assert etree.fromstring(r.commands[0].encode()).findtext(".//{*}router-id") == "9.9.9.9"
 
-    d = await drv.render_ospf_change(OspfChange(action="delete", target="interface", interface="vlan1010"))
+    d = await drv.render_ospf_change(
+        OspfChange(action="delete", target="interface", interface="vlan1010")
+    )
     vi = etree.fromstring(d.commands[0].encode()).find(".//{*}interface")
     assert vi.get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation") == "delete"
 

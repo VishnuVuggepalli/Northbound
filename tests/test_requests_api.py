@@ -615,8 +615,14 @@ async def test_ospf_interface_full_lifecycle(
     created = await client.post(
         "/api/requests/ospf",
         headers=_bearer(alice),
-        json={"device_id": leaf.id, "action": "set", "target": "interface",
-              "interface": "vlan1010", "area": "0.0.0.0", "cost": 10},
+        json={
+            "device_id": leaf.id,
+            "action": "set",
+            "target": "interface",
+            "interface": "vlan1010",
+            "area": "0.0.0.0",
+            "cost": 10,
+        },
     )
     assert created.status_code == 201
     rid = created.json()["id"]
@@ -633,7 +639,12 @@ async def test_ospf_interface_without_area_422(
     resp = await client.post(
         "/api/requests/ospf",
         headers=_bearer(alice),
-        json={"device_id": leaf.id, "action": "set", "target": "interface", "interface": "vlan1010"},
+        json={
+            "device_id": leaf.id,
+            "action": "set",
+            "target": "interface",
+            "interface": "vlan1010",
+        },
     )
     assert resp.status_code == 422
 
@@ -646,7 +657,12 @@ async def test_ospf_read_only_device_403(
     resp = await client.post(
         "/api/requests/ospf",
         headers=_bearer(alice),
-        json={"device_id": router.id, "action": "set", "target": "router-id", "router_id": "1.1.1.1"},
+        json={
+            "device_id": router.id,
+            "action": "set",
+            "target": "router-id",
+            "router_id": "1.1.1.1",
+        },
     )
     assert resp.status_code == 403
 
@@ -656,11 +672,17 @@ async def test_request_comment_thread_timeline(
     client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
 ) -> None:
     _, admin, alice, leaf, _ = seeded
-    rid = (await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))).json()["id"]
+    rid = (
+        await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    ).json()["id"]
     # alice comments, admin replies
-    c1 = await client.post(f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": "why pending?"})
+    c1 = await client.post(
+        f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": "why pending?"}
+    )
     assert c1.status_code == 201 and c1.json()["kind"] == "comment"
-    await client.post(f"/api/requests/{rid}/comments", headers=_bearer(admin), json={"body": "reviewing now"})
+    await client.post(
+        f"/api/requests/{rid}/comments", headers=_bearer(admin), json={"body": "reviewing now"}
+    )
 
     tl = await client.get(f"/api/requests/{rid}/timeline", headers=_bearer(alice))
     assert tl.status_code == 200
@@ -679,9 +701,15 @@ async def test_request_timeline_and_comment_authz(
 ) -> None:
     """A non-owner non-admin can neither read the timeline nor comment (404)."""
     _, admin, alice, leaf, _ = seeded
-    rid = (await client.post("/api/requests", headers=_bearer(admin), json=_create_body(leaf.id))).json()["id"]
-    assert (await client.get(f"/api/requests/{rid}/timeline", headers=_bearer(alice))).status_code == 404
-    r = await client.post(f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": "x"})
+    rid = (
+        await client.post("/api/requests", headers=_bearer(admin), json=_create_body(leaf.id))
+    ).json()["id"]
+    assert (
+        await client.get(f"/api/requests/{rid}/timeline", headers=_bearer(alice))
+    ).status_code == 404
+    r = await client.post(
+        f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": "x"}
+    )
     assert r.status_code == 404
 
 
@@ -690,5 +718,11 @@ async def test_request_comment_requires_body(
     client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
 ) -> None:
     _, _, alice, leaf, _ = seeded
-    rid = (await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))).json()["id"]
-    assert (await client.post(f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": ""})).status_code == 422
+    rid = (
+        await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    ).json()["id"]
+    assert (
+        await client.post(
+            f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": ""}
+        )
+    ).status_code == 422
