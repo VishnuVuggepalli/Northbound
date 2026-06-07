@@ -939,3 +939,19 @@ def test_parse_l3_loopback_interface() -> None:
     assert l3["lo0"].mtu == 1500
     # the per-port <loopback>false</loopback> boolean must NOT become an interface
     assert all(i.kind != "loopback" or i.name == "lo0" for i in _parse_l3_interfaces_xml(xml))
+
+
+def test_parse_ospf_interfaces() -> None:
+    from northbound.drivers.pica8 import _parse_ospf_interfaces_xml
+
+    xml = """<data><ospf xmlns="http://pica8.com/xorplus/ospfv2">
+      <router-id>10.10.250.2</router-id>
+      <interface><name>vlan1010</name><area>0.0.0.0</area><cost>10</cost>
+        <hello-interval>5</hello-interval><passive>true</passive></interface>
+      <interface><name>vlan1050</name><area>0.0.0.1</area></interface>
+    </ospf></data>"""
+    ifs = {i.name: i for i in _parse_ospf_interfaces_xml(xml)}
+    assert set(ifs) == {"vlan1010", "vlan1050"}  # router-id is NOT an interface
+    assert ifs["vlan1010"].area == "0.0.0.0" and ifs["vlan1010"].cost == 10
+    assert ifs["vlan1010"].hello_interval == 5 and ifs["vlan1010"].passive is True
+    assert ifs["vlan1050"].area == "0.0.0.1" and ifs["vlan1050"].cost is None

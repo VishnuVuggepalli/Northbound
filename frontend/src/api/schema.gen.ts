@@ -570,6 +570,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/{device_id}/ospf-interfaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ospf Interfaces
+         * @description OSPF-enabled interfaces (name/area/tuning) from the device config.
+         */
+        get: operations["get_ospf_interfaces_api_devices__device_id__ospf_interfaces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/{device_id}/config/backup": {
         parameters: {
             query?: never;
@@ -1353,6 +1373,27 @@ export interface components {
              * @default true
              */
             configured: boolean;
+        };
+        /** OspfInterfaceOut */
+        OspfInterfaceOut: {
+            /** Name */
+            name: string;
+            /**
+             * Area
+             * @default
+             */
+            area: string;
+            /** Cost */
+            cost?: number | null;
+            /** Hello Interval */
+            hello_interval?: number | null;
+            /** Dead Interval */
+            dead_interval?: number | null;
+            /**
+             * Passive
+             * @default false
+             */
+            passive: boolean;
         };
         /** PlatformInfo */
         PlatformInfo: {
@@ -2906,6 +2947,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["L3InterfaceOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ospf_interfaces_api_devices__device_id__ospf_interfaces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OspfInterfaceOut"][];
                 };
             };
             /** @description Validation Error */

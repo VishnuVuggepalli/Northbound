@@ -25,6 +25,7 @@ import type {
   Port,
   PortListSnapshot,
   L3Interface,
+  OspfInterface,
   PortMap,
   RequestedChanges,
   ProtocolDetail,
@@ -321,6 +322,10 @@ export async function getVlans(id: string): Promise<VlanInfo[]> {
 
 export async function getL3Interfaces(id: string): Promise<L3Interface[]> {
   return request<L3Interface[]>(`/api/devices/${encodeURIComponent(id)}/l3-interfaces`);
+}
+
+export async function getOspfInterfaces(id: string): Promise<OspfInterface[]> {
+  return request<OspfInterface[]>(`/api/devices/${encodeURIComponent(id)}/ospf-interfaces`);
 }
 
 export async function listLinks(_env?: Environment): Promise<readonly TopologyLink[]> {

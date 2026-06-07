@@ -218,6 +218,15 @@ export interface L3Interface {
   detail: string;
 }
 
+export interface OspfInterface {
+  name: string;
+  area: string;
+  cost: number | null;
+  hello_interval: number | null;
+  dead_interval: number | null;
+  passive: boolean;
+}
+
 export interface MgmtService {
   name: string;
   enabled: boolean;

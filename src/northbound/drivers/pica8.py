@@ -60,6 +60,7 @@ from northbound.schemas.driver import (
     MgmtService,
     Neighbor,
     OspfChange,
+    OspfInterfaceInfo,
     PortChange,
     PortState,
     ProtocolDetail,
@@ -305,6 +306,14 @@ class Pica8Driver(Driver):
         except Exception:
             return []
         return _parse_l3_interfaces_xml(cfg)
+
+    async def get_ospf_interfaces(self) -> list[OspfInterfaceInfo]:
+        """OSPF-enabled interfaces (name/area/tuning) from the <ospf> config."""
+        try:
+            cfg = await self._netconf.get_config(source="running")
+        except Exception:
+            return []
+        return _parse_ospf_interfaces_xml(cfg)
 
     # ---------- write ----------
 
@@ -1424,6 +1433,39 @@ def _build_vrf_edit_config_xml(change: VrfChange) -> str:
     elif change.description:
         etree.SubElement(vrf, "description").text = change.description
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
+
+
+def _parse_ospf_interfaces_xml(xml: str) -> list[OspfInterfaceInfo]:
+    """Parse OSPF-enabled interfaces from the xorplus ``<ospf>`` config:
+    ``<ospf><interface><name>vlanN</name><area>0.0.0.0</area>[<cost>][<hello-interval>]
+    [<dead-interval>][<passive>]``."""
+    root = _safe_parse(xml)
+    if root is None:
+        return []
+    ospf = _find_first(root, "ospf")
+    if ospf is None:
+        return []
+    out: list[OspfInterfaceInfo] = []
+    for el in ospf.iter():
+        if _localname(el.tag) != "interface":
+            continue
+        name = _child_text(el, "name")
+        if not name:
+            continue
+        cost = _child_text(el, "cost")
+        hello = _child_text(el, "hello-interval")
+        dead = _child_text(el, "dead-interval")
+        out.append(
+            OspfInterfaceInfo(
+                name=name,
+                area=_child_text(el, "area") or "",
+                cost=int(cost) if cost and cost.isdigit() else None,
+                hello_interval=int(hello) if hello and hello.isdigit() else None,
+                dead_interval=int(dead) if dead and dead.isdigit() else None,
+                passive=(_child_text(el, "passive") or "").strip().lower() == "true",
+            )
+        )
+    return out
 
 
 def _build_ospf_edit_config_xml(change: OspfChange) -> str:

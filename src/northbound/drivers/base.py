@@ -21,6 +21,7 @@ from northbound.schemas.driver import (
     L3Interface,
     Neighbor,
     OspfChange,
+    OspfInterfaceInfo,
     PortChange,
     PortState,
     ProtocolDetail,
@@ -131,6 +132,10 @@ class Driver(ABC):
 
     async def get_l3_interfaces(self) -> list[L3Interface]:
         """Addressed/non-switchport interfaces: management, SVIs, LAGs. Default: none."""
+        return []
+
+    async def get_ospf_interfaces(self) -> list[OspfInterfaceInfo]:
+        """OSPF-enabled interfaces (name/area/tuning) from config. Default: none."""
         return []
 
     # ---------- write (NotSupported if writable=False) ----------

@@ -167,6 +167,15 @@ class L3InterfaceOut(BaseModel):
     detail: str = ""
 
 
+class OspfInterfaceOut(BaseModel):
+    name: str
+    area: str = ""
+    cost: int | None = None
+    hello_interval: int | None = None
+    dead_interval: int | None = None
+    passive: bool = False
+
+
 class ProtocolTableOut(BaseModel):
     title: str
     columns: list[str] = Field(default_factory=list)

@@ -168,6 +168,14 @@ export function useL3Interfaces(deviceId: string | null | undefined) {
   });
 }
 
+export function useOspfInterfaces(deviceId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['devices', deviceId ?? '', 'ospf-interfaces'],
+    queryFn: () => api.getOspfInterfaces(deviceId!),
+    enabled: !!deviceId,
+  });
+}
+
 /* ------------------------------------ mutations ------------------------------------ */
 
 export function useCreateSite() {

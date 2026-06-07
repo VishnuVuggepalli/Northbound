@@ -39,6 +39,7 @@ from northbound.schemas.port import (
     L3InterfaceOut,
     MacEntryOut,
     MgmtServiceOut,
+    OspfInterfaceOut,
     PortConfigIn,
     PortDescriptionIn,
     PortDetailOut,
@@ -490,6 +491,37 @@ async def get_l3_interfaces(
             mtu=i.mtu,
             enabled=i.enabled,
             detail=i.detail,
+        )
+        for i in ifaces
+    ]
+
+
+@router.get("/{device_id}/ospf-interfaces", response_model=list[OspfInterfaceOut])
+async def get_ospf_interfaces(
+    device_id: str,
+    _user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[OspfInterfaceOut]:
+    """OSPF-enabled interfaces (name/area/tuning) from the device config."""
+    device = await _load_device(session, device_id)
+    creds = _credentials_for(device)
+    driver = driver_for(device, creds)
+    try:
+        ifaces = await driver.get_ospf_interfaces()
+    except DriverError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"OSPF fetch failed: {exc}"
+        ) from exc
+    finally:
+        await driver.aclose()
+    return [
+        OspfInterfaceOut(
+            name=i.name,
+            area=i.area,
+            cost=i.cost,
+            hello_interval=i.hello_interval,
+            dead_interval=i.dead_interval,
+            passive=i.passive,
         )
         for i in ifaces
     ]

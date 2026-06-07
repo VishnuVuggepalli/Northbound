@@ -6,6 +6,7 @@ import {
   useCreateVlanRequest,
   useCreateVrfRequest,
   useL3Interfaces,
+  useOspfInterfaces,
   useProtocolDetail,
   useSystemInfo,
   useVlans,
@@ -41,6 +42,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const { data, isLoading, isError, error } = useSystemInfo(device.id);
   const { data: vlans = [] } = useVlans(device.id);
   const { data: l3 = [] } = useL3Interfaces(device.id);
+  const { data: ospfIfaces = [] } = useOspfInterfaces(device.id);
   const [macFilter, setMacFilter] = useState('');
   const [vlanFilter, setVlanFilter] = useState('');
   const [sub, setSub] = useState<SubTab>('overview');
@@ -690,6 +692,83 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                   ];
                 })}
                 cellClass={(j) => (j === 0 ? 'text-fg' : j === 2 ? 'text-link' : 'text-fg-muted')}
+              />
+            </div>
+          )}
+          {ospfIfaces.length > 0 && (
+            <div className="mt-5 px-1">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+                OSPF interfaces
+              </div>
+              <DataTable
+                columns={
+                  canWriteVlan
+                    ? ['Interface', 'Area', 'Cost', 'Hello', 'Dead', 'Passive', '']
+                    : ['Interface', 'Area', 'Cost', 'Hello', 'Dead', 'Passive']
+                }
+                rows={ospfIfaces.map((o) => {
+                  const base = [
+                    o.name,
+                    o.area,
+                    o.cost != null ? String(o.cost) : '',
+                    o.hello_interval != null ? String(o.hello_interval) : '',
+                    o.dead_interval != null ? String(o.dead_interval) : '',
+                    o.passive ? 'yes' : '',
+                  ];
+                  if (!canWriteVlan) return base;
+                  return [
+                    ...base,
+                    <span key="act" className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        title={`Edit OSPF ${o.name}`}
+                        aria-label={`Edit OSPF ${o.name}`}
+                        onClick={() => {
+                          setOspfTarget('interface');
+                          setOspfIface(o.name);
+                          setOspfArea(o.area);
+                          setOspfCost(o.cost != null ? String(o.cost) : '');
+                          setAddingOspf(true);
+                        }}
+                        className="text-fg-subtle transition-colors hover:text-accent"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        title={`Remove ${o.name} from OSPF`}
+                        aria-label={`Remove ${o.name} from OSPF`}
+                        onClick={() =>
+                          createOspf.mutate(
+                            {
+                              device_id: device.id,
+                              action: 'delete',
+                              target: 'interface',
+                              interface: o.name,
+                            },
+                            {
+                              onSuccess: () =>
+                                pushToast({
+                                  kind: 'success',
+                                  title: `OSPF remove ${o.name} requested`,
+                                }),
+                              onError: (err: unknown) =>
+                                pushToast({
+                                  kind: 'error',
+                                  title: 'Could not file request',
+                                  message: err instanceof Error ? err.message : 'Failed',
+                                }),
+                            },
+                          )
+                        }
+                        className="text-fg-subtle transition-colors hover:text-danger"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </span>,
+                  ];
+                })}
+                cellClass={(j) => (j === 0 ? 'text-fg' : 'text-fg-muted')}
               />
             </div>
           )}

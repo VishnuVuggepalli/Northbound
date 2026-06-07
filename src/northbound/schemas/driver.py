@@ -115,12 +115,24 @@ class L3Interface:
     """A non-switchport / addressed interface: management, SVI, or LAG."""
 
     name: str
-    kind: str  # "management" | "svi" | "aggregated"
+    kind: str  # "management" | "svi" | "loopback" | "aggregated"
     ipv4: str = ""  # e.g. "10.10.250.2/16"
     gateway: str = ""
     mtu: int | None = None
     enabled: bool = True
     detail: str = ""  # free-form (e.g. LAG members)
+
+
+@dataclass(frozen=True)
+class OspfInterfaceInfo:
+    """One OSPF-enabled interface from config (name + area + per-iface tuning)."""
+
+    name: str
+    area: str
+    cost: int | None = None
+    hello_interval: int | None = None
+    dead_interval: int | None = None
+    passive: bool = False
 
 
 @dataclass(frozen=True)
