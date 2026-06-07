@@ -50,7 +50,9 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [deleteVid, setDeleteVid] = useState<number | null>(null);
-  const [deleteSvi, setDeleteSvi] = useState<number | null>(null);
+  const [deleteL3, setDeleteL3] = useState<
+    { kind: 'svi' | 'loopback'; vid?: number; name?: string; label: string } | null
+  >(null);
   const createL3 = useCreateL3Request();
   const [addingL3, setAddingL3] = useState(false);
   const [l3Kind, setL3Kind] = useState<'svi' | 'loopback'>('svi');
@@ -577,14 +579,14 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
             <p className="px-1 text-xs text-fg-subtle">No addressed interfaces reported.</p>
           ) : (
             <div className="px-1">
-              {deleteSvi !== null && (
+              {deleteL3 !== null && (
                 <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-danger/40 bg-danger/5 p-3 text-sm">
                   <span className="text-fg">
-                    Delete SVI <span className="nb-mono font-semibold">vlan{deleteSvi}</span>? Files a
+                    Delete <span className="nb-mono font-semibold">{deleteL3.label}</span>? Files a
                     change request.
                   </span>
                   <span className="ml-auto flex gap-1.5">
-                    <Button kind="ghost" size="sm" onClick={() => setDeleteSvi(null)}>
+                    <Button kind="ghost" size="sm" onClick={() => setDeleteL3(null)}>
                       Cancel
                     </Button>
                     <Button
@@ -593,11 +595,17 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                       disabled={createL3.isPending}
                       onClick={() =>
                         createL3.mutate(
-                          { device_id: device.id, action: 'delete', kind: 'svi', vlan_id: deleteSvi },
+                          {
+                            device_id: device.id,
+                            action: 'delete',
+                            kind: deleteL3.kind,
+                            vlan_id: deleteL3.vid,
+                            name: deleteL3.name,
+                          },
                           {
                             onSuccess: () => {
-                              pushToast({ kind: 'success', title: 'SVI delete requested' });
-                              setDeleteSvi(null);
+                              pushToast({ kind: 'success', title: `${deleteL3.label} delete requested` });
+                              setDeleteL3(null);
                             },
                             onError: (err: unknown) =>
                               pushToast({
@@ -623,26 +631,35 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                 rows={l3.map((i) => {
                   const base = [
                     i.name,
-                    i.kind === 'svi' ? 'L3 SVI' : i.kind === 'management' ? 'Management' : 'LAG',
+                    i.kind === 'svi'
+                      ? 'L3 SVI'
+                      : i.kind === 'loopback'
+                        ? 'Loopback'
+                        : i.kind === 'management'
+                          ? 'Management'
+                          : 'LAG',
                     i.ipv4,
                     i.gateway,
                     i.mtu != null ? String(i.mtu) : '',
                     i.enabled ? i.detail : `disabled${i.detail ? ' · ' + i.detail : ''}`,
                   ];
                   if (!canWriteVlan) return base;
-                  // Only SVIs are user-managed via our change model (mgmt/LAG aren't).
+                  // SVIs + loopbacks are user-managed via our change model (mgmt/LAG aren't).
                   const vid = i.kind === 'svi' ? Number.parseInt(i.name.replace(/\D/g, ''), 10) : NaN;
+                  const editable =
+                    (i.kind === 'svi' && Number.isFinite(vid)) || i.kind === 'loopback';
                   return [
                     ...base,
-                    i.kind === 'svi' && Number.isFinite(vid) ? (
+                    editable ? (
                       <span key="act" className="flex items-center gap-2">
                         <button
                           type="button"
                           title={`Edit ${i.name}`}
                           aria-label={`Edit ${i.name}`}
                           onClick={() => {
-                            setL3Kind('svi');
-                            setL3Vid(String(vid));
+                            setL3Kind(i.kind === 'svi' ? 'svi' : 'loopback');
+                            setL3Vid(i.kind === 'svi' ? String(vid) : '');
+                            setL3Name(i.kind === 'loopback' ? i.name : '');
                             setL3Ip(i.ipv4);
                             setL3Mtu(i.mtu != null ? String(i.mtu) : '');
                             setAddingL3(true);
@@ -655,7 +672,13 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                           type="button"
                           title={`Delete ${i.name}`}
                           aria-label={`Delete ${i.name}`}
-                          onClick={() => setDeleteSvi(vid)}
+                          onClick={() =>
+                            setDeleteL3(
+                              i.kind === 'svi'
+                                ? { kind: 'svi', vid, label: i.name }
+                                : { kind: 'loopback', name: i.name, label: i.name },
+                            )
+                          }
                           className="text-fg-subtle transition-colors hover:text-danger"
                         >
                           <Trash2 size={13} />

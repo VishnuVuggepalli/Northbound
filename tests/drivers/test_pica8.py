@@ -920,3 +920,22 @@ async def test_render_ospf_interface_and_router_id() -> None:
     d = await drv.render_ospf_change(OspfChange(action="delete", target="interface", interface="vlan1010"))
     vi = etree.fromstring(d.commands[0].encode()).find(".//{*}interface")
     assert vi.get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation") == "delete"
+
+
+def test_parse_l3_loopback_interface() -> None:
+    from northbound.drivers.pica8 import _parse_l3_interfaces_xml
+
+    xml = """<data><l3-interface xmlns="http://pica8.com/xorplus/vlan-interface">
+      <loopback><name>lo0</name><mtu>1500</mtu>
+        <address><ip>10.99.0.1</ip><prefix-length>32</prefix-length></address>
+      </loopback></l3-interface>
+      <interface xmlns="http://pica8.com/xorplus/interface"><gigabit-ethernet>
+        <name>ge-1/1/1</name><loopback>false</loopback></gigabit-ethernet></interface>
+    </data>"""
+    l3 = {i.name: i for i in _parse_l3_interfaces_xml(xml)}
+    assert "lo0" in l3, "interface loopback must be parsed"
+    assert l3["lo0"].kind == "loopback"
+    assert l3["lo0"].ipv4 == "10.99.0.1/32"
+    assert l3["lo0"].mtu == 1500
+    # the per-port <loopback>false</loopback> boolean must NOT become an interface
+    assert all(i.kind != "loopback" or i.name == "lo0" for i in _parse_l3_interfaces_xml(xml))

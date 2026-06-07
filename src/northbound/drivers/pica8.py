@@ -806,6 +806,31 @@ def _parse_l3_interfaces_xml(xml: str) -> list[L3Interface]:
             )
         )
 
+    # Loopbacks: <l3-interface><loopback><name>lo0</name>
+    #   <address><ip>10.0.0.1</ip><prefix-length>32</prefix-length></address>
+    # The interface <loopback> always has a <name>; the per-port
+    # <loopback>false</loopback> boolean (loopback-detection) has none — skip those.
+    for lb in root.iter():
+        if _localname(lb.tag) != "loopback":
+            continue
+        name = _child_text(lb, "name")
+        if not name:
+            continue
+        addr = _find_first(lb, "address")
+        ip = _child_text(addr, "ip") if addr is not None else None
+        prefix = _child_text(addr, "prefix-length") if addr is not None else None
+        ipv4 = f"{ip}/{prefix}" if ip and prefix else (ip or "")
+        mtu_text = _child_text(lb, "mtu")
+        out.append(
+            L3Interface(
+                name=name,
+                kind="loopback",
+                ipv4=ipv4,
+                mtu=int(mtu_text) if mtu_text and mtu_text.isdigit() else None,
+                enabled=(_child_text(lb, "disable") or "").strip().lower() != "true",
+            )
+        )
+
     # LAGs: <aggregated-ethernet><name>ae0</name>... (members best-effort)
     for ae in root.iter():
         if _localname(ae.tag) != "aggregated-ethernet":
