@@ -1,0 +1,8 @@
+{% if action == 'delete' %}
+no vlan {{ vlan_id }}
+{% else %}
+vlan {{ vlan_id }}
+{% if name %}
+   name {{ name }}
+{% endif %}
+{% endif %}

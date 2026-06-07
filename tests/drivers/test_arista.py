@@ -243,7 +243,9 @@ async def test_arista_render_svi_eos_naming() -> None:
     from northbound.schemas.driver import L3Change
 
     d = AristaDriver.__new__(AristaDriver)
-    c = await d.render_l3_change(L3Change(action="create", kind="svi", vlan_id=1010, ipv4="10.0.0.1/24"))
+    c = await d.render_l3_change(
+        L3Change(action="create", kind="svi", vlan_id=1010, ipv4="10.0.0.1/24")
+    )
     assert c.commands[0] == "interface Vlan1010"  # EOS capitalised SVI name
     assert "   ip address 10.0.0.1/24" in c.commands
 
@@ -258,14 +260,43 @@ async def test_arista_render_vrf_instance() -> None:
 
 
 @pytest.mark.asyncio
-async def test_arista_l3_loopback_and_vrf_binding_not_grounded() -> None:
-    from northbound.drivers.base import NotSupported
+async def test_arista_l3_loopback_and_vrf_binding() -> None:
     from northbound.schemas.driver import L3Change
 
     d = AristaDriver.__new__(AristaDriver)
-    with pytest.raises(NotSupported):
-        await d.render_l3_change(L3Change(action="create", kind="loopback", name="Loopback1", ipv4="1.1.1.1/32"))
-    with pytest.raises(NotSupported):
-        await d.render_l3_change(
-            L3Change(action="create", kind="svi", vlan_id=10, ipv4="1.1.1.1/24", vrf="t")
+    lb = await d.render_l3_change(
+        L3Change(action="create", kind="loopback", name="Loopback1", ipv4="1.1.1.1/32")
+    )
+    assert lb.commands == ("interface Loopback1", "   ip address 1.1.1.1/32")
+    svi = await d.render_l3_change(
+        L3Change(action="create", kind="svi", vlan_id=10, ipv4="10.0.0.1/24", vrf="tenant")
+    )
+    # vrf forwarding MUST precede ip address (EOS clears the address on vrf change)
+    assert svi.commands.index("   vrf forwarding tenant") < svi.commands.index(
+        "   ip address 10.0.0.1/24"
+    )
+
+
+@pytest.mark.asyncio
+async def test_arista_render_ospf() -> None:
+    from northbound.schemas.driver import OspfChange
+
+    d = AristaDriver.__new__(AristaDriver)
+    rid = await d.render_ospf_change(
+        OspfChange(action="set", target="router-id", router_id="9.9.9.9")
+    )
+    assert rid.commands == ("router ospf 1", "   router-id 9.9.9.9")
+    iff = await d.render_ospf_change(
+        OspfChange(
+            action="set",
+            target="interface",
+            interface="Vlan10",
+            area="0.0.0.0",
+            cost=5,
+            passive=True,
         )
+    )
+    assert "   ip ospf area 0.0.0.0" in iff.commands  # interface-level area
+    assert "   ip ospf cost 5" in iff.commands
+    # passive lives under router ospf, NOT the interface (EOS model)
+    assert "router ospf 1" in iff.commands and "   passive-interface Vlan10" in iff.commands

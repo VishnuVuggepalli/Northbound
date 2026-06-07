@@ -36,6 +36,7 @@ from northbound.drivers.base import (
     NotSupported,
     ReachabilityError,
 )
+from northbound.drivers.config_templates import render_lines
 from northbound.drivers.registry import register
 from northbound.schemas.driver import (
     ApplyResult,
@@ -47,6 +48,7 @@ from northbound.schemas.driver import (
     DriverCapabilities,
     L3Change,
     Neighbor,
+    OspfChange,
     PortChange,
     PortState,
     TestResult,
@@ -241,40 +243,40 @@ class AristaDriver(Driver):
         )
 
     async def render_vlan_change(self, change: VlanChange) -> ConfigDiff:
-        """EOS VLAN-database create/delete (`vlan <id>` / `no vlan <id>`)."""
-        if change.action == "delete":
-            return self._diff(f"Delete VLAN {change.vlan_id}", [f"no vlan {change.vlan_id}"])
-        cmds = [f"vlan {change.vlan_id}"]
-        if change.name:
-            cmds.append(f"   name {change.name}")
-        return self._diff(f"Create VLAN {change.vlan_id}", cmds)
+        """EOS VLAN-database create/delete — rendered from arista/vlan.j2."""
+        verb = "Delete" if change.action == "delete" else "Create"
+        return self._diff(
+            f"{verb} VLAN {change.vlan_id}", render_lines("arista/vlan.j2", **change.model_dump())
+        )
 
     async def render_l3_change(self, change: L3Change) -> ConfigDiff:
-        """EOS SVI create/delete. The interface is ``Vlan<id>`` (EOS naming, derived
-        from vlan_id). Loopback + VRF-binding deferred for EOS (naming/version
-        grounding pending a vEOS pass) — raise rather than guess routed config."""
-        if change.kind != "svi":
-            raise NotSupported("arista: render_l3_change loopback not grounded yet")
-        if change.vrf:
-            raise NotSupported("arista: SVI vrf-binding keyword not grounded yet")
-        name = f"Vlan{change.vlan_id}"
-        if change.action == "delete":
-            return self._diff(f"Delete SVI {name}", [f"no interface {name}"])
-        cmds = [f"interface {name}", f"   ip address {change.ipv4}"]
-        if change.mtu is not None:
-            cmds.append(f"   mtu {change.mtu}")
-        if change.enabled is not None:
-            cmds.append("   no shutdown" if change.enabled else "   shutdown")
-        return self._diff(f"Create SVI {name}", cmds)
+        """EOS SVI / loopback create/delete incl. VRF binding — arista/l3.j2.
+
+        SVI interface is ``Vlan<id>`` (EOS-capitalised); loopback uses the given
+        name (e.g. ``Loopback1``). The template emits ``vrf forwarding`` before
+        ``ip address`` (EOS clears the address on a VRF change)."""
+        verb = "Delete" if change.action == "delete" else "Create"
+        label = "SVI" if change.kind == "svi" else "loopback"
+        return self._diff(
+            f"{verb} {label} {change.iface_name}",
+            render_lines("arista/l3.j2", **change.model_dump()),
+        )
+
+    async def render_ospf_change(self, change: OspfChange) -> ConfigDiff:
+        """EOS OSPFv2 change — arista/ospf.j2. Process id defaults to 1; area +
+        cost/timers are interface-level, but ``passive-interface`` is under
+        ``router ospf`` (the EOS model)."""
+        what = "router-id" if change.target == "router-id" else (change.interface or "")
+        return self._diff(
+            f"OSPF {change.action} {what}", render_lines("arista/ospf.j2", **change.model_dump())
+        )
 
     async def render_vrf_change(self, change: VrfChange) -> ConfigDiff:
-        """EOS VRF create/delete (`vrf instance <name>`, 4.22+)."""
-        if change.action == "delete":
-            return self._diff(f"Delete VRF {change.name}", [f"no vrf instance {change.name}"])
-        cmds = [f"vrf instance {change.name}"]
-        if change.description:
-            cmds.append(f"   description {change.description}")
-        return self._diff(f"Create VRF {change.name}", cmds)
+        """EOS VRF create/delete (`vrf instance <name>`, 4.22+) — arista/vrf.j2."""
+        verb = "Delete" if change.action == "delete" else "Create"
+        return self._diff(
+            f"{verb} VRF {change.name}", render_lines("arista/vrf.j2", **change.model_dump())
+        )
 
     async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
         session = diff.metadata.get(_SESSION_KEY) or f"nb-{uuid.uuid4().hex[:8]}"

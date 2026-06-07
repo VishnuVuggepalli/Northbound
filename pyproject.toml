@@ -120,5 +120,6 @@ build-backend= "setuptools.build_meta"
 where=["src"]
 
 [tool.setuptools.package-data]
-# Ship the TextFSM templates used to parse PicOS CLI operational output.
-"northbound.drivers" = ["textfsm_templates/**/*.textfsm"]
+# Ship the TextFSM templates (parse PicOS CLI) + Jinja2 config templates (render
+# CLI write config, e.g. Arista EOS) — both are loaded from disk at runtime.
+"northbound.drivers" = ["textfsm_templates/**/*.textfsm", "config_templates/**/*.j2"]
