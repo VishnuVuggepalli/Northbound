@@ -18,13 +18,16 @@ from northbound.api.deps import get_current_user, require_admin
 from northbound.api.limiter import limiter, write_rate_key, write_rate_limit_provider
 from northbound.db import get_session
 from northbound.models.change_request import ChangeRequest
+from northbound.models.change_request_event import ChangeRequestEvent
 from northbound.models.device import Device
 from northbound.models.enums import ChangeRequestStatus, UserRole
 from northbound.models.user import User
 from northbound.schemas.driver import L3Change, OspfChange, VlanChange, VrfChange
 from northbound.schemas.request import (
     RequestChangesIn,
+    RequestCommentIn,
     RequestCreateIn,
+    RequestEventOut,
     RequestL3In,
     RequestOspfIn,
     RequestOut,
@@ -241,6 +244,64 @@ async def get_request(
     req = await _load_request(session, request_id)
     _assert_can_read(req, user)
     return await _request_out(session, req)
+
+
+async def _events_out(
+    session: AsyncSession, events: list[ChangeRequestEvent]
+) -> list[RequestEventOut]:
+    """Serialize event-log rows to the timeline DTO, resolving actor usernames."""
+    names = await requests.usernames_for(session, {e.actor for e in events})
+    out: list[RequestEventOut] = []
+    for e in events:
+        payload = e.payload or {}
+        is_comment = payload.get("kind") == "comment"
+        out.append(
+            RequestEventOut(
+                id=e.id,
+                kind="comment" if is_comment else "transition",
+                from_status=e.from_status,
+                to_status=e.to_status,
+                actor=e.actor,
+                actor_username=names.get(e.actor),
+                body=str(payload.get("body") or "") if is_comment else "",
+                created_at=e.created_at.isoformat() if e.created_at else "",
+            )
+        )
+    return out
+
+
+@router.get("/{request_id}/timeline", response_model=list[RequestEventOut])
+async def get_request_timeline(
+    request_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[RequestEventOut]:
+    """The request's timeline — status transitions + comments, oldest first.
+
+    Object-level authz: a non-admin may only read their own request (404 else)."""
+    req = await _load_request(session, request_id)
+    _assert_can_read(req, user)
+    return await _events_out(session, await requests.list_events(session, request_id))
+
+
+@router.post(
+    "/{request_id}/comments",
+    response_model=RequestEventOut,
+    status_code=status.HTTP_201_CREATED,
+)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def add_request_comment(
+    request: Request,
+    request_id: str,
+    body: RequestCommentIn,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestEventOut:
+    """Post a comment to a request (owner or admin — same read authz)."""
+    req = await _load_request(session, request_id)
+    _assert_can_read(req, user)
+    event = await requests.add_comment(session, req, user, body.body)
+    return (await _events_out(session, [event]))[0]
 
 
 @router.post("/{request_id}/approve", response_model=RequestOut)

@@ -85,6 +85,25 @@ class RequestChangesIn(BaseModel):
     comment: str = Field(min_length=1, max_length=2000)
 
 
+class RequestCommentIn(BaseModel):
+    """Body of ``POST /api/requests/{id}/comments`` — a free-text comment."""
+
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class RequestEventOut(BaseModel):
+    """One entry of a request's timeline — a status transition or a comment."""
+
+    id: str
+    kind: str  # "comment" | "transition"
+    from_status: str
+    to_status: str
+    actor: str
+    actor_username: str | None = None
+    body: str = ""  # comment text (empty for transitions)
+    created_at: str
+
+
 class RequestResubmitIn(BaseModel):
     """Body of ``POST /api/requests/{id}/resubmit`` — owner revises and resubmits.
 

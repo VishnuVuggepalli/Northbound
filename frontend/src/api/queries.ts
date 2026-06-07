@@ -241,6 +241,24 @@ export function useCreateRequest() {
   });
 }
 
+export function useRequestTimeline(requestId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['requests', requestId, 'timeline'],
+    queryFn: () => api.getRequestTimeline(requestId),
+    enabled,
+    // Light polling while the thread is open → near-realtime chat without SSE.
+    refetchInterval: enabled ? 8000 : false,
+  });
+}
+
+export function useAddRequestComment(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: string) => api.addRequestComment(requestId, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['requests', requestId, 'timeline'] }),
+  });
+}
+
 export function useCreateVlanRequest() {
   const qc = useQueryClient();
   return useMutation({

@@ -784,6 +784,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/requests/{request_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Request Timeline
+         * @description The request's timeline — status transitions + comments, oldest first.
+         *
+         *     Object-level authz: a non-admin may only read their own request (404 else).
+         */
+        get: operations["get_request_timeline_api_requests__request_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{request_id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Request Comment
+         * @description Post a comment to a request (owner or admin — same read authz).
+         */
+        post: operations["add_request_comment_api_requests__request_id__comments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/requests/{request_id}/approve": {
         parameters: {
             query?: never;
@@ -1657,6 +1699,14 @@ export interface components {
             comment: string;
         };
         /**
+         * RequestCommentIn
+         * @description Body of ``POST /api/requests/{id}/comments`` — a free-text comment.
+         */
+        RequestCommentIn: {
+            /** Body */
+            body: string;
+        };
+        /**
          * RequestCreateIn
          * @description Body of ``POST /api/requests`` — file a change request.
          */
@@ -1671,6 +1721,31 @@ export interface components {
              * @default
              */
             reason: string;
+        };
+        /**
+         * RequestEventOut
+         * @description One entry of a request's timeline — a status transition or a comment.
+         */
+        RequestEventOut: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** From Status */
+            from_status: string;
+            /** To Status */
+            to_status: string;
+            /** Actor */
+            actor: string;
+            /** Actor Username */
+            actor_username?: string | null;
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /** Created At */
+            created_at: string;
         };
         /**
          * RequestL3In
@@ -3300,6 +3375,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_request_timeline_api_requests__request_id__timeline_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestEventOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_request_comment_api_requests__request_id__comments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestCommentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestEventOut"];
                 };
             };
             /** @description Validation Error */

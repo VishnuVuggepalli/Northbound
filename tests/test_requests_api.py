@@ -649,3 +649,46 @@ async def test_ospf_read_only_device_403(
         json={"device_id": router.id, "action": "set", "target": "router-id", "router_id": "1.1.1.1"},
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_request_comment_thread_timeline(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    rid = (await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))).json()["id"]
+    # alice comments, admin replies
+    c1 = await client.post(f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": "why pending?"})
+    assert c1.status_code == 201 and c1.json()["kind"] == "comment"
+    await client.post(f"/api/requests/{rid}/comments", headers=_bearer(admin), json={"body": "reviewing now"})
+
+    tl = await client.get(f"/api/requests/{rid}/timeline", headers=_bearer(alice))
+    assert tl.status_code == 200
+    ev = tl.json()
+    # timeline interleaves the create transition + both comments, oldest first
+    assert ev[0]["kind"] == "transition" and ev[0]["to_status"] == "pending"
+    comments = [e for e in ev if e["kind"] == "comment"]
+    assert [c["body"] for c in comments] == ["why pending?", "reviewing now"]
+    assert comments[0]["actor_username"] == "alice"
+    assert comments[1]["actor_username"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_request_timeline_and_comment_authz(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """A non-owner non-admin can neither read the timeline nor comment (404)."""
+    _, admin, alice, leaf, _ = seeded
+    rid = (await client.post("/api/requests", headers=_bearer(admin), json=_create_body(leaf.id))).json()["id"]
+    assert (await client.get(f"/api/requests/{rid}/timeline", headers=_bearer(alice))).status_code == 404
+    r = await client.post(f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": "x"})
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_request_comment_requires_body(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    rid = (await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))).json()["id"]
+    assert (await client.post(f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": ""})).status_code == 422

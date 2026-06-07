@@ -612,6 +612,36 @@ async def get_request(session: AsyncSession, request_id: str) -> ChangeRequest |
     return await session.scalar(select(ChangeRequest).where(ChangeRequest.id == request_id))
 
 
+async def add_comment(
+    session: AsyncSession, request: ChangeRequest, user: User, body: str
+) -> ChangeRequestEvent:
+    """Append a free-text comment to a request's event log (no status change).
+
+    A comment is a ChangeRequestEvent with from==to (current status) and
+    ``payload={"kind":"comment","body":...}`` — so the request timeline is one
+    ordered stream of transitions + comments (GitHub-PR style)."""
+    event = ChangeRequestEvent(
+        request_id=request.id,
+        from_status=request.status.value,
+        to_status=request.status.value,
+        actor=user.id,
+        payload={"kind": "comment", "body": body},
+    )
+    session.add(event)
+    await session.flush()
+    return event
+
+
+async def list_events(session: AsyncSession, request_id: str) -> list[ChangeRequestEvent]:
+    """The full event log for a request (transitions + comments), oldest first."""
+    rows = await session.scalars(
+        select(ChangeRequestEvent)
+        .where(ChangeRequestEvent.request_id == request_id)
+        .order_by(ChangeRequestEvent.created_at)
+    )
+    return list(rows.all())
+
+
 async def usernames_for(session: AsyncSession, user_ids: set[str]) -> dict[str, str]:
     """Map user id → username for the given ids in ONE query (avoids N+1 when
     serializing a list of requests). Missing ids are simply absent from the map."""

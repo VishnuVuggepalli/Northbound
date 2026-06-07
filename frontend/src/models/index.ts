@@ -134,6 +134,17 @@ export interface RequestedChanges {
   notes?: string;
 }
 
+export interface RequestEvent {
+  id: string;
+  kind: 'comment' | 'transition';
+  from_status: string;
+  to_status: string;
+  actor: string;
+  actor_username: string | null;
+  body: string;
+  created_at: string; // ISO 8601
+}
+
 export interface ChangeRequest {
   id: string;
   device_id: string;

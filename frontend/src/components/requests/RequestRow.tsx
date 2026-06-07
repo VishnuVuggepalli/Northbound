@@ -7,6 +7,7 @@ import { StatusBadge } from '@/shared/StatusBadge';
 import { Badge } from '@/shared/Badge';
 import { KV } from '@/shared/KV';
 import { Diff, ConfigDiff } from '@/components/Diff';
+import { RequestThread } from '@/components/requests/RequestThread';
 import { ApplyConfirmModal } from '@/modals/ApplyConfirmModal';
 import { applyChangeToPort, mergeChange, portToRequestedChanges } from '@/lib/config';
 import { timeAgo } from '@/lib/format';
@@ -141,6 +142,7 @@ export function RequestRow({
           {request.reviewer_comment && (
             <KV label="Reviewer comment" variant="stacked">{request.reviewer_comment}</KV>
           )}
+          <RequestThread requestId={request.id} open={expanded} />
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <KV label="Field changes" variant="stacked">
               <Diff

@@ -28,6 +28,7 @@ import type {
   OspfInterface,
   PortMap,
   RequestedChanges,
+  RequestEvent,
   ProtocolDetail,
   Site,
   SystemInfo,
@@ -502,6 +503,19 @@ export async function createRequest(input: CreateRequestInput): Promise<ChangeRe
     },
   });
   return mapRequest(req);
+}
+
+/** A request's timeline — status transitions + comments, oldest first. */
+export async function getRequestTimeline(id: string): Promise<RequestEvent[]> {
+  return request<RequestEvent[]>(`/api/requests/${encodeURIComponent(id)}/timeline`);
+}
+
+/** Post a comment to a request's thread. */
+export async function addRequestComment(id: string, body: string): Promise<RequestEvent> {
+  return request<RequestEvent>(`/api/requests/${encodeURIComponent(id)}/comments`, {
+    method: 'POST',
+    body: { body },
+  });
 }
 
 /** File a VLAN-database change request (create/delete a VLAN id). */
