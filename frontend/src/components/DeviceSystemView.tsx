@@ -16,7 +16,7 @@ import { DataTable } from '@/shared/DataTable';
 import { StatusDot } from '@/shared/StatusDot';
 import { Input } from '@/shared/Input';
 import { Button } from '@/shared/Button';
-import { Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
 import type { Device } from '@/models';
@@ -50,6 +50,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [deleteVid, setDeleteVid] = useState<number | null>(null);
+  const [deleteSvi, setDeleteSvi] = useState<number | null>(null);
   const createL3 = useCreateL3Request();
   const [addingL3, setAddingL3] = useState(false);
   const [l3Kind, setL3Kind] = useState<'svi' | 'loopback'>('svi');
@@ -576,16 +577,95 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
             <p className="px-1 text-xs text-fg-subtle">No addressed interfaces reported.</p>
           ) : (
             <div className="px-1">
+              {deleteSvi !== null && (
+                <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-danger/40 bg-danger/5 p-3 text-sm">
+                  <span className="text-fg">
+                    Delete SVI <span className="nb-mono font-semibold">vlan{deleteSvi}</span>? Files a
+                    change request.
+                  </span>
+                  <span className="ml-auto flex gap-1.5">
+                    <Button kind="ghost" size="sm" onClick={() => setDeleteSvi(null)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      kind="danger"
+                      size="sm"
+                      disabled={createL3.isPending}
+                      onClick={() =>
+                        createL3.mutate(
+                          { device_id: device.id, action: 'delete', kind: 'svi', vlan_id: deleteSvi },
+                          {
+                            onSuccess: () => {
+                              pushToast({ kind: 'success', title: 'SVI delete requested' });
+                              setDeleteSvi(null);
+                            },
+                            onError: (err: unknown) =>
+                              pushToast({
+                                kind: 'error',
+                                title: 'Could not file request',
+                                message: err instanceof Error ? err.message : 'Failed',
+                              }),
+                          },
+                        )
+                      }
+                    >
+                      Request delete
+                    </Button>
+                  </span>
+                </div>
+              )}
               <DataTable
-                columns={['Interface', 'Kind', 'IPv4', 'Gateway', 'MTU', 'Notes']}
-                rows={l3.map((i) => [
-                  i.name,
-                  i.kind === 'svi' ? 'L3 SVI' : i.kind === 'management' ? 'Management' : 'LAG',
-                  i.ipv4,
-                  i.gateway,
-                  i.mtu != null ? String(i.mtu) : '',
-                  i.enabled ? i.detail : `disabled${i.detail ? ' · ' + i.detail : ''}`,
-                ])}
+                columns={
+                  canWriteVlan
+                    ? ['Interface', 'Kind', 'IPv4', 'Gateway', 'MTU', 'Notes', '']
+                    : ['Interface', 'Kind', 'IPv4', 'Gateway', 'MTU', 'Notes']
+                }
+                rows={l3.map((i) => {
+                  const base = [
+                    i.name,
+                    i.kind === 'svi' ? 'L3 SVI' : i.kind === 'management' ? 'Management' : 'LAG',
+                    i.ipv4,
+                    i.gateway,
+                    i.mtu != null ? String(i.mtu) : '',
+                    i.enabled ? i.detail : `disabled${i.detail ? ' · ' + i.detail : ''}`,
+                  ];
+                  if (!canWriteVlan) return base;
+                  // Only SVIs are user-managed via our change model (mgmt/LAG aren't).
+                  const vid = i.kind === 'svi' ? Number.parseInt(i.name.replace(/\D/g, ''), 10) : NaN;
+                  return [
+                    ...base,
+                    i.kind === 'svi' && Number.isFinite(vid) ? (
+                      <span key="act" className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          title={`Edit ${i.name}`}
+                          aria-label={`Edit ${i.name}`}
+                          onClick={() => {
+                            setL3Kind('svi');
+                            setL3Vid(String(vid));
+                            setL3Ip(i.ipv4);
+                            setL3Mtu(i.mtu != null ? String(i.mtu) : '');
+                            setAddingL3(true);
+                          }}
+                          className="text-fg-subtle transition-colors hover:text-accent"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          title={`Delete ${i.name}`}
+                          aria-label={`Delete ${i.name}`}
+                          onClick={() => setDeleteSvi(vid)}
+                          className="text-fg-subtle transition-colors hover:text-danger"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </span>
+                    ) : (
+                      ''
+                    ),
+                  ];
+                })}
                 cellClass={(j) => (j === 0 ? 'text-fg' : j === 2 ? 'text-link' : 'text-fg-muted')}
               />
             </div>
@@ -815,21 +895,36 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                 if (!canWriteVlan) return base;
                 return [
                   ...base,
-                  // VLAN 1 (default) is not deletable on most platforms — hide it.
-                  v.vlan_id === 1 ? (
-                    ''
-                  ) : (
+                  <span key="act" className="flex items-center gap-2">
                     <button
-                      key="del"
                       type="button"
-                      title={`Delete VLAN ${v.vlan_id}`}
-                      aria-label={`Delete VLAN ${v.vlan_id}`}
-                      onClick={() => setDeleteVid(v.vlan_id)}
-                      className="text-fg-subtle transition-colors hover:text-danger"
+                      title={`Edit VLAN ${v.vlan_id}`}
+                      aria-label={`Edit VLAN ${v.vlan_id}`}
+                      onClick={() => {
+                        // Pre-fill the Add form → submit re-applies (edit-config
+                        // merges, so this updates name/description in place).
+                        setNewVid(String(v.vlan_id));
+                        setNewName(v.name);
+                        setNewDesc(v.description);
+                        setAddingVlan(true);
+                      }}
+                      className="text-fg-subtle transition-colors hover:text-accent"
                     >
-                      <Trash2 size={13} />
+                      <Pencil size={13} />
                     </button>
-                  ),
+                    {/* VLAN 1 (default) is not deletable on most platforms. */}
+                    {v.vlan_id !== 1 && (
+                      <button
+                        type="button"
+                        title={`Delete VLAN ${v.vlan_id}`}
+                        aria-label={`Delete VLAN ${v.vlan_id}`}
+                        onClick={() => setDeleteVid(v.vlan_id)}
+                        className="text-fg-subtle transition-colors hover:text-danger"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </span>,
                 ];
               })}
               cellClass={(j) => (j === 0 ? 'text-fg' : j === 3 ? 'text-link' : 'text-fg-muted')}
