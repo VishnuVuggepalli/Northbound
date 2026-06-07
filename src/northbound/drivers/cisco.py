@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
 import time
 import uuid
@@ -36,6 +37,7 @@ from northbound.drivers.base import (
     NotSupported,
     ReachabilityError,
 )
+from northbound.drivers.config_templates import render_lines
 from northbound.drivers.registry import register
 from northbound.schemas.driver import (
     ApplyResult,
@@ -45,10 +47,14 @@ from northbound.schemas.driver import (
     Credentials,
     DiscoveryResult,
     DriverCapabilities,
+    L3Change,
     Neighbor,
+    OspfChange,
     PortChange,
     PortState,
     TestResult,
+    VlanChange,
+    VrfChange,
 )
 
 logger = logging.getLogger("northbound.drivers.cisco")
@@ -214,6 +220,54 @@ class CiscoDriver(Driver):
             raw_after="\n".join(cmds) + "\n",
             commands=tuple(cmds),
             metadata={_CHECKPOINT_KEY: token},
+        )
+
+    @property
+    def _os(self) -> str:
+        """`nxos` or `ios` — selects the per-OS template set (syntax diverges)."""
+        return "nxos" if self._use_native else "ios"
+
+    def _diff(self, summary: str, cmds: list[str]) -> ConfigDiff:
+        return ConfigDiff(
+            summary=summary,
+            raw_before="! (previous state not captured)\n",
+            raw_after="\n".join(cmds) + "\n",
+            commands=tuple(cmds),
+            metadata={_CHECKPOINT_KEY: f"nb-{uuid.uuid4().hex[:8]}"},
+        )
+
+    async def render_vlan_change(self, change: VlanChange) -> ConfigDiff:
+        verb = "Delete" if change.action == "delete" else "Create"
+        return self._diff(
+            f"{verb} VLAN {change.vlan_id}",
+            render_lines(f"cisco_{self._os}/vlan.j2", **change.model_dump()),
+        )
+
+    async def render_l3_change(self, change: L3Change) -> ConfigDiff:
+        """SVI/loopback. IOS takes a dotted mask (`ip address a.b.c.d m.m.m.m`),
+        NX-OS takes CIDR; both put the VRF binding before the address (the device
+        clears L3 on a VRF change). NX-OS also needs `feature interface-vlan`."""
+        ctx = {**change.model_dump(), "ipv4_mask": _cidr_to_dotted(change.ipv4 or "")}
+        verb = "Delete" if change.action == "delete" else "Create"
+        label = "SVI" if change.kind == "svi" else "loopback"
+        return self._diff(
+            f"{verb} {label} {change.iface_name}", render_lines(f"cisco_{self._os}/l3.j2", **ctx)
+        )
+
+    async def render_vrf_change(self, change: VrfChange) -> ConfigDiff:
+        """IOS `vrf definition` (+ address-family ipv4); NX-OS `vrf context`."""
+        verb = "Delete" if change.action == "delete" else "Create"
+        return self._diff(
+            f"{verb} VRF {change.name}",
+            render_lines(f"cisco_{self._os}/vrf.j2", **change.model_dump()),
+        )
+
+    async def render_ospf_change(self, change: OspfChange) -> ConfigDiff:
+        """IOS `ip ospf <p> area`; NX-OS `ip router ospf <p> area` (+ feature ospf)."""
+        what = "router-id" if change.target == "router-id" else (change.interface or "")
+        return self._diff(
+            f"OSPF {change.action} {what}",
+            render_lines(f"cisco_{self._os}/ospf.j2", **change.model_dump()),
         )
 
     async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
@@ -400,6 +454,16 @@ def _parse_vlan_list(value: object) -> tuple[int, ...]:
         elif tok.isdigit():
             out.append(int(tok))
     return tuple(out)
+
+
+def _cidr_to_dotted(cidr: str) -> str:
+    """``10.0.0.1/24`` → ``10.0.0.1 255.255.255.0`` (IOS wants a dotted mask;
+    NX-OS takes the CIDR as-is). Returns the input unchanged if unparseable."""
+    try:
+        iface = ipaddress.ip_interface(cidr)
+        return f"{iface.ip} {iface.netmask}"
+    except ValueError:
+        return cidr
 
 
 def _build_change_commands(port: str, change: PortChange) -> list[str]:

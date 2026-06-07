@@ -1,0 +1,8 @@
+{% if action == 'delete' %}
+no vrf context {{ name }}
+{% else %}
+vrf context {{ name }}
+{% if description %}
+  description {{ description }}
+{% endif %}
+{% endif %}

@@ -1,0 +1,28 @@
+{% if target == 'router-id' %}
+feature ospf
+router ospf 1
+{% if action == 'delete' %}
+  no router-id
+{% else %}
+  router-id {{ router_id }}
+{% endif %}
+{% elif action == 'delete' %}
+interface {{ interface }}
+  no ip router ospf 1 area {{ area }}
+{% else %}
+feature ospf
+interface {{ interface }}
+  ip router ospf 1 area {{ area }}
+{% if cost is not none %}
+  ip ospf cost {{ cost }}
+{% endif %}
+{% if hello_interval is not none %}
+  ip ospf hello-interval {{ hello_interval }}
+{% endif %}
+{% if dead_interval is not none %}
+  ip ospf dead-interval {{ dead_interval }}
+{% endif %}
+{% if passive %}
+  ip ospf passive-interface
+{% endif %}
+{% endif %}

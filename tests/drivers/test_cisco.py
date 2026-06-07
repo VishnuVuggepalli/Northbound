@@ -210,3 +210,44 @@ async def test_apply_failure_discards_candidate() -> None:
     res = await d.apply_change(diff)
     assert res.success is False and res.error and "invalid command" in res.error
     assert ("discard_config", None) in fake.calls
+
+
+def _drv(nxos: bool) -> CiscoDriver:
+    d = CiscoDriver.__new__(CiscoDriver)
+    d._use_native = nxos  # nxos vs ios template selection
+    return d
+
+
+@pytest.mark.asyncio
+async def test_cisco_ios_vs_nxos_svi_vrf() -> None:
+    from northbound.schemas.driver import L3Change
+
+    ch = L3Change(action="create", kind="svi", vlan_id=10, ipv4="10.0.0.1/24", vrf="Red")
+    ios = (await _drv(False).render_l3_change(ch)).commands
+    nx = (await _drv(True).render_l3_change(ch)).commands
+    # IOS: dotted mask + `vrf forwarding`; NX-OS: CIDR + `vrf member` + feature.
+    assert " ip address 10.0.0.1 255.255.255.0" in ios and " vrf forwarding Red" in ios
+    assert "  ip address 10.0.0.1/24" in nx and "  vrf member Red" in nx
+    assert "feature interface-vlan" in nx
+    # vrf binding precedes the address on both (device clears L3 on vrf change)
+    assert nx.index("  vrf member Red") < nx.index("  ip address 10.0.0.1/24")
+
+
+@pytest.mark.asyncio
+async def test_cisco_ios_vs_nxos_vrf_object() -> None:
+    from northbound.schemas.driver import VrfChange
+
+    ch = VrfChange(action="create", name="Red")
+    assert "vrf definition Red" in (await _drv(False).render_vrf_change(ch)).commands
+    assert "vrf context Red" in (await _drv(True).render_vrf_change(ch)).commands
+
+
+@pytest.mark.asyncio
+async def test_cisco_ios_vs_nxos_ospf_interface() -> None:
+    from northbound.schemas.driver import OspfChange
+
+    ch = OspfChange(action="set", target="interface", interface="Vlan10", area="0", cost=5)
+    ios = (await _drv(False).render_ospf_change(ch)).commands
+    nx = (await _drv(True).render_ospf_change(ch)).commands
+    assert " ip ospf 1 area 0" in ios  # IOS
+    assert "  ip router ospf 1 area 0" in nx and "feature ospf" in nx  # NX-OS

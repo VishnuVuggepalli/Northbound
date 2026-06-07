@@ -1,0 +1,10 @@
+{% if action == 'delete' %}
+no vrf definition {{ name }}
+{% else %}
+vrf definition {{ name }}
+{% if description %}
+ description {{ description }}
+{% endif %}
+ address-family ipv4
+ exit-address-family
+{% endif %}
