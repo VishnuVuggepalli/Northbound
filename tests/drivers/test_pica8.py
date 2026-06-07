@@ -955,3 +955,23 @@ def test_parse_ospf_interfaces() -> None:
     assert ifs["vlan1010"].area == "0.0.0.0" and ifs["vlan1010"].cost == 10
     assert ifs["vlan1010"].hello_interval == 5 and ifs["vlan1010"].passive is True
     assert ifs["vlan1050"].area == "0.0.0.1" and ifs["vlan1050"].cost is None
+
+
+def test_detail_bgp_lists_neighbors_with_remote_as() -> None:
+    from northbound.drivers.pica8 import _detail_bgp
+
+    el = etree.fromstring(
+        b"""<bgp xmlns="http://pica8.com/xorplus/bgp">
+          <local-as>65000</local-as><router-id>10.0.0.1</router-id>
+          <neighbor><name>10.0.0.2</name><remote-as>65001</remote-as></neighbor>
+          <neighbor><name>10.0.0.3</name><remote-as>65002</remote-as></neighbor>
+        </bgp>"""
+    )
+    params, summary = _detail_bgp(el)
+    d = dict(params)
+    assert d["Local AS"] == "65000"
+    assert d["Router ID"] == "10.0.0.1"
+    assert d["Configured peers"] == "2"
+    assert d["Neighbor 10.0.0.2"] == "remote-AS 65001"
+    assert d["Neighbor 10.0.0.3"] == "remote-AS 65002"
+    assert "AS 65000" in summary and "2 peers" in summary

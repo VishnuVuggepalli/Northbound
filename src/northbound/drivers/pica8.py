@@ -1145,6 +1145,20 @@ def _detail_bgp(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
         params.append(("Router ID", rid))
     if neighbors:
         params.append(("Configured peers", str(len(neighbors))))
+    # Per-neighbor config: peer address (child or @name attr) → remote-AS. The
+    # exact leaf names aren't device-confirmed, so probe the common variants and
+    # show whatever is present (no crash when a field is absent).
+    for n in neighbors:
+        addr = (
+            _child_text(n, "name")
+            or _child_text(n, "address")
+            or _child_text(n, "peer-address")
+            or n.get("name")
+            or ""
+        )
+        ras = _child_text(n, "remote-as") or _child_text(n, "peer-as") or _child_text(n, "as")
+        if addr:
+            params.append((f"Neighbor {addr}", f"remote-AS {ras}" if ras else "configured"))
     summary = " · ".join(
         p for p in ((f"AS {local_as}" if local_as else ""), f"{len(neighbors)} peers") if p
     )
