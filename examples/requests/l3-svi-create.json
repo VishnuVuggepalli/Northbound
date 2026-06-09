@@ -1,0 +1,10 @@
+{
+  "device_id": "REPLACE-with-id-from-GET-/api/devices",
+  "action": "create",
+  "kind": "svi",
+  "vlan_id": 200,
+  "ipv4": "192.0.2.1/24",
+  "mtu": 1500,
+  "enabled": true,
+  "reason": "Gateway for the app-tier VLAN"
+}

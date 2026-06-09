@@ -264,6 +264,30 @@ async def test_apply_stale_state_blocks(
 
 
 @pytest.mark.asyncio
+async def test_apply_unrelated_port_change_does_not_drift(
+    db_session: AsyncSession, users2: tuple[User, User]
+) -> None:
+    """Drift is scoped to the request's own port: a VLAN change on a *different*
+    port must NOT block applying an Eth1 request."""
+    admin, alice = users2
+    device = await _device(db_session, "applyconfirm")
+    # Two ports at file time; the request targets Eth1 only.
+    _ConfirmDriver._ports = (_port("Eth1", 1), _port("Eth2", 2))
+    req = await _approved_request(db_session, device, alice, admin)
+
+    # Mutate ONLY the unrelated port after filing.
+    _ConfirmDriver._ports = (_port("Eth1", 1), _port("Eth2", 999))
+
+    # Must not raise StateDrift; request moves forward (awaiting confirm).
+    req = await change_apply.apply_request(db_session, req, device, admin)
+    assert req.status != S.APPROVED
+    drift = await db_session.scalar(
+        select(AuditLog).where(AuditLog.action == "request.apply_blocked_drift")
+    )
+    assert drift is None
+
+
+@pytest.mark.asyncio
 async def test_apply_driver_failure_marks_failed(
     db_session: AsyncSession, users2: tuple[User, User]
 ) -> None:

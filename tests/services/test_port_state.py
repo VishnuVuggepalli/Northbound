@@ -165,3 +165,28 @@ def test_fingerprint_order_independent() -> None:
     a = port_state.device_state_fingerprint([_port("Eth1", 1), _port("Eth2", 2)])
     b = port_state.device_state_fingerprint([_port("Eth2", 2), _port("Eth1", 1)])
     assert a == b
+
+
+def test_fingerprint_scoped_to_one_port() -> None:
+    """With ``port_name`` set, only that port's VLAN state feeds the hash, so an
+    unrelated port changing does NOT change the scoped fingerprint."""
+    base = [_port("Eth1", 10, (100,)), _port("Eth2", 20, (200,))]
+    other_moved = [_port("Eth1", 10, (100,)), _port("Eth2", 999, (200,))]
+
+    # Whole-device hash is sensitive to ANY port (status quo).
+    assert port_state.device_state_fingerprint(base) != port_state.device_state_fingerprint(
+        other_moved
+    )
+
+    # Scoped to Eth1: unrelated Eth2 change is invisible.
+    scoped = port_state.device_state_fingerprint(base, port_name="Eth1")
+    assert scoped == port_state.device_state_fingerprint(other_moved, port_name="Eth1")
+
+    # But changing Eth1 itself still drifts the scoped hash.
+    eth1_moved = [_port("Eth1", 11, (100,)), _port("Eth2", 20, (200,))]
+    assert scoped != port_state.device_state_fingerprint(eth1_moved, port_name="Eth1")
+
+    # A port not present hashes the empty set (stable, distinct).
+    assert port_state.device_state_fingerprint(base, port_name="Nope") == (
+        port_state.device_state_fingerprint([], port_name="Nope")
+    )

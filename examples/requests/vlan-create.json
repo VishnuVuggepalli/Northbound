@@ -1,0 +1,8 @@
+{
+  "device_id": "REPLACE-with-id-from-GET-/api/devices",
+  "action": "create",
+  "vlan_id": 200,
+  "name": "app-tier",
+  "description": "Application servers",
+  "reason": "New app tier needs its own broadcast domain"
+}

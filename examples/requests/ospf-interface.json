@@ -1,0 +1,10 @@
+{
+  "device_id": "REPLACE-with-id-from-GET-/api/devices",
+  "action": "set",
+  "target": "interface",
+  "interface": "vlan200",
+  "area": "0.0.0.0",
+  "cost": 10,
+  "passive": false,
+  "reason": "Advertise the app-tier SVI into OSPF area 0"
+}

@@ -76,3 +76,6 @@ frontend/playwright/reports/
 frontend/playwright/test-results/
 northbound.db.bak-*
 frontend/scripts/
+
+# Local scratch/debug probes (underscore-prefixed, not part of the app)
+scripts/_*.py

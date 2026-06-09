@@ -4,12 +4,18 @@ A network engineer's doctor and helper for the day-to-day port change.
 
 ## What Northbound is
 
-Northbound is a **request-mediated port-change workflow**. Alice needs port 14 on
+Northbound is a **request-mediated config-change workflow**. Alice needs port 14 on
 VLAN 200, files a request, an admin sees the rendered diff, clicks apply, and the
-change ships in about 30 seconds with backup, audit, and rollback.
+change ships in about 30 seconds with backup, audit, and rollback. An admin who
+isn't happy can **request changes** (instead of a hard reject) and the two sides
+talk it out on a per-request **comment thread** before it ships.
+
+Beyond the port move, requests cover device-level objects: **VLANs, L3 interfaces
+(SVI + loopback), VRFs, and OSPFv2** — each with full create/edit/delete, the same
+diff-and-approve gate, and a per-driver renderer.
 
 It targets a specific tooling gap between *observing the network* and *mass-changing
-the network* — the boring everyday port move that interrupts everyone's day.
+the network* — the boring everyday change that interrupts everyone's day.
 
 ## What Northbound is NOT
 
@@ -18,9 +24,11 @@ Read this once and 60% of "why doesn't it do X?" questions are already answered:
 - **A monitoring / alerting platform** — use LibreNMS, Observium, Prometheus + Grafana
 - **A bulk config push tool** — use Ansible, MikroWizard, or Napalm
 - **A network source-of-truth / intent model** — use NetBox or Nautobot
-- **A multi-vendor abstraction layer** — Northbound ships direct drivers for five
-  platforms (RouterOS, SwOS, Arista EOS, Pica8 PicOS, FreeBSD); Napalm is overkill
-  at this scale
+- **A multi-vendor abstraction layer** — Northbound ships direct drivers for six
+  platforms (Pica8 PicOS, Arista EOS, Cisco IOS/NX-OS, MikroTik RouterOS, MikroTik
+  SwOS, and a Mock for tests). Arista and Cisco wrap NAPALM for transport;
+  everything else is a thin direct driver — a full Napalm-style abstraction is
+  overkill at this scale
 - **A firmware update orchestrator** — out of scope forever
 
 Northbound **complements** those tools. Keep LibreNMS for graphs and alerts. Keep
@@ -50,6 +58,8 @@ See **Scale out** below.
 - `seed.py` — idempotent DB seed (baseline users + optional sample devices)
 - `deploy/` — systemd unit, env-file example, backup cron
 - `config.example.toml` — documented configuration template
+- `examples/` — copy-paste API request payloads (port/VLAN/SVI/VRF/OSPF/comment)
+- `share/` — onboarding kit: getting-started guide + a runnable curl API walkthrough
 - `supporting material/` — product + engineering specs the implementation tracks
 
 The full positioning copy lives at `/about` in the running app and in
@@ -141,6 +151,60 @@ checkout). It requires BuildKit (`DOCKER_BUILDKIT=1`, set by the make target) so
 its per-Dockerfile `Dockerfile.selfcontained.dockerignore` — which keeps the
 frontend sources in context — is honoured.
 
+### Run the container
+
+Two ways, depending on whether the app must reach devices on the host's own L2/L3
+(e.g. a switch on a management subnet the host routes to):
+
+**Compose (simplest — bridge networking, publishes `8090:8090`):**
+
+```bash
+cp .env.example .env          # fill NB_MASTER_KEY + NB_SECRET_KEY (see that file)
+make docker-up                # frontend-build + docker compose up --build -d
+make docker-down              # stop
+```
+
+> Needs Compose **v2** (`docker compose`). On a host with only the legacy v1
+> binary, use `docker-compose up --build -d` (hyphen) instead.
+
+**Host networking (when the container must use the host's routes/interfaces to
+reach managed devices):** bridge mode can't always reach a device on the host's
+mgmt VLAN, so run on the host network by hand:
+
+```bash
+make docker-build             # build northbound:latest (SPA built on host first)
+
+docker run -d --name northbound \
+  --network host \                       # host routes + :8090, no port mapping
+  --restart unless-stopped \
+  -v nb-data:/data \                     # SQLite DB survives rebuilds
+  --env-file .env \                      # NB_MASTER_KEY / NB_SECRET_KEY / NB_COOKIE_SECURE
+  -e NB_SEED=1 -e NB_ENABLE_SCHEDULER=true \
+  northbound:latest
+```
+
+`NB_ENVIRONMENT`, `NB_DB_URL` (`sqlite:////data/northbound.db`) and
+`NB_FRONTEND_DIST` are baked into the image — don't re-pass them. **`.env` must
+carry the same `NB_MASTER_KEY` across rebuilds**, or device credentials encrypted
+in the DB on the `nb-data` volume won't decrypt.
+
+**Day-to-day:**
+
+```bash
+docker ps                                  # status / running image
+docker logs -f northbound                  # tail logs
+docker restart northbound                  # bounce, same config
+```
+
+**Rollback** — old and new images coexist by ID (only one holds the `:latest`
+tag); the `nb-data` volume (DB) persists across all of it:
+
+```bash
+docker images northbound                   # find the previous image id
+docker tag <old-image-id> northbound:latest
+docker stop northbound && docker rm northbound   # then re-run `docker run …` above
+```
+
 ## Scale out (Postgres + multi-worker)
 
 The single-worker SQLite default is fine for a lab and small fleets. To run
@@ -189,18 +253,19 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
 While authenticated, the SPA opens one `EventSource` to `/api/events/stream`
 (`useEventStream`). The browser authenticates it with the same-origin httpOnly
 session cookie (EventSource cannot send an `Authorization` header) and
-auto-reconnects on drop. The backend pushes two event types — `device.reachability`
-(reachability poll transitions) and `device.ports` (after a write invalidates a
-device's port cache) — and the client invalidates the matching TanStack queries.
-No new background poller: events ride existing signals.
+auto-reconnects on drop. The backend pushes three event types — `device.reachability`
+(reachability poll transitions), `device.ports` (after a write invalidates a
+device's port cache), and `request.timeline` (a comment or status transition landed
+on a request → the open thread refreshes) — and the client invalidates the matching
+TanStack queries. No new background poller: events ride existing signals.
 
 ## Testing
 
 ```bash
 make check          # ruff lint + pyright typecheck + ruff format
-make test           # pytest (255 tests)
+make test           # pytest (456 tests)
 make verify         # check + test
-cd frontend && npm test     # vitest unit/component
+cd frontend && npm test     # vitest unit/component (62 tests)
 ```
 
 ## Driver status
@@ -208,18 +273,24 @@ cd frontend && npm test     # vitest unit/component
 | Platform | `platform_id` | Writable | Validation |
 |---|---|---|---|
 | Mock (testing) | `mock` | ✓ | reference impl — full contract suite |
-| Arista EOS (eAPI) | `arista` | ✓ | code-complete; fixtures **hand-authored** from vendor docs; live: **blocked** (cEOS needs arista.com auth) |
-| Cisco NX-OS (NX-API) | `cisco` | ✓ | code-complete; fixtures **hand-authored**; live: **blocked** (NX-OSv licensed + KVM nesting) |
-| Pica8 PicOS (NETCONF) | `pica8` | ✓ | code-complete; fixtures **hand-authored**; live: **blocked** (no public image) |
-| MikroTik RouterOS / SwOS, FreeBSD | — | planned | not yet implemented |
+| Pica8 PicOS (NETCONF) | `pica8` | ✓ | **live** — reads vs PicOS-V 4.2.2 + real **leaf-01**; VLAN / SVI / loopback / VRF / OSPF **writes live-validated on real leaf-01** (N8560-32C, PicOS 4.7) |
+| Arista EOS (eAPI via NAPALM) | `arista` | ✓ | **live** vs **vEOS-lab 4.27.0F** — reads + commit-confirm write (access **and** trunk) + LLDP; 4 real bugs found & fixed |
+| Cisco IOS / NX-OS (SSH + NX-API via NAPALM) | `cisco` | ✓ | **live** — SSH read vs **IOSv 15.8 / IOSvL2 15.2**; NX-API read+write vs **NX-OSv 7.3** (access + trunk); SSH LLDP vs IOSvL2 |
+| MikroTik SwOS | `mikrotik_swos` | read-only | **live** vs a real **CSS326** switch |
+| MikroTik RouterOS | `mikrotik` | ✓ | code-complete; fixtures-only (no RouterOS hardware available) |
 
-**Honest validation stance.** The non-mock driver fixtures are **hand-authored
-from vendor docs**, not captured from real hardware — so the parser and its
-fixture can share the same wrong guess and still pass green (the "circular
-fixture" problem). The one piece live-validated in this build is the **SSH
-transport** (`asyncssh_client`), exercised against a real **FRR 9.1** node over
-SSH (`sandbox/validate_ssh.py`) — the transport the FreeBSD/FRR read path uses.
-Arista/Cisco/Pica8 remain behaviorally unverified until run against real
-devices. The `sandbox/` rig (containerlab topology + `record_fixtures.py`
-capture harness) closes this gap the moment an operator supplies a cEOS image.
-Per-driver truth table: [`supporting material/vendor-docs/validation-status.md`](supporting%20material/vendor-docs/validation-status.md).
+**Honest validation stance.** Every network-backed driver except MikroTik
+RouterOS has now been **run against a real device or a real network-OS image** —
+which is exactly how live runs caught bugs the self-consistent fixtures never
+could (3–4 each on Arista and Cisco; 2 on the Pica8 read path; 2 on the NETCONF
+transport; 1 on SNMP). The transports are independently live-validated too: SSH
+vs **FRR 9.1** + IOSv, eAPI/NX-API vs vEOS/NX-OSv, NETCONF vs **Netopeer2**, SNMP
+vs **net-snmp**.
+
+Known gaps, flagged not faked: **Cisco NX-API LLDP** (`get_neighbors`) is
+unit-tested only — NX-OSv Titanium wedges the moment a second (data) NIC is added,
+so a 2-node adjacency can't form on this emulator. **MikroTik RouterOS** stays
+fixtures-only (no hardware). The `sandbox/` rig (containerlab topology +
+`record_fixtures.py` capture harness) is how each gap gets closed. Per-driver
+truth table with full evidence:
+[`supporting material/vendor-docs/validation-status.md`](supporting%20material/vendor-docs/validation-status.md).
