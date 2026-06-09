@@ -158,22 +158,35 @@ async def get_ports(
     return [_merge(p, meta.get(p.name)) for p in ports]
 
 
-def device_state_fingerprint(ports: tuple[PortState, ...] | list[PortState]) -> str:
+def device_state_fingerprint(
+    ports: tuple[PortState, ...] | list[PortState], port_name: str | None = None
+) -> str:
     """Stable sha256 over VLAN-bearing port state, for drift detection.
 
     Canonical input: sorted by port name; each port reduced to
     ``[name, untagged_vlan, sorted(tagged_vlans)]``. Whitespace-free JSON keeps
     the hash reproducible across processes.
+
+    When ``port_name`` is given the hash covers *only* that port, so drift is
+    scoped to the request's own switchport — an unrelated edit elsewhere on the
+    device no longer blocks the apply. ``port_name=None`` hashes the whole device
+    (the right scope for device-level changes: VLAN db, SVIs, VRFs, OSPF).
     """
+    selected = ports if port_name is None else [p for p in ports if p.name == port_name]
     canonical = sorted(
-        ([p.name, p.untagged_vlan, sorted(p.tagged_vlans)] for p in ports),
+        ([p.name, p.untagged_vlan, sorted(p.tagged_vlans)] for p in selected),
         key=lambda row: str(row[0]),
     )
     blob = json.dumps(canonical, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-async def current_fingerprint(device: Device, *, refresh: bool = True) -> str:
-    """Fetch (optionally fresh) live ports and return their fingerprint."""
+async def current_fingerprint(
+    device: Device, *, refresh: bool = True, port_name: str | None = None
+) -> str:
+    """Fetch (optionally fresh) live ports and return their fingerprint.
+
+    ``port_name`` scopes the hash to a single switchport (see
+    :func:`device_state_fingerprint`)."""
     ports = await _cached_ports(device, refresh=refresh)
-    return device_state_fingerprint(ports)
+    return device_state_fingerprint(ports, port_name=port_name)

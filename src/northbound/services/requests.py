@@ -225,7 +225,11 @@ async def create_request(
     # Fail fast: never accept a request against a read-only device.
     assert_writable(device)
 
-    fingerprint = await port_state.current_fingerprint(device, refresh=True)
+    # Scope drift to this switchport so an unrelated edit elsewhere on the device
+    # doesn't block this request (device-level kinds pass port_name="" → None).
+    fingerprint = await port_state.current_fingerprint(
+        device, refresh=True, port_name=port_name or None
+    )
 
     request = ChangeRequest(
         device_id=device.id,
@@ -562,7 +566,7 @@ async def resubmit_request(
     if requested_changes is not None:
         request.requested_changes = requested_changes.model_dump(exclude_none=False)
         request.device_state_fingerprint = await port_state.current_fingerprint(
-            device, refresh=True
+            device, refresh=True, port_name=request.port_name or None
         )
     if reason is not None:
         request.reason = reason

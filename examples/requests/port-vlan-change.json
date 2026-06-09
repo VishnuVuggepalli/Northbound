@@ -1,0 +1,11 @@
+{
+  "device_id": "REPLACE-with-id-from-GET-/api/devices",
+  "port_name": "xe-1/1/2",
+  "reason": "Move host to VLAN 200 access + management trunk",
+  "requested_changes": {
+    "untagged_vlan": 200,
+    "tagged_vlans": [4000],
+    "description": "app-server-07",
+    "enabled": true
+  }
+}

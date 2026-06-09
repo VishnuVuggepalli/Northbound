@@ -1,0 +1,7 @@
+{
+  "device_id": "REPLACE-with-id-from-GET-/api/devices",
+  "action": "create",
+  "name": "tenant-a",
+  "description": "Tenant A routing table",
+  "reason": "Isolate tenant-a L3 from the global table"
+}

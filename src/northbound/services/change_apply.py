@@ -98,7 +98,11 @@ async def apply_request(
     driver = driver_for(device, creds)
     try:
         # 4. Stale-state guard: recompute the live fingerprint and compare.
-        live_fingerprint = await port_state.current_fingerprint(device, refresh=True)
+        #    Scoped to the request's own port (port_name="" for device-level
+        #    kinds → whole-device), matching how it was captured at file time.
+        live_fingerprint = await port_state.current_fingerprint(
+            device, refresh=True, port_name=request.port_name or None
+        )
         if (
             request.device_state_fingerprint is not None
             and live_fingerprint != request.device_state_fingerprint
