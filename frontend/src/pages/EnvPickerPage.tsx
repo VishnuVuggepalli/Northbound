@@ -1,13 +1,19 @@
-import { useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight } from 'lucide-react';
-import { Topology3D } from '@/components/three/Topology3D';
-import { Wordmark } from '@/shared/Wordmark';
-import { useAuthStore } from '@/store/auth';
-import { useThemeStore } from '@/store/theme';
-import { useUIStore } from '@/store/ui';
-import { useAllPorts, useDevices, useLinks, useRequests, useSites } from '@/api/queries';
-import type { Environment } from '@/models';
+import { useMemo } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowRight } from "lucide-react";
+import { Topology3D } from "@/components/three/Topology3D";
+import { Wordmark } from "@/shared/Wordmark";
+import { useAuthStore } from "@/store/auth";
+import { useThemeStore } from "@/store/theme";
+import { useUIStore } from "@/store/ui";
+import {
+  useAllPorts,
+  useDevices,
+  useLinks,
+  useRequests,
+  useSites,
+} from "@/api/queries";
+import type { Environment } from "@/models";
 
 export function EnvPickerPage() {
   const navigate = useNavigate();
@@ -30,12 +36,12 @@ export function EnvPickerPage() {
       const ds = devices.filter((d) => d.env === site.slug);
       const ps = ds.flatMap((d) => ports[d.id] ?? []);
       const rq = requests.filter(
-        (r) => ds.some((d) => d.id === r.device_id) && r.status === 'pending',
+        (r) => ds.some((d) => d.id === r.device_id) && r.status === "pending",
       );
       out[site.slug] = {
         devices: ds.length,
         ports: ps.length,
-        up: ps.filter((p) => p.state === 'up').length,
+        up: ps.filter((p) => p.state === "up").length,
         pending: rq.length,
       };
     }
@@ -53,7 +59,7 @@ export function EnvPickerPage() {
         <div className="mx-auto max-w-5xl">
           <div
             className="nb-reveal nb-mono flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-fg-subtle"
-            style={{ '--nb-reveal-i': 0 } as React.CSSProperties}
+            style={{ "--nb-reveal-i": 0 } as React.CSSProperties}
           >
             <Wordmark size={14} glyph />
             <span>·</span>
@@ -61,13 +67,13 @@ export function EnvPickerPage() {
           </div>
           <h1
             className="nb-reveal mt-3 text-4xl font-semibold tracking-tightest text-fg text-balance"
-            style={{ '--nb-reveal-i': 1 } as React.CSSProperties}
+            style={{ "--nb-reveal-i": 1 } as React.CSSProperties}
           >
             Pick an environment
           </h1>
           <p
             className="nb-reveal mt-1.5 max-w-xl text-sm text-fg-muted"
-            style={{ '--nb-reveal-i': 2 } as React.CSSProperties}
+            style={{ "--nb-reveal-i": 2 } as React.CSSProperties}
           >
             Live state, structured requests, no more port-by-DM.
           </p>
@@ -88,22 +94,35 @@ export function EnvPickerPage() {
                 key={site.id}
                 type="button"
                 onClick={() => handlePick(env)}
-                style={{ '--nb-reveal-i': 3 + i } as React.CSSProperties}
+                style={{ "--nb-reveal-i": 3 + i } as React.CSSProperties}
                 className="nb-reveal group flex flex-col overflow-hidden rounded-2xl border border-border bg-bg-elev-1 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-accent/60 hover:shadow-[0_12px_48px_-12px_var(--nb-accent-soft)]"
               >
                 <div className="aspect-[4/2.4] w-full bg-bg-sunken">
-                  <Topology3D devices={ds} links={envLinks} theme={theme} ambient />
+                  <Topology3D
+                    devices={ds}
+                    links={envLinks}
+                    theme={theme}
+                    ambient
+                  />
                 </div>
                 <div className="border-t border-border p-5">
                   <div className="flex items-baseline justify-between">
-                    <h2 className="text-xl font-semibold text-fg">{site.name}</h2>
-                    <span className="nb-mono text-xs text-fg-subtle">{site.slug}</span>
+                    <h2 className="text-xl font-semibold text-fg">
+                      {site.name}
+                    </h2>
+                    <span className="nb-mono text-xs text-fg-subtle">
+                      {site.slug}
+                    </span>
                   </div>
                   <dl className="mt-4 grid grid-cols-4 gap-3">
                     <Stat label="devices" value={s.devices} />
                     <Stat label="ports" value={s.ports} />
                     <Stat label="up" value={s.up} tone="success" />
-                    <Stat label="pending" value={s.pending} tone={s.pending ? 'warn' : undefined} />
+                    <Stat
+                      label="pending"
+                      value={s.pending}
+                      tone={s.pending ? "warn" : undefined}
+                    />
                   </dl>
                   <div className="mt-5 flex items-center justify-end gap-1.5 text-sm font-medium text-accent group-hover:translate-x-0.5 transition-transform">
                     <span>Enter</span>
@@ -117,19 +136,22 @@ export function EnvPickerPage() {
 
         <div className="mx-auto mt-10 flex max-w-5xl items-center justify-between text-xs text-fg-subtle">
           <span>
-            Connected as <strong className="text-fg-muted">{user?.name ?? 'guest'}</strong>
+            Connected as{" "}
+            <strong className="text-fg-muted">{user?.name ?? "guest"}</strong>
           </span>
           <span className="nb-mono">tailnet · northbound.lab</span>
         </div>
 
-        <div className="mx-auto mt-6 max-w-5xl">
-          <Link
-            to="/onboard"
-            className="inline-flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-1.5 text-xs text-fg-muted hover:border-accent hover:text-accent"
-          >
-            + Onboard a new device
-          </Link>
-        </div>
+        {user?.role === "admin" && (
+          <div className="mx-auto mt-6 max-w-5xl">
+            <Link
+              to="/onboard"
+              className="inline-flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-1.5 text-xs text-fg-muted hover:border-accent hover:text-accent"
+            >
+              + Onboard a new device
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -142,12 +164,12 @@ function Stat({
 }: {
   label: string;
   value: number;
-  tone?: 'success' | 'warn';
+  tone?: "success" | "warn";
 }) {
-  const TONE: Record<NonNullable<typeof tone> | 'default', string> = {
-    default: 'text-fg',
-    success: 'text-success',
-    warn: 'text-warn',
+  const TONE: Record<NonNullable<typeof tone> | "default", string> = {
+    default: "text-fg",
+    success: "text-success",
+    warn: "text-warn",
   };
   // Each stat is a <div> wrapper holding a <dt>/<dd> pair so the surrounding
   // <dl> is structurally valid (axe `definition-list`). Visually we want value
@@ -155,8 +177,12 @@ function Stat({
   // order.
   return (
     <div className="flex flex-col-reverse">
-      <dt className="nb-mono text-[10px] uppercase tracking-[0.12em] text-fg-subtle">{label}</dt>
-      <dd className={`nb-mono mb-0.5 text-2xl font-semibold tabular-nums ${tone ? TONE[tone] : TONE.default}`}>
+      <dt className="nb-mono text-[10px] uppercase tracking-[0.12em] text-fg-subtle">
+        {label}
+      </dt>
+      <dd
+        className={`nb-mono mb-0.5 text-2xl font-semibold tabular-nums ${tone ? TONE[tone] : TONE.default}`}
+      >
         {value}
       </dd>
     </div>
