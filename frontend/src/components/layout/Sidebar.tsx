@@ -1,22 +1,23 @@
-import { useEffect, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Plus } from 'lucide-react';
-import { useDevices, useRequests, useSites } from '@/api/queries';
-import { useUIStore } from '@/store/ui';
-import { PlatformIcon } from '@/shared/PlatformIcon';
-import { StatusDot } from '@/shared/StatusDot';
-import { Badge } from '@/shared/Badge';
-import { SkeletonList } from '@/shared/Skeleton';
-import { cn } from '@/lib/cn';
-import { plural } from '@/lib/format';
-import type { Device, DeviceRole, Environment } from '@/models';
+import { useEffect, useRef } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Plus } from "lucide-react";
+import { useDevices, useRequests, useSites } from "@/api/queries";
+import { useAuthStore } from "@/store/auth";
+import { useUIStore } from "@/store/ui";
+import { PlatformIcon } from "@/shared/PlatformIcon";
+import { StatusDot } from "@/shared/StatusDot";
+import { Badge } from "@/shared/Badge";
+import { SkeletonList } from "@/shared/Skeleton";
+import { cn } from "@/lib/cn";
+import { plural } from "@/lib/format";
+import type { Device, DeviceRole, Environment } from "@/models";
 
-const ROLE_ORDER: DeviceRole[] = ['spine', 'leaf', 'router', 'vpn'];
+const ROLE_ORDER: DeviceRole[] = ["spine", "leaf", "router", "vpn"];
 const ROLE_LABELS: Record<DeviceRole, string> = {
-  spine: 'Spines',
-  leaf: 'Leaves',
-  router: 'Routers',
-  vpn: 'VPN',
+  spine: "Spines",
+  leaf: "Leaves",
+  router: "Routers",
+  vpn: "VPN",
 };
 
 interface SidebarProps {
@@ -25,6 +26,8 @@ interface SidebarProps {
 
 export function Sidebar({ env }: SidebarProps) {
   const navigate = useNavigate();
+  // Onboarding is admin-only (API enforces it); don't show the affordance.
+  const isAdmin = useAuthStore((st) => st.user?.role === "admin");
   const params = useParams();
   const { data: devices = [], isLoading: devicesLoading } = useDevices(env);
   const { data: requests = [] } = useRequests();
@@ -43,17 +46,19 @@ export function Sidebar({ env }: SidebarProps) {
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!dragRef.current.active) return;
-      setSidebarWidth(dragRef.current.startW + (e.clientX - dragRef.current.startX));
+      setSidebarWidth(
+        dragRef.current.startW + (e.clientX - dragRef.current.startX),
+      );
     };
     const onUp = () => {
       dragRef.current.active = false;
-      document.body.classList.remove('cursor-col-resize');
+      document.body.classList.remove("cursor-col-resize");
     };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
     return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
     };
   }, [setSidebarWidth]);
 
@@ -74,17 +79,23 @@ export function Sidebar({ env }: SidebarProps) {
         <div className="border-b border-border px-4 py-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-xs uppercase tracking-wider text-fg-subtle">{siteName}</div>
-              <div className="text-sm font-semibold text-fg">{plural(devices.length, 'device')}</div>
+              <div className="text-xs uppercase tracking-wider text-fg-subtle">
+                {siteName}
+              </div>
+              <div className="text-sm font-semibold text-fg">
+                {plural(devices.length, "device")}
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => navigate('/onboard')}
-              title="Add device"
-              className="rounded-md p-1.5 text-fg-muted hover:bg-bg-elev-2 hover:text-fg"
-            >
-              <Plus size={14} />
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => navigate("/onboard")}
+                title="Add device"
+                className="rounded-md p-1.5 text-fg-muted hover:bg-bg-elev-2 hover:text-fg"
+              >
+                <Plus size={14} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -95,10 +106,10 @@ export function Sidebar({ env }: SidebarProps) {
         )}
         {!devicesLoading && devices.length === 0 && (
           <div className="px-4 py-6 text-center text-xs text-fg-muted">
-            No devices in {siteName} yet.{' '}
+            No devices in {siteName} yet.{" "}
             <button
               type="button"
-              onClick={() => navigate('/onboard')}
+              onClick={() => navigate("/onboard")}
               className="text-accent hover:underline"
             >
               Onboard one
@@ -117,7 +128,7 @@ export function Sidebar({ env }: SidebarProps) {
               <ul className="space-y-0.5">
                 {list.map((d) => {
                   const pendingCount = requests.filter(
-                    (r) => r.device_id === d.id && r.status === 'pending',
+                    (r) => r.device_id === d.id && r.status === "pending",
                   ).length;
                   const isSelected = params.deviceId === d.id;
                   return (
@@ -129,28 +140,39 @@ export function Sidebar({ env }: SidebarProps) {
                           navigate(`/env/${env}/devices/${d.id}`);
                         }}
                         className={cn(
-                          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-fg-muted transition-colors',
+                          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-fg-muted transition-colors",
                           isSelected
-                            ? 'bg-accent-soft text-fg shadow-[0_0_0_1px_var(--nb-accent-soft)_inset]'
-                            : 'hover:bg-bg-elev-2 hover:text-fg',
+                            ? "bg-accent-soft text-fg shadow-[0_0_0_1px_var(--nb-accent-soft)_inset]"
+                            : "hover:bg-bg-elev-2 hover:text-fg",
                         )}
                       >
                         <PlatformIcon platform={d.platform} role={d.role} />
-                        <span className="nb-mono flex-1 truncate text-left">{d.name}</span>
+                        <span className="nb-mono flex-1 truncate text-left">
+                          {d.name}
+                        </span>
                         <span className="flex items-center gap-1.5">
                           {pendingCount > 0 && (
-                            <Badge variant="warn" title={`${pendingCount} pending`}>
+                            <Badge
+                              variant="warn"
+                              title={`${pendingCount} pending`}
+                            >
                               {pendingCount}
                             </Badge>
                           )}
                           <StatusDot
-                            state={d.reachable == null ? 'pending' : d.reachable ? 'up' : 'down'}
+                            state={
+                              d.reachable == null
+                                ? "pending"
+                                : d.reachable
+                                  ? "up"
+                                  : "down"
+                            }
                             label={
                               d.reachable == null
-                                ? 'Reachability unknown'
+                                ? "Reachability unknown"
                                 : d.reachable
-                                  ? 'Reachable'
-                                  : 'Unreachable'
+                                  ? "Reachable"
+                                  : "Unreachable"
                             }
                           />
                         </span>
@@ -181,16 +203,16 @@ export function Sidebar({ env }: SidebarProps) {
         tabIndex={0}
         onMouseDown={(e) => {
           dragRef.current = { active: true, startX: e.clientX, startW: width };
-          document.body.classList.add('cursor-col-resize');
+          document.body.classList.add("cursor-col-resize");
         }}
         onKeyDown={(e) => {
           let next = width;
-          if (e.key === 'ArrowLeft') next = width - 16;
-          else if (e.key === 'ArrowRight') next = width + 16;
-          else if (e.key === 'PageUp') next = width - 64;
-          else if (e.key === 'PageDown') next = width + 64;
-          else if (e.key === 'Home') next = 220;
-          else if (e.key === 'End') next = 420;
+          if (e.key === "ArrowLeft") next = width - 16;
+          else if (e.key === "ArrowRight") next = width + 16;
+          else if (e.key === "PageUp") next = width - 64;
+          else if (e.key === "PageDown") next = width + 64;
+          else if (e.key === "Home") next = 220;
+          else if (e.key === "End") next = 420;
           else return;
           e.preventDefault();
           setSidebarWidth(next);
