@@ -217,6 +217,42 @@ export async function listUsers(): Promise<User[]> {
   return users.map((u) => ({ username: u.username, role: u.role, name: u.username }));
 }
 
+/** Admin user-management view — keeps the backend id (needed for resets). */
+export interface AdminUser {
+  id: string;
+  username: string;
+  role: 'admin' | 'requester';
+  email: string | null;
+}
+
+export async function listUsersAdmin(): Promise<AdminUser[]> {
+  const users = await request<UserOut[]>('/api/users');
+  return users.map((u) => ({
+    id: u.id,
+    username: u.username,
+    role: u.role,
+    email: u.email ?? null,
+  }));
+}
+
+/** Self-service password change. The response re-issues session cookies, so the
+ * current browser session survives its own token-version bump. */
+export async function changeMyPassword(currentPassword: string, newPassword: string): Promise<void> {
+  await request<UserOut>('/api/users/me/password', {
+    method: 'POST',
+    body: { current_password: currentPassword, new_password: newPassword },
+  });
+}
+
+/** Admin sets a NEW password for a user (old one is never recoverable) and
+ * kicks all of the target's sessions. */
+export async function resetUserPassword(userId: string, newPassword: string): Promise<void> {
+  await request<UserOut>(`/api/users/${userId}/password-reset`, {
+    method: 'POST',
+    body: { new_password: newPassword },
+  });
+}
+
 /* -------------------------------------------------------------------------
  * Sites (the runtime-managed location/environment catalog)
  * ------------------------------------------------------------------------- */

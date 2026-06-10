@@ -39,6 +39,11 @@ class TokenPayload(BaseModel):
     role: UserRole
     exp: int
     type: str = "access"
+    # Token-version: must match User.token_version or the token is rejected —
+    # bumping the column on a password change/reset revokes every issued token.
+    # Defaults 0 so tokens minted before the claim existed stay valid until the
+    # user's first password change.
+    ver: int = 0
 
 
 class UserOut(BaseModel):
@@ -59,6 +64,23 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=1)
     role: UserRole
     email: str | None = Field(default=None, max_length=256)
+
+
+class PasswordChangeIn(BaseModel):
+    """Body of ``POST /api/users/me/password`` (self-service).
+
+    Requires the current password so a hijacked session can't silently take
+    over the account. Same floor as registration for the new secret.
+    """
+
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8, max_length=256)
+
+
+class PasswordResetIn(BaseModel):
+    """Body of ``POST /api/users/{user_id}/password-reset`` (admin only)."""
+
+    new_password: str = Field(min_length=8, max_length=256)
 
 
 class RegisterRequest(BaseModel):

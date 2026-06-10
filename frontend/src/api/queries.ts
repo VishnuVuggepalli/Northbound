@@ -145,6 +145,29 @@ export function usePlatforms() {
   return useQuery({ queryKey: queryKeys.platforms(), queryFn: () => api.listPlatforms() });
 }
 
+export function useUsersAdmin(opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.users(),
+    queryFn: () => api.listUsersAdmin(),
+    // Admin-only on the backend; callers gate so requesters never fire a 403.
+    enabled: opts?.enabled ?? true,
+  });
+}
+
+export function useChangeMyPassword() {
+  return useMutation({
+    mutationFn: (input: { currentPassword: string; newPassword: string }) =>
+      api.changeMyPassword(input.currentPassword, input.newPassword),
+  });
+}
+
+export function useResetUserPassword() {
+  return useMutation({
+    mutationFn: (input: { userId: string; newPassword: string }) =>
+      api.resetUserPassword(input.userId, input.newPassword),
+  });
+}
+
 export function useSites() {
   return useQuery({ queryKey: queryKeys.sites(), queryFn: () => api.listSites() });
 }

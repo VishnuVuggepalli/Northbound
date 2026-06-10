@@ -4,6 +4,7 @@ import {
   Inbox,
   Info,
   Keyboard,
+  KeyRound,
   ListChecks,
   LogOut,
   Moon,
@@ -23,6 +24,7 @@ import { initials } from '@/lib/format';
 import { PALETTES } from '@/lib/palette';
 import { cn } from '@/lib/cn';
 import { LiveIndicator } from '@/components/layout/LiveIndicator';
+import { ChangePasswordModal } from '@/modals/ChangePasswordModal';
 import type { Environment } from '@/models';
 
 export function TopBar() {
@@ -40,6 +42,7 @@ export function TopBar() {
   const toggleTheme = useThemeStore((s) => s.toggle);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -228,6 +231,14 @@ export function TopBar() {
                     navigate('/about');
                   }}
                 />
+                <MenuItem
+                  icon={<KeyRound size={14} />}
+                  label="Change password"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setChangingPassword(true);
+                  }}
+                />
                 <div className="my-1 border-t border-border" />
                 <MenuItem
                   icon={<LogOut size={14} />}
@@ -243,6 +254,7 @@ export function TopBar() {
           )}
         </div>
       </div>
+      <ChangePasswordModal open={changingPassword} onClose={() => setChangingPassword(false)} />
     </header>
   );
 }

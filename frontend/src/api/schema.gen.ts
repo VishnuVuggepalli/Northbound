@@ -155,6 +155,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/users/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change My Password
+         * @description Self-service password change (any role).
+         *
+         *     Requires the CURRENT password so a hijacked cookie alone can't take over
+         *     the account. Bumps ``token_version`` — revoking every session issued
+         *     before the change — then re-issues fresh cookies so the caller stays
+         *     logged in. Audited without any secret material.
+         */
+        post: operations["change_my_password_api_users_me_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/{user_id}/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset User Password
+         * @description Admin sets a NEW password for a user (the old one is never recoverable —
+         *     passwords are one-way bcrypt hashes). Bumps ``token_version`` so every one
+         *     of the target's existing sessions is kicked. Audited (actor + target, no
+         *     secret material).
+         */
+        post: operations["reset_user_password_api_users__user_id__password_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/test-connection": {
         parameters: {
             query?: never;
@@ -978,7 +1026,7 @@ export interface paths {
         };
         /**
          * Stream
-         * @description Open the live-state SSE stream (authenticated).
+         * @description Open the live-state SSE stream (authenticated; per-user concurrency cap).
          */
         get: operations["stream_api_events_stream_get"];
         put?: never;
@@ -1436,6 +1484,27 @@ export interface components {
              * @default false
              */
             passive: boolean;
+        };
+        /**
+         * PasswordChangeIn
+         * @description Body of ``POST /api/users/me/password`` (self-service).
+         *
+         *     Requires the current password so a hijacked session can't silently take
+         *     over the account. Same floor as registration for the new secret.
+         */
+        PasswordChangeIn: {
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
+        };
+        /**
+         * PasswordResetIn
+         * @description Body of ``POST /api/users/{user_id}/password-reset`` (admin only).
+         */
+        PasswordResetIn: {
+            /** New Password */
+            new_password: string;
         };
         /** PlatformInfo */
         PlatformInfo: {
@@ -2272,6 +2341,74 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_my_password_api_users_me_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordChangeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_user_password_api_users__user_id__password_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Gauge, Save } from 'lucide-react';
+import { Gauge, KeyRound, Save, Users } from 'lucide-react';
 import { Button } from '@/shared/Button';
 import { Input } from '@/shared/Input';
 import { Section } from '@/shared/Section';
-import { useSettings, useUpdateSettings } from '@/api/queries';
+import {
+  useResetUserPassword,
+  useSettings,
+  useUpdateSettings,
+  useUsersAdmin,
+} from '@/api/queries';
 import { useAuthStore } from '@/store/auth';
 import { pushToast } from '@/store/toast';
 import { isApiError } from '@/api';
@@ -83,6 +88,119 @@ export function SettingsPage() {
           )}
         </label>
       </Section>
+
+      <Section title="Users">
+        <div className="flex items-start gap-2 text-xs text-fg-muted">
+          <Users size={14} className="mt-0.5 shrink-0 text-fg-subtle" />
+          <p>
+            Passwords are stored as one-way hashes — they can never be viewed, only replaced.
+            Resetting a password signs the user out of every session. Your own password lives in
+            the user menu (top right) → Change password.
+          </p>
+        </div>
+        <UsersTable />
+      </Section>
     </div>
+  );
+}
+
+/** Admin user list with per-row password reset (the old password is never shown
+ * or recoverable — bcrypt hashes are one-way). */
+function UsersTable() {
+  const { data: users = [], isLoading } = useUsersAdmin();
+  const reset = useResetUserPassword();
+  const me = useAuthStore((s) => s.user?.username);
+  const [resetting, setResetting] = useState<string | null>(null);
+  const [newPw, setNewPw] = useState('');
+
+  const submit = (userId: string, username: string) => {
+    reset.mutate(
+      { userId, newPassword: newPw },
+      {
+        onSuccess: () => {
+          pushToast({
+            kind: 'success',
+            title: 'Password reset',
+            message: `@${username} was signed out everywhere.`,
+          });
+          setResetting(null);
+          setNewPw('');
+        },
+        onError: (e: unknown) =>
+          pushToast({
+            kind: 'error',
+            title: 'Reset failed',
+            message: e instanceof Error ? e.message : 'Failed.',
+          }),
+      },
+    );
+  };
+
+  if (isLoading) return <p className="mt-3 text-xs text-fg-muted">Loading users…</p>;
+
+  return (
+    <ul className="mt-4 divide-y divide-border">
+      {users.map((u) => (
+        <li key={u.id} className="flex flex-wrap items-center gap-2 py-2">
+          <div className="min-w-40">
+            <span className="text-sm text-fg">@{u.username}</span>
+            {u.username === me && <span className="ml-1 text-[10px] text-fg-subtle">(you)</span>}
+            <span className="ml-2 text-[10px] uppercase tracking-wider text-fg-subtle">
+              {u.role}
+            </span>
+          </div>
+          {resetting === u.id ? (
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (newPw.length >= 8) submit(u.id, u.username);
+              }}
+            >
+              <Input
+                type="password"
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                placeholder="New password (min 8)"
+                className="h-7 w-48 text-[12px]"
+                autoFocus
+                aria-label={`New password for ${u.username}`}
+              />
+              <Button
+                size="sm"
+                kind="danger"
+                type="submit"
+                disabled={newPw.length < 8 || reset.isPending}
+              >
+                {reset.isPending ? 'Resetting…' : 'Reset'}
+              </Button>
+              <Button
+                size="sm"
+                kind="ghost"
+                type="button"
+                onClick={() => {
+                  setResetting(null);
+                  setNewPw('');
+                }}
+              >
+                Cancel
+              </Button>
+            </form>
+          ) : (
+            <Button
+              size="sm"
+              kind="outline"
+              leftIcon={<KeyRound size={12} />}
+              onClick={() => {
+                setResetting(u.id);
+                setNewPw('');
+              }}
+            >
+              Reset password…
+            </Button>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

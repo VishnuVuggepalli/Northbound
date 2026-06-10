@@ -72,6 +72,7 @@ def _mint(
     token_type: str,
     window: dt.timedelta,
     settings: Settings | None,
+    token_version: int = 0,
 ) -> str:
     resolved = settings if settings is not None else get_settings()
     key = _resolve_secret_key(resolved)
@@ -81,6 +82,9 @@ def _mint(
         "role": role.value,
         "exp": int(expires_at.timestamp()),
         "type": token_type,
+        # Must match User.token_version at verification time; bumping the
+        # column on a password change revokes every previously-issued token.
+        "ver": token_version,
     }
     return cast(str, jwt.encode(claims, key, algorithm=resolved.jwt_algorithm))
 
@@ -91,11 +95,19 @@ def create_access_token(
     expiry: dt.timedelta | None = None,
     *,
     settings: Settings | None = None,
+    token_version: int = 0,
 ) -> str:
     """Mint a short-lived access JWT (``type=access``)."""
     resolved = settings if settings is not None else get_settings()
     window = expiry if expiry is not None else dt.timedelta(minutes=resolved.access_token_minutes)
-    return _mint(sub, role, token_type="access", window=window, settings=settings)
+    return _mint(
+        sub,
+        role,
+        token_type="access",
+        window=window,
+        settings=settings,
+        token_version=token_version,
+    )
 
 
 def create_refresh_token(
@@ -104,11 +116,19 @@ def create_refresh_token(
     expiry: dt.timedelta | None = None,
     *,
     settings: Settings | None = None,
+    token_version: int = 0,
 ) -> str:
     """Mint a long-lived refresh JWT (``type=refresh``), used only at /auth/refresh."""
     resolved = settings if settings is not None else get_settings()
     window = expiry if expiry is not None else dt.timedelta(days=resolved.refresh_token_days)
-    return _mint(sub, role, token_type="refresh", window=window, settings=settings)
+    return _mint(
+        sub,
+        role,
+        token_type="refresh",
+        window=window,
+        settings=settings,
+        token_version=token_version,
+    )
 
 
 def decode_token(

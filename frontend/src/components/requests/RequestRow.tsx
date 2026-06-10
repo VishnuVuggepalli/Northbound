@@ -277,15 +277,25 @@ export function RequestRow({
                   Edit &amp; resubmit
                 </Button>
               )}
-              {isAdmin && request.status === 'approved' && !writeLocked && (
-                <Button
-                  kind="success"
-                  size="sm"
-                  onClick={() => setConfirmingApply(true)}
-                  data-testid="apply-now"
-                >
-                  Apply now
-                </Button>
+              {isAdmin && request.status === 'approved' && (
+                <>
+                  {!writeLocked && (
+                    <Button
+                      kind="success"
+                      size="sm"
+                      onClick={() => setConfirmingApply(true)}
+                      data-testid="apply-now"
+                    >
+                      Apply now
+                    </Button>
+                  )}
+                  {/* APPROVED → REJECTED is a legal transition: a stale approved
+                      request (e.g. drift-blocked) must be killable, not stuck
+                      with Apply as its only exit. */}
+                  <Button kind="danger" size="sm" onClick={() => setPanel('reject')}>
+                    Reject…
+                  </Button>
+                </>
               )}
             </div>
           )}

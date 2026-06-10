@@ -740,3 +740,24 @@ async def test_request_comment_requires_body(
             f"/api/requests/{rid}/comments", headers=_bearer(alice), json={"body": ""}
         )
     ).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_approved_request_can_be_rejected(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """APPROVED → REJECTED is legal: an admin can kill a stale approved request
+    (e.g. drift-blocked) instead of being stuck with only an Apply option."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    approved = await client.post(f"/api/requests/{req_id}/approve", headers=_bearer(admin))
+    assert approved.json()["status"] == "approved"
+
+    rejected = await client.post(
+        f"/api/requests/{req_id}/reject",
+        headers=_bearer(admin),
+        json={"comment": "stale — device state moved on; refile if still needed"},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"

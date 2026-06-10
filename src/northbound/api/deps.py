@@ -54,6 +54,12 @@ async def get_current_user(
     user = await session.scalar(select(User).where(User.id == payload.sub))
     if user is None:
         raise _CREDENTIALS_EXCEPTION
+    # Token-version check: a password change/reset bumps User.token_version,
+    # which revokes every token minted before it (the only way to invalidate
+    # stateless JWTs). Old pre-claim tokens default ver=0, matching the
+    # column's backfill default, so sessions survive the upgrade itself.
+    if payload.ver != user.token_version:
+        raise _CREDENTIALS_EXCEPTION
     # Stash the verified subject for the write rate-limiter's key func (it runs
     # after dependencies): avoids a second JWT decode per write, and gives
     # cookie-authenticated browser sessions (no Authorization header) a

@@ -52,8 +52,8 @@ def _issue_session(response: Response, user: User) -> LoginResponse:
     """Mint an access + refresh token, set the httpOnly cookies, and return the
     login body. The body still carries ``access_token`` for API/Bearer clients
     (and tests); browsers use the cookie and ignore it."""
-    access = create_access_token(sub=user.id, role=user.role)
-    refresh = create_refresh_token(sub=user.id, role=user.role)
+    access = create_access_token(sub=user.id, role=user.role, token_version=user.token_version)
+    refresh = create_refresh_token(sub=user.id, role=user.role, token_version=user.token_version)
     set_session_cookies(
         response, access_token=access, refresh_token=refresh, settings=get_settings()
     )
@@ -144,6 +144,11 @@ async def refresh(
         raise _INVALID_REFRESH from exc
     user = await session.scalar(select(User).where(User.id == payload.sub))
     if user is None:
+        raise _INVALID_REFRESH
+    # A stale refresh token (minted before a password change bumped the
+    # version) must not be able to mint fresh sessions — that would defeat
+    # the revocation entirely.
+    if payload.ver != user.token_version:
         raise _INVALID_REFRESH
     return _issue_session(response, user)
 
