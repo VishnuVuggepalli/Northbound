@@ -62,13 +62,15 @@ class PortMetadataPatchIn(BaseModel):
 
     host_model: str | None = Field(default=None, max_length=256)
     bmc_ip: str | None = Field(default=None, max_length=64)
-    notes: str | None = None
+    notes: str | None = Field(default=None, max_length=4000)
 
 
 class PortDescriptionIn(BaseModel):
     """Admin direct edit of the port's on-device description (config write)."""
 
-    description: str = Field(max_length=256)
+    # No CR/LF: this lands in a CLI config line on Arista/Cisco — a newline
+    # would start a new command (same guard as PortChange.description).
+    description: str = Field(max_length=256, pattern=r"^[^\r\n]*$")
 
 
 class PortConfigIn(BaseModel):

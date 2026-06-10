@@ -89,3 +89,18 @@ async def test_event_stream_greets_then_forwards_published_events() -> None:
     await gen.aclose()
     await asyncio.sleep(0)  # let the close cleanup run
     assert hub.subscriber_count == base  # closing the stream deregisters the subscriber
+
+
+async def test_stream_per_user_cap_returns_429(client: tuple[AsyncClient, User]) -> None:
+    """A single user may hold at most MAX_STREAMS_PER_USER concurrent streams —
+    the bound that keeps a scripted client from exhausting fds/memory."""
+    from northbound.api import events as events_api
+
+    c, admin = client
+    # Simulate the user already holding the maximum number of open streams.
+    events_api._active_streams[admin.id] = events_api.MAX_STREAMS_PER_USER
+    try:
+        resp = await c.get("/api/events/stream", headers=_bearer(admin))
+        assert resp.status_code == 429
+    finally:
+        del events_api._active_streams[admin.id]

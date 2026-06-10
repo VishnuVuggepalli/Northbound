@@ -40,7 +40,7 @@ import type {
 import type { components } from './schema.gen';
 import type { SettingsOut, SettingsPatch } from './schema';
 import { ApiError } from './errors';
-import { clearAuthSession, getAuthToken } from '@/store/auth';
+import { clearAuthSession } from '@/store/auth';
 import {
   mapAudit,
   mapDevice,
@@ -96,6 +96,12 @@ async function parseError(res: Response): Promise<ApiError> {
     else if (Array.isArray(data.detail) && data.detail.length > 0) {
       const first = data.detail[0] as { msg?: string };
       if (first?.msg) message = first.msg;
+    } else if (data.detail !== null && typeof data.detail === 'object') {
+      // Structured detail (e.g. the apply 409s: {code: "STATE_DRIFT", message}).
+      // Without this branch the toast degrades to a bare "Conflict".
+      const detail = data.detail as { code?: unknown; message?: unknown };
+      if (typeof detail.message === 'string') message = detail.message;
+      if (typeof detail.code === 'string') code = detail.code;
     }
     if (typeof data.code === 'string') code = data.code;
   } catch {
@@ -123,12 +129,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const send = async (): Promise<Response> => {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    if (!anonymous) {
-      // Auth rides in the httpOnly cookie (sent via credentials:'include'). A
-      // legacy in-memory bearer, if any, is still attached for API parity.
-      const token = getAuthToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
-    }
+    // Auth rides exclusively in the httpOnly cookie (credentials:'include').
+    // No Authorization header: keeping a bearer in JS-reachable state would
+    // hand a copy to any XSS payload; the cookie is XSS-unreadable by design.
     return fetch(buildUrl(path, query), {
       method,
       headers,
@@ -429,7 +432,9 @@ async function portsForDeviceResilient(deviceId: string): Promise<Port[]> {
     );
     return snap.ports;
   } catch (err) {
-    // Surfaced (not swallowed); the device simply contributes no ports.
+    // Kept deliberately: in env-wide aggregates (topology/search) a failed
+    // device just contributes no ports, so this console line is the ONLY
+    // place the failure (and which device caused it) is visible.
     console.error(`listAllPorts: failed to load ports for device ${deviceId}`, err);
     return [];
   }
@@ -721,11 +726,10 @@ export async function confirmOnboard(draft: OnboardingDraft): Promise<ConfirmOnb
   try {
     const snap = await listPortsForDevice(created.id);
     portCount = snap.ports.length;
-  } catch (err: unknown) {
+  } catch {
     // Expected best-effort: the device is created but ports may not be
-    // pollable on the first beat. Report zero, but log so a persistent
-    // seeding failure is diagnosable rather than silently hidden.
-    console.error(`onboardDevice: initial port poll failed for ${created.id}`, err);
+    // pollable on the first beat. The outcome surfaces to the user as
+    // "0 ports seeded" in the success toast, so no console noise here.
   }
   return { device: mapDevice(created, portCount), ports_seeded: portCount };
 }

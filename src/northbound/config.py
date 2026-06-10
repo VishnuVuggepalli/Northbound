@@ -11,7 +11,7 @@ import logging
 import tomllib
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -97,8 +97,11 @@ class Settings(BaseSettings):
     # Optional: read the JWT secret from a FILE (same secrets convention as
     # master_key_file). Inline NB_SECRET_KEY wins if both are set.
     secret_key_file: str | None = Field(default=None)
-    jwt_algorithm: str = Field(default="HS256")
-    jwt_expiry_minutes: int = Field(default=480)  # legacy default for create_access_token
+    # Allowlist of strong HMAC algorithms only — a free-form string would let a
+    # misconfigured NB_JWT_ALGORITHM (e.g. "none") silently weaken token signing.
+    # (jwt_expiry_minutes was removed: a dead legacy field that LOOKED like the
+    # token-lifetime knob but was read by nothing — access_token_minutes is.)
+    jwt_algorithm: Literal["HS256", "HS384", "HS512"] = Field(default="HS256")
 
     # Cookie-based session (hardened): short-lived access token + long-lived
     # refresh token, both in httpOnly cookies. Access is sent on every request;
@@ -116,10 +119,27 @@ class Settings(BaseSettings):
             return self.cookie_secure
         return self.environment != "development"
 
-    # Open self-registration: when true, anyone can POST /api/auth/register to
-    # create a REQUESTER account (never admin). Kill-switch for deployments that
-    # require admin-provisioned accounts only.
-    allow_open_registration: bool = Field(default=True)
+    # SSH/NETCONF host-key verification for device connections. Default OFF
+    # (lab reality: device keys aren't pre-distributed), which leaves the
+    # control channel MITM-able — production should distribute a known_hosts
+    # file and enable strict mode. Outside development a loud warning is logged
+    # at startup while this is off. Cannot default-strict: it would brick every
+    # existing deployment that has never collected host keys.
+    ssh_strict_host_keys: bool = Field(default=False)
+    ssh_known_hosts_path: str | None = Field(default=None)  # required when strict
+
+    # Extra Origins allowed to make state-changing requests, beyond same-origin
+    # (e.g. a separately-hosted SPA: NB_ALLOWED_ORIGINS='["https://nb.corp"]').
+    # Same-origin (Origin matching the request Host) is always allowed; this
+    # never needs setting for the default single-container deployment.
+    allowed_origins: list[str] = Field(default_factory=list)
+
+    # Open self-registration: when true, anyone who can reach the API can POST
+    # /api/auth/register to create a REQUESTER account (never admin). Default
+    # OFF (secure-by-default): an internet-reachable deployment must not accept
+    # anonymous account creation unless the operator explicitly opts in with
+    # NB_ALLOW_OPEN_REGISTRATION=1.
+    allow_open_registration: bool = Field(default=False)
 
     # Commit-confirm window (seconds) for platforms with native commit-confirm
     # (Arista session timer, Pica8 confirmed-commit). The apply flow passes this

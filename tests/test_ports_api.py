@@ -214,3 +214,110 @@ async def test_ports_device_not_found(
     _, _, alice, _ = seeded
     resp = await client.get("/api/devices/nope/ports", headers=_bearer(alice))
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Direct-write confirm failure must leave a trace (backup + failure audit),
+# not vanish in the route's 502 rollback.
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_direct_write_confirm_failure_persists_audit_and_backup(
+    db_session: AsyncSession,
+) -> None:
+    from fastapi import HTTPException
+
+    from northbound.drivers import registry
+    from northbound.drivers.base import Driver, DriverError
+    from northbound.models.config_backup import ConfigBackup
+    from northbound.schemas.driver import (
+        ApplyResult,
+        AuthMethod,
+        ConfigDiff,
+        DiscoveryResult,
+        DriverCapabilities,
+        PortChange,
+        PortState,
+        TestResult,
+    )
+
+    class _ConfirmFailDriver(Driver):
+        platform_id = "directconfirmfail"
+        display_name = "ConfirmFail (test)"
+        capabilities = DriverCapabilities(
+            writable=True,
+            supports_commit_confirm=True,
+            native_api_available=True,
+            supports_snmp_read=False,
+            supports_lldp=False,
+            max_concurrency=5,
+            auth_methods=[AuthMethod.PASSWORD],
+        )
+
+        async def test_credentials(self) -> TestResult:
+            return TestResult(ok=True, latency_ms=1.0, platform_version="x")
+
+        async def discover(self) -> DiscoveryResult:
+            return DiscoveryResult(hostname="h", ports=(), running_config="cfg")
+
+        async def reachable(self) -> bool:
+            return True
+
+        async def get_ports(self) -> list[PortState]:
+            return []
+
+        async def get_running_config(self) -> str:
+            return "running-cfg"
+
+        async def backup_config(self) -> str:
+            return "backup-cfg"
+
+        async def render_change(self, port: str, change: PortChange) -> ConfigDiff:
+            return ConfigDiff(summary="s", raw_before="b", raw_after="a", commands=("c",))
+
+        async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
+            return ApplyResult(success=True, confirm_token="tok", confirm_deadline_at=9999.0)
+
+        async def confirm(self, apply_token: str) -> None:
+            raise DriverError("confirm rejected by device")
+
+    registry.register(_ConfirmFailDriver)
+    try:
+        vault = FernetCredVault.from_settings()
+        admin = User(username="dwadmin", password_hash=hash_password("a"), role=UserRole.ADMIN)
+        device = Device(
+            name="dw-leaf",
+            environment="lab",
+            platform="directconfirmfail",
+            role=DeviceRole.LEAF,
+            mgmt_ip="10.0.0.9",
+            prefer_native_api=True,
+            encrypted_credentials=serialize_credentials(Credentials(username="u"), vault),
+        )
+        db_session.add_all([admin, device])
+        await db_session.flush()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await ports_api._apply_direct_port_change(
+                db_session,
+                device,
+                "Eth1",
+                PortChange(description="x"),
+                admin=admin,
+                action="port.description_set",
+                after={"description": "x"},
+            )
+        assert exc_info.value.status_code == 502
+
+        # The failure audit + the pre-write backup were committed despite the 502.
+        audit_row = await db_session.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "port.description_set", AuditLog.result == "error"
+            )
+        )
+        assert audit_row is not None
+        backup = await db_session.scalar(
+            select(ConfigBackup).where(ConfigBackup.device_id == device.id)
+        )
+        assert backup is not None
+    finally:
+        registry._REGISTRY.pop("directconfirmfail", None)

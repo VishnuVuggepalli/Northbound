@@ -149,6 +149,17 @@ export function mapPort(p: PortStateOut, deviceId: string, index: number): Port 
   };
 }
 
+/* Runtime narrowing for untrusted wire values (`requested_changes` is a free
+ * JSON object on the wire) — a malformed backend value becomes `undefined`
+ * instead of a lying compile-time cast. */
+const asNumber = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+const asString = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+function asNumberArray(v: unknown): number[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const nums = v.filter((x): x is number => typeof x === 'number');
+  return nums.length === v.length ? nums : undefined;
+}
+
 export function mapRequest(r: RequestOut): ChangeRequest {
   const changes = (r.requested_changes ?? {}) as Record<string, unknown>;
   return {
@@ -158,11 +169,11 @@ export function mapRequest(r: RequestOut): ChangeRequest {
     requested_by: r.requested_by,
     requested_by_username: r.requested_by_username ?? null,
     requested_changes: {
-      untagged_vlan: changes.untagged_vlan as number | undefined,
-      tagged_vlans: changes.tagged_vlans as number[] | undefined,
-      host_model: changes.host_model as string | undefined,
-      bmc_ip: changes.bmc_ip as string | undefined,
-      notes: changes.notes as string | undefined,
+      untagged_vlan: asNumber(changes.untagged_vlan),
+      tagged_vlans: asNumberArray(changes.tagged_vlans),
+      host_model: asString(changes.host_model),
+      bmc_ip: asString(changes.bmc_ip),
+      notes: asString(changes.notes),
     },
     reason: r.reason,
     status: r.status,

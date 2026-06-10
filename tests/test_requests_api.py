@@ -304,16 +304,27 @@ async def test_apply_unapproved_pending_shortcut(
 async def test_audit_list_filtered(
     client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
 ) -> None:
-    _, _, alice, leaf, _ = seeded
+    _, admin, alice, leaf, _ = seeded
     await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
     resp = await client.get(
-        f"/api/audit?device_id={leaf.id}&port=Ethernet1", headers=_bearer(alice)
+        f"/api/audit?device_id={leaf.id}&port=Ethernet1", headers=_bearer(admin)
     )
     assert resp.status_code == 200
     actions = [e["action"] for e in resp.json()]
     assert "request.created" in actions
     # No plaintext creds anywhere in the audit feed.
     assert "switch-pw" not in str(resp.json())
+
+
+@pytest.mark.asyncio
+async def test_audit_list_is_admin_only(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """The full audit feed exposes per-user activity + change before/after —
+    requesters must not read it (they keep per-port history + own timelines)."""
+    _, _, alice, _, _ = seeded
+    resp = await client.get("/api/audit", headers=_bearer(alice))
+    assert resp.status_code == 403
 
 
 # --------------------------------------------------------------------------- #
@@ -346,6 +357,9 @@ async def test_request_changes_then_resubmit_round_trip(
     assert re.json()["status"] == "pending"
     assert re.json()["requested_changes"]["untagged_vlan"] == 210
     assert re.json()["reason"] == "fixed per review"
+    # The prior review is superseded: a re-queued pending request must not
+    # still name the old reviewer (the note survives in the event log).
+    assert re.json()["reviewer_id"] is None
 
 
 @pytest.mark.asyncio

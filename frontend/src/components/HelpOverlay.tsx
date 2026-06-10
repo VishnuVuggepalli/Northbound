@@ -8,8 +8,6 @@ interface HelpOverlayProps {
 
 const SHORTCUTS: Array<[label: string, keys: string]> = [
   ['Search', '/'],
-  ['Switch to Lab', 'g l'],
-  ['Switch to DC', 'g d'],
   ['Home (env picker)', 'g h'],
   ['My requests', 'g r'],
   ['Admin queue (admin)', 'g q'],

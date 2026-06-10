@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
-import { apiClient } from '@/api';
+import { useSearchPorts } from '@/api/queries';
 import { useUIStore } from '@/store/ui';
 import { useThemeStore } from '@/store/theme';
 import { VlanChip } from '@/shared/VlanChip';
-import type { Device, Environment, Port } from '@/models';
+import type { Environment } from '@/models';
 
 export function SearchResultsPage() {
   const { env } = useParams<{ env: Environment }>();
@@ -14,30 +13,8 @@ export function SearchResultsPage() {
   const navigate = useNavigate();
   const theme = useThemeStore((s) => s.theme);
   const selectPort = useUIStore((s) => s.selectPort);
-  const [results, setResults] = useState<Array<{ device: Device; port: Port }>>([]);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!env) return;
-    let cancelled = false;
-    setError(null);
-    void apiClient
-      .searchPorts(env, q)
-      .then((r) => {
-        if (!cancelled) setResults(r);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        // Don't swallow: log for diagnosis and tell the user the search failed
-        // rather than showing a misleading empty result set.
-        console.error(`searchPorts failed (env=${env}, q="${q}")`, err);
-        setResults([]);
-        setError(err instanceof Error ? err.message : 'Search failed');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [env, q]);
+  const { data: results = [], isLoading, error } = useSearchPorts(env, q);
 
   if (!env) return null;
 
@@ -48,15 +25,20 @@ export function SearchResultsPage() {
         <h1 className="text-xl font-semibold text-fg">
           Results for <span className="nb-mono text-accent">{q}</span>
         </h1>
-        <p className="mt-1 text-sm text-fg-muted">{results.length} match{results.length === 1 ? '' : 'es'}</p>
+        <p className="mt-1 text-sm text-fg-muted">
+          {isLoading ? 'Searching…' : `${results.length} match${results.length === 1 ? '' : 'es'}`}
+        </p>
       </header>
-      {error && (
+      {error != null && (
         <div
           role="alert"
           className="mb-3 rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-sm text-danger"
         >
-          Search failed: {error}
+          Search failed: {error instanceof Error ? error.message : 'Unknown error'}
         </div>
+      )}
+      {isLoading && (
+        <div className="py-8 text-center text-sm text-fg-muted">Searching ports…</div>
       )}
       <div className="space-y-1.5">
         {results.map(({ device, port }) => (

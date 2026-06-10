@@ -45,10 +45,12 @@ export function formatSpeed(mbps: number | null): string {
   return `${mbps} Mbps`;
 }
 
-/** dotted-quad IPv4 validator (lenient, no per-octet range) */
+/** Dotted-quad IPv4 validator — four numeric octets, each 0–255. */
 export function isPlausibleIp(s: string): boolean {
   if (!s) return false;
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(s);
+  const octets = s.split('.');
+  if (octets.length !== 4) return false;
+  return octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255);
 }
 
 /** Initials for avatar from a full name. */

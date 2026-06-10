@@ -83,10 +83,18 @@ def write_rate_key(request: Request) -> str:
     """Rate-limit key for authenticated write endpoints: ``user:<sub>``.
 
     Keys on the JWT subject so the budget follows the *user*, not a shared NAT/
-    proxy IP (which would let one user exhaust everyone's budget). Falls back to
-    ``ip:<addr>`` when there is no valid bearer token. Import is local to avoid a
-    module-load cycle (auth.jwt → config → ... ).
+    proxy IP (which would let one user exhaust everyone's budget). The verified
+    subject is read from ``request.state.auth_sub`` — stashed by
+    ``get_current_user``, which has already run (slowapi's check wraps the
+    endpoint, after dependency resolution) — covering BOTH cookie and Bearer
+    sessions without a second JWT decode. The Bearer-header decode below is a
+    fallback for any write route not depending on ``get_current_user``. Falls
+    back to ``ip:<addr>`` when neither yields a subject. Import is local to
+    avoid a module-load cycle (auth.jwt → config → ...).
     """
+    sub = getattr(request.state, "auth_sub", None)
+    if isinstance(sub, str) and sub:
+        return f"user:{sub}"
     auth = request.headers.get("authorization", "")
     if auth[:7].lower() == "bearer ":
         from northbound.auth.jwt import InvalidToken, decode_token

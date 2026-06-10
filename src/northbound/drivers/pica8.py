@@ -34,6 +34,7 @@ from lxml import etree  # type: ignore[attr-defined]  # lxml has no stubs; etree
 
 from northbound._lib.transport.asyncssh_client import SshClient, SshParams
 from northbound._lib.transport.netconf_client import NetconfClient, NetconfParams
+from northbound.config import get_settings
 from northbound.drivers._protocol_gets import (
     PROTOCOL_GETS,
     STANDALONE_GETS,
@@ -116,10 +117,17 @@ class Pica8Driver(Driver):
         self._pending_token: str | None = None
 
     async def aclose(self) -> None:
-        """Close the NETCONF session. Idempotent (NetconfClient.close is)."""
+        """Close the NETCONF session. Idempotent (NetconfClient.close is).
+
+        The SSH transport needs no close: ``SshClient`` opens a fresh asyncssh
+        connection inside each ``run()`` and tears it down before returning
+        (its semaphore is scoped ``async with``), so it holds no persistent
+        socket between calls. Only the NETCONF session is long-lived.
+        """
         await self._netconf.close()
 
     def _build_netconf(self) -> NetconfClient:
+        settings = get_settings()
         return NetconfClient(
             NetconfParams(
                 host=self._conn.host,
@@ -128,13 +136,16 @@ class Pica8Driver(Driver):
                 private_key=self._creds.ssh_private_key,
                 port=self._conn.port or 830,
                 timeout_seconds=self._conn.timeout_seconds,
-                hostkey_verify=False,  # lab default
+                # Host-key verification follows the global knob (NB_SSH_STRICT_
+                # HOST_KEYS): off = lab default, MITM-able; see config.py.
+                hostkey_verify=settings.ssh_strict_host_keys,
             )
         )
 
     def _build_ssh(self) -> SshClient:
         # CLI-over-SSH (port 22) for operational reads the NETCONF data model
         # doesn't expose. NOT the NETCONF port (self._conn.port may be 830).
+        settings = get_settings()
         return SshClient(
             SshParams(
                 host=self._conn.host,
@@ -143,6 +154,8 @@ class Pica8Driver(Driver):
                 private_key=self._creds.ssh_private_key,
                 port=22,
                 timeout_seconds=self._conn.timeout_seconds,
+                known_hosts_mode="strict" if settings.ssh_strict_host_keys else "insecure",
+                known_hosts_path=settings.ssh_known_hosts_path,
             )
         )
 
@@ -996,11 +1009,16 @@ def _verify_applied(cfg: str, port: str, change: PortChange) -> str | None:
     compared. Returns a human description of any drift so the caller surfaces a
     real failure instead of a false success.
     """
+    root = _safe_parse(cfg)
+    if root is None:
+        return f"unparseable running config after write to {port}"
+    # Match ANY physical-port element local-name (te-/qe-/... live under their own
+    # elements) — the same _PORT_ELEMENTS set _parse_interfaces_xml accepts.
     iface = next(
         (
             el
-            for el in etree.fromstring(cfg.encode()).iter()
-            if _localname(el.tag) == "gigabit-ethernet" and (_child_text(el, "name") or "") == port
+            for el in root.iter()
+            if _localname(el.tag) in _PORT_ELEMENTS and (_child_text(el, "name") or "") == port
         ),
         None,
     )

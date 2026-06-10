@@ -48,12 +48,14 @@ export function DeviceDetailPage() {
   const { data: portSnapshot, refetch, dataUpdatedAt } = usePorts(deviceId);
   const ports = portSnapshot?.ports ?? [];
   const { data: requests = [] } = useRequests();
-  const { data: audit = [] } = useAudit();
+  const isAdmin = user?.role === 'admin';
+  // Audit log is admin-only on the backend — don't fire a guaranteed-403 fetch
+  // for requesters (they see an empty history instead).
+  const { data: audit = [] } = useAudit(undefined, undefined, { enabled: isAdmin });
   // Must be called unconditionally (before any early return) so the hook order
   // is stable across renders — otherwise React crashes the page to blank once
   // `device` loads and an extra hook appears. (react-hooks/rules-of-hooks)
   const { data: platforms } = usePlatforms();
-  const isAdmin = user?.role === 'admin';
   const setWrites = useSetDeviceWrites(deviceId ?? '');
   const rediscover = useRediscoverDevice(deviceId ?? '');
   const remove = useDeleteDevice(deviceId ?? '');

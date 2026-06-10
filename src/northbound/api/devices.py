@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from northbound.api.deps import get_current_user, require_admin
 from northbound.api.limiter import limiter, write_rate_key, write_rate_limit_provider
+from northbound.api.ports import invalidate_device_caches
 from northbound.db import get_session
 from northbound.drivers.base import AuthError, DriverError, ReachabilityError
 from northbound.drivers.factory import driver_for, driver_from_params
@@ -470,3 +471,7 @@ async def delete_device(
         after=None,
         result="ok",
     )
+
+    # Drop cached live state (running config + port view) so no stale entry
+    # outlives the offboarded device.
+    invalidate_device_caches(device_id)

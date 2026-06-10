@@ -30,6 +30,7 @@ from northbound.api import (
 )
 from northbound.api import settings as settings_api
 from northbound.api.limiter import limiter
+from northbound.api.security_headers import SecurityHeadersMiddleware
 from northbound.api.static_spa import mount_spa
 from northbound.api.versioning import ApiVersionMiddleware
 from northbound.config import get_settings
@@ -72,6 +73,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
       on one worker (e.g. the write rate limit) converges to the others.
     """
     settings = get_settings()
+
+    # Loud, repeated-at-every-boot warning: with host-key verification off, the
+    # SSH/NETCONF control channel to devices is MITM-able (device credentials
+    # could be harvested by an on-path attacker). Acceptable in a lab; a
+    # production deployment should distribute known_hosts and set
+    # NB_SSH_STRICT_HOST_KEYS=1 (+ NB_SSH_KNOWN_HOSTS_PATH).
+    if settings.environment != "development" and not settings.ssh_strict_host_keys:
+        logger.warning(
+            "SSH/NETCONF host-key verification is DISABLED outside development — "
+            "device connections are MITM-able. Set NB_SSH_STRICT_HOST_KEYS=1 "
+            "with NB_SSH_KNOWN_HOSTS_PATH for production."
+        )
 
     # Seed the default Lab/DC sites so a fresh DB has a usable catalog. Idempotent
     # and resilient: a missing ``sites`` table (migration not yet run) only logs.
@@ -124,6 +137,10 @@ app = FastAPI(title="Northbound", version="0.1.0", lifespan=lifespan)
 # API versioning: 406 a request that pins an unsupported version via Accept, and
 # stamp X-API-Version on every response. Added first so it wraps outermost.
 app.add_middleware(ApiVersionMiddleware)
+
+# Security headers (X-Frame-Options / nosniff / Referrer-Policy / CSP / HSTS) on
+# every response + cross-origin write rejection (the SameSite=Lax CSRF gap).
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Reverse-proxy support: only honour X-Forwarded-* (so the rate limiter and
 # logs see the real client IP, not the proxy's) when explicitly enabled and

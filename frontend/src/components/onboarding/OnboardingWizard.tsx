@@ -13,6 +13,7 @@ import { Input, Textarea } from '@/shared/Input';
 import { Badge } from '@/shared/Badge';
 import { PlatformIcon } from '@/shared/PlatformIcon';
 import { cn } from '@/lib/cn';
+import { isPlausibleIp } from '@/lib/format';
 import {
   usePlatforms,
   useTestConnection,
@@ -91,7 +92,7 @@ export function OnboardingWizard() {
       case 2:
         return !!draft.name && !!draft.env && !!draft.role;
       case 3:
-        return /^\d{1,3}(\.\d{1,3}){3}$/.test(draft.mgmt_ip) && draft.port > 0;
+        return isPlausibleIp(draft.mgmt_ip) && draft.port > 0;
       case 4: {
         // Username is only required when the auth method actually uses one.
         // SNMP v2c uses a community string, no username.
@@ -454,7 +455,7 @@ function Step2Identity({ draft, update }: { draft: OnboardingDraft; update: Upda
 
 function Step3Connection({ draft, update }: { draft: OnboardingDraft; update: UpdateFn }) {
   const ipDirty = draft.mgmt_ip.length > 0;
-  const ipValid = /^\d{1,3}(\.\d{1,3}){3}$/.test(draft.mgmt_ip);
+  const ipValid = isPlausibleIp(draft.mgmt_ip);
   const portValid = draft.port > 0 && draft.port < 65536;
   return (
     <div className="space-y-4">

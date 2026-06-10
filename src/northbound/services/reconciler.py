@@ -55,7 +55,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from sqlalchemy import desc, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from northbound.config import get_settings
@@ -88,19 +88,6 @@ def _credentials_for(device: Device) -> Credentials:
         return Credentials()
     vault = FernetCredVault.from_settings()
     return deserialize_credentials(device.encrypted_credentials, vault)
-
-
-async def _latest_event_at(
-    session: AsyncSession,
-    request_id: str,
-) -> dt.datetime | None:
-    """Timestamp of the most recent transition event for a request."""
-    return await session.scalar(
-        select(ChangeRequestEvent.created_at)
-        .where(ChangeRequestEvent.request_id == request_id)
-        .order_by(desc(ChangeRequestEvent.created_at))
-        .limit(1)
-    )
 
 
 def _aware(value: dt.datetime) -> dt.datetime:
@@ -259,6 +246,21 @@ async def reconcile_once(
         await session.scalars(select(ChangeRequest).where(ChangeRequest.status.in_(_IN_FLIGHT)))
     ).all()
 
+    # One GROUP BY query for every APPLYING row's latest event time, instead of
+    # a per-request SELECT inside the loop (N+1 during an apply burst).
+    applying_ids = [r.id for r in rows if r.status == S.APPLYING]
+    last_event_at: dict[str, dt.datetime] = {}
+    if applying_ids:
+        event_rows = await session.execute(
+            select(
+                ChangeRequestEvent.request_id,
+                func.max(ChangeRequestEvent.created_at),
+            )
+            .where(ChangeRequestEvent.request_id.in_(applying_ids))
+            .group_by(ChangeRequestEvent.request_id)
+        )
+        last_event_at = {rid: ts for rid, ts in event_rows.all() if ts is not None}
+
     failed = 0
     for request in rows:
         if request.status == S.AWAITING_CONFIRM:
@@ -277,7 +279,7 @@ async def reconcile_once(
             # claim_transition does not touch onupdate, so without folding in
             # ``updated_at`` here the heartbeat would be invisible and a slow-
             # but-live apply could be wrongly reaped.
-            last_event = await _latest_event_at(session, request.id)
+            last_event = last_event_at.get(request.id)
             liveness_candidates = [
                 _aware(t) for t in (last_event, request.updated_at) if t is not None
             ]

@@ -54,6 +54,11 @@ async def get_current_user(
     user = await session.scalar(select(User).where(User.id == payload.sub))
     if user is None:
         raise _CREDENTIALS_EXCEPTION
+    # Stash the verified subject for the write rate-limiter's key func (it runs
+    # after dependencies): avoids a second JWT decode per write, and gives
+    # cookie-authenticated browser sessions (no Authorization header) a
+    # per-user key instead of collapsing onto a shared NAT/proxy IP.
+    request.state.auth_sub = payload.sub
     return user
 
 

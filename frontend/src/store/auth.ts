@@ -1,13 +1,18 @@
 /**
- * Auth store — current user + role + bearer token.
+ * Auth store — current user + role. Deliberately NO token field.
  *
- * Persists to localStorage so reload doesn't bounce back to /login. The token
- * is the credential the real API client attaches as `Authorization: Bearer`.
- * The mock client mints a fake token; either way the store shape is identical
- * so nothing downstream branches on which client is active.
+ * The browser session's credential is the httpOnly `nb_access`/`nb_refresh`
+ * cookie pair (set by the API, unreadable to JS, sent via
+ * `credentials:'include'`). Holding the access token in JS-reachable state
+ * would hand a working 30-minute session to any XSS payload — the cookie
+ * design exists precisely so that can't happen, so the login response's
+ * `access_token` (still returned for non-browser API clients) is discarded.
  *
- * The role switcher in the user menu (mock/demo affordance) also writes here,
- * which the UI reads to decide whether to render admin-only inline buttons.
+ * Persists the user identity to localStorage so reload doesn't bounce back to
+ * /login; it's re-validated against /api/users/me on mount and the cookie is
+ * the real credential. The role switcher in the user menu (mock/demo
+ * affordance) also writes here, which the UI reads to decide whether to render
+ * admin-only inline buttons.
  */
 
 import { create } from 'zustand';
@@ -16,7 +21,6 @@ import type { AuthSession, User, UserRole } from '@/models';
 
 interface AuthState {
   user: User | null;
-  token: string | null;
   isAuthenticated: boolean;
   /** Persist a fresh session after a successful login / `me` refresh. */
   setSession: (session: AuthSession) => void;
@@ -35,16 +39,14 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       user: null,
-      token: null,
       isAuthenticated: false,
       setSession: (session) =>
         set({
           user: userFromSession(session),
-          token: session.access_token,
           isAuthenticated: true,
         }),
       setUser: (user) => set({ user }),
-      logout: () => set({ user: null, token: null, isAuthenticated: false }),
+      logout: () => set({ user: null, isAuthenticated: false }),
       switchRole: (role) => {
         const current = get().user;
         if (!current || current.role === role) return;
@@ -53,10 +55,6 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'nb-auth',
-      // Deliberately NOT persisting the token: the session lives in the httpOnly
-      // `nb_access`/`nb_refresh` cookies (set by the API, unreadable to JS). Only
-      // the user identity is cached for instant UI; it's re-validated against
-      // /api/users/me on mount and the cookie is the real credential.
       partialize: (s) => ({
         user: s.user,
         isAuthenticated: s.isAuthenticated,
@@ -64,11 +62,6 @@ export const useAuthStore = create<AuthState>()(
     },
   ),
 );
-
-/** Read the bearer token outside React (used by the real API client). */
-export function getAuthToken(): string | null {
-  return useAuthStore.getState().token;
-}
 
 /** Clear the session outside React (used on a 401 from the real client). */
 export function clearAuthSession(): void {

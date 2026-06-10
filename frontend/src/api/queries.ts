@@ -21,6 +21,7 @@ export const queryKeys = {
   ports: (deviceId: string) => ['devices', deviceId, 'ports'] as const,
   allPorts: () => ['ports'] as const,
   links: (env?: Environment) => ['links', env ?? 'all'] as const,
+  search: (env: Environment, q: string) => ['search', env, q] as const,
   requests: (filter?: { mine?: string; status?: ChangeRequestStatus }) =>
     ['requests', filter?.mine ?? 'all', filter?.status ?? 'all'] as const,
   audit: (deviceId?: string, port?: string) =>
@@ -32,6 +33,7 @@ export const queryKeys = {
     ['devices', deviceId, 'protocol', slug] as const,
   vlans: (deviceId: string) => ['devices', deviceId, 'vlans'] as const,
   l3: (deviceId: string) => ['devices', deviceId, 'l3-interfaces'] as const,
+  ospfInterfaces: (deviceId: string) => ['devices', deviceId, 'ospf-interfaces'] as const,
   settings: () => ['settings'] as const,
 } as const;
 
@@ -114,6 +116,14 @@ export function useLinks(env?: Environment) {
   return useQuery({ queryKey: queryKeys.links(env), queryFn: () => api.listLinks(env) });
 }
 
+export function useSearchPorts(env: Environment | undefined, q: string) {
+  return useQuery({
+    queryKey: queryKeys.search(env ?? '', q),
+    queryFn: () => api.searchPorts(env ?? '', q),
+    enabled: !!env && q.length > 0,
+  });
+}
+
 export function useRequests(filter?: { mine?: string; status?: ChangeRequestStatus }) {
   return useQuery({
     queryKey: queryKeys.requests(filter),
@@ -121,10 +131,13 @@ export function useRequests(filter?: { mine?: string; status?: ChangeRequestStat
   });
 }
 
-export function useAudit(deviceId?: string, portName?: string) {
+export function useAudit(deviceId?: string, portName?: string, opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: queryKeys.audit(deviceId, portName),
     queryFn: () => api.listAudit({ device_id: deviceId, port_name: portName }),
+    // Admin-only on the backend: callers pass enabled:false for requesters so
+    // we never fire a guaranteed-403 fetch.
+    enabled: opts?.enabled ?? true,
   });
 }
 
@@ -170,7 +183,7 @@ export function useL3Interfaces(deviceId: string | null | undefined) {
 
 export function useOspfInterfaces(deviceId: string | null | undefined) {
   return useQuery({
-    queryKey: ['devices', deviceId ?? '', 'ospf-interfaces'],
+    queryKey: queryKeys.ospfInterfaces(deviceId ?? ''),
     queryFn: () => api.getOspfInterfaces(deviceId!),
     enabled: !!deviceId,
   });
@@ -289,7 +302,12 @@ export function useCreateOspfRequest() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: api.createOspfRequest,
-    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+    onSuccess: (req) => {
+      invalidateRequestsAndPorts(qc, req.device_id);
+      // The OSPF interfaces table reads its own key — without this it shows
+      // stale rows until the next navigation.
+      qc.invalidateQueries({ queryKey: queryKeys.ospfInterfaces(req.device_id) });
+    },
   });
 }
 

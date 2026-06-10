@@ -7,11 +7,19 @@ and equality semantics for caching and reasoning.
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Free text that reaches device config must never carry CR/LF: the Arista/Cisco
+# renderers are Jinja CLI templates (autoescape=False), where a newline starts a
+# NEW config command — i.e. the vector for an authenticated requester smuggling
+# arbitrary CLI into an admin-approved apply. (lxml escapes XML text content,
+# but the constraint is enforced uniformly at this DTO chokepoint.)
+_NO_CRLF = r"^[^\r\n]*$"
 
 
 class AuthMethod(StrEnum):
@@ -269,10 +277,10 @@ class PortChange(BaseModel):
 
     untagged_vlan: int | None = Field(default=None, ge=1, le=4094)
     tagged_vlans: list[Annotated[int, Field(ge=1, le=4094)]] | None = None
-    host_model: str | None = None
-    bmc_ip: str | None = None
-    notes: str | None = None
-    description: str | None = None
+    host_model: str | None = Field(default=None, max_length=256, pattern=_NO_CRLF)
+    bmc_ip: str | None = Field(default=None, max_length=64, pattern=_NO_CRLF)
+    notes: str | None = Field(default=None, max_length=4000)  # DB-only, multiline OK
+    description: str | None = Field(default=None, max_length=256, pattern=_NO_CRLF)
     # Device-level tunables (admin direct write). port_mode is explicit so the
     # builder no longer has to infer access/trunk from tagged-VLAN presence.
     port_mode: Literal["access", "trunk"] | None = None
@@ -289,16 +297,16 @@ class VlanChange(BaseModel):
 
     action: Literal["create", "delete"]
     vlan_id: int = Field(ge=1, le=4094)
-    name: str | None = Field(default=None, max_length=64)
-    description: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=64, pattern=_NO_CRLF)
+    description: str | None = Field(default=None, max_length=255, pattern=_NO_CRLF)
 
 
 class VrfChange(BaseModel):
     """Device-level VRF create/delete (`set ip vrf <name> [description]`)."""
 
     action: Literal["create", "delete"]
-    name: str = Field(min_length=1, max_length=64)
-    description: str | None = Field(default=None, max_length=255)
+    name: str = Field(min_length=1, max_length=64, pattern=_NO_CRLF)
+    description: str | None = Field(default=None, max_length=255, pattern=_NO_CRLF)
 
 
 class OspfChange(BaseModel):
@@ -319,12 +327,27 @@ class OspfChange(BaseModel):
     action: Literal["set", "delete"]
     target: Literal["router-id", "interface"]
     router_id: str | None = Field(default=None, max_length=15)
-    interface: str | None = Field(default=None, max_length=64)
+    interface: str | None = Field(default=None, max_length=64, pattern=_NO_CRLF)
     area: str | None = Field(default=None, max_length=15)  # dotted (0.0.0.0) or int
     cost: int | None = Field(default=None, ge=1, le=65535)
     hello_interval: int | None = Field(default=None, ge=1, le=65535)
     dead_interval: int | None = Field(default=None, ge=1, le=65535)
     passive: bool | None = None
+
+    @field_validator("router_id")
+    @classmethod
+    def _router_id_is_dotted_quad(cls, v: str | None) -> str | None:
+        """Router-id is a 32-bit dotted quad; reject free text at file time."""
+        if v is not None:
+            ipaddress.IPv4Address(v)  # raises ValueError → ValidationError
+        return v
+
+    @field_validator("area")
+    @classmethod
+    def _area_is_dotted_or_int(cls, v: str | None) -> str | None:
+        if v is not None and not v.isdigit():
+            ipaddress.IPv4Address(v)
+        return v
 
     @model_validator(mode="after")
     def _check(self) -> OspfChange:
@@ -350,13 +373,22 @@ class L3Change(BaseModel):
 
     action: Literal["create", "delete"]
     kind: Literal["svi", "loopback"]
-    name: str | None = Field(default=None, max_length=64)
+    name: str | None = Field(default=None, max_length=64, pattern=_NO_CRLF)
     vlan_id: int | None = Field(default=None, ge=1, le=4094)
     ipv4: str | None = Field(default=None, max_length=43)  # IPv4 or IPv6 CIDR
     mtu: int | None = Field(default=None, ge=64, le=16360)
     enabled: bool | None = None  # maps to <disable> (disable = not enabled)
     dhcp: bool | None = None
-    vrf: str | None = Field(default=None, max_length=64)  # place the interface in a VRF
+    vrf: str | None = Field(default=None, max_length=64, pattern=_NO_CRLF)
+
+    @field_validator("ipv4")
+    @classmethod
+    def _ipv4_is_cidr_interface(cls, v: str | None) -> str | None:
+        """Must parse as an address-with-prefix (v4 or v6) — fail at file time,
+        not at apply time on the device."""
+        if v is not None:
+            ipaddress.ip_interface(v)  # raises ValueError → ValidationError
+        return v
 
     @model_validator(mode="after")
     def _check(self) -> L3Change:

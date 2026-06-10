@@ -119,7 +119,6 @@ function GlobalShortcuts() {
   const selectedPortName = useUIStore((s) => s.selectedPortName);
   const selectedDeviceId = useUIStore((s) => s.selectedDeviceId);
   const selectPort = useUIStore((s) => s.selectPort);
-  const setEnv = useUIStore((s) => s.setEnv);
   const openRequest = useUIStore((s) => s.openRequest);
   const userRole = useAuthStore((s) => s.user?.role);
 
@@ -165,15 +164,9 @@ function GlobalShortcuts() {
     },
   });
 
+  // No per-site jump shortcuts: environments are free-form site slugs now, so
+  // hardcoded 'g l'/'g d' targets would 404 on installs without those sites.
   useSequenceHotkeys({
-    'g l': () => {
-      setEnv('lab');
-      navigate('/env/lab');
-    },
-    'g d': () => {
-      setEnv('dc');
-      navigate('/env/dc');
-    },
     'g h': () => navigate('/'),
     'g r': () => navigate('/requests'),
     'g q': () => {
@@ -181,15 +174,13 @@ function GlobalShortcuts() {
     },
   });
 
-  // Close overlays on route change
+  // Close overlays on route change. Reach the store via getState() (stable,
+  // non-reactive) so the effect genuinely depends on the pathname alone.
   const location = useLocation();
   useEffect(() => {
-    closeOverlays();
-    // Don't depend on closeOverlays — it's stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useUIStore.getState().closeOverlays();
   }, [location.pathname]);
 
-  // Close overlays don't depend on env/path used here.
   return null;
 }
 

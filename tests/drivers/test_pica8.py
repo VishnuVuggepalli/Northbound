@@ -859,6 +859,21 @@ def test_verify_applied_missing_port() -> None:
     assert _verify_applied(cfg, "xe-9/9/9", PortChange(mtu=1500)) is not None
 
 
+def test_verify_applied_matches_higher_speed_port_elements() -> None:
+    # Real PicOS surfaces faster ports under their own element local-names
+    # (ten-gigabit-ethernet etc., the same set _parse_interfaces_xml accepts).
+    # A verify that only matches gigabit-ethernet false-fails every such port.
+    cfg = (
+        f"<configuration><interface {_NS}><ten-gigabit-ethernet><name>te-1/1/1</name>"
+        f"<mtu>9216</mtu><disable>false</disable>"
+        f"<family><ethernet-switching><port-mode>trunk</port-mode>"
+        f"<native-vlan-id>1010</native-vlan-id></ethernet-switching></family>"
+        f"</ten-gigabit-ethernet></interface></configuration>"
+    )
+    change = PortChange(port_mode="trunk", untagged_vlan=1010)
+    assert _verify_applied(cfg, "te-1/1/1", change) is None
+
+
 @pytest.mark.asyncio
 async def test_apply_change_fails_when_device_does_not_apply() -> None:
     # Simulate the device quirk: commit succeeds but the port-mode flip is dropped.

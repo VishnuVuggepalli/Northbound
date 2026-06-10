@@ -164,7 +164,15 @@ async def claim_transition(
         if not can_transition(from_status_candidate, to_status):
             raise IllegalTransition(from_status_candidate, to_status)
 
-    # Capture the pre-claim status for the event log before the raw UPDATE.
+    # Capture the pre-claim status for the event log before the raw UPDATE —
+    # session.refresh() below overwrites request.status with the POST-claim
+    # value, so this local is the only place the "from" side survives. INVARIANT:
+    # keep this capture before the refresh; the claim's WHERE status IN expected
+    # guarantees the true pre-claim status was in expected_set, so the in-memory
+    # value can only be wrong if expected_set has ≥2 members AND a concurrent
+    # transition moved between them in the load→claim window (accepted: the
+    # event row would name the other expected status, the transition itself is
+    # still serialized correctly by the conditional UPDATE).
     from_status = request.status
 
     # Flush any pending ORM mutations on this object FIRST, so the upcoming raw
@@ -578,9 +586,11 @@ async def resubmit_request(
         actor=requester.id,
         payload={"resubmitted": True},
     )
-    # Back in the queue: the prior review is superseded (the admin's note stays
-    # on the row + in the event log as history).
+    # Back in the queue: the prior review is superseded — clear the reviewer
+    # association too, so a pending request never displays a stale reviewer
+    # (the admin's note stays on the row + in the event log as history).
     request.reviewed_at = None
+    request.reviewer_id = None
     session.add(request)
     await audit.append_audit(
         session,

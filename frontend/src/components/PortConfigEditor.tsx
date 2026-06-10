@@ -30,13 +30,17 @@ export function PortConfigEditor({ deviceId, port }: PortConfigEditorProps) {
   const [enabled, setEnabled] = useState(port.admin_up);
 
   // Re-seed when the selected port changes (panel reused across ports).
+  // Deliberately keyed on `port.name` only: the `port` object reference changes
+  // on every 30s refetch / SSE invalidation, and re-seeding then would silently
+  // wipe a user's unsaved draft mid-edit.
   useEffect(() => {
     setMode(port.tagged_vlans.length > 0 ? 'trunk' : 'access');
     setNative(port.untagged_vlan);
     setTaggedText(port.tagged_vlans.join(', '));
     setMtu(port.mtu);
     setEnabled(port.admin_up);
-  }, [port]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- name-only dep preserves drafts across refetches
+  }, [port.name]);
 
   const tagged = parseTagged(taggedText);
   const patch = buildPortConfigPatch(port, { mode, native, tagged, mtu, enabled });

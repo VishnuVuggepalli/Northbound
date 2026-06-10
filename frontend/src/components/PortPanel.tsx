@@ -27,6 +27,7 @@ import {
   useSetPortDescription,
   useUpdatePortMetadata,
 } from '@/api/queries';
+import { isApiError } from '@/api';
 import { pushToast } from '@/store/toast';
 import { findPlatformForDevice, isWriteLocked } from '@/lib/devicePolicy';
 
@@ -83,6 +84,16 @@ const STALE_THRESHOLD_MS = 60_000;
  *  burning frames; the threshold transitions are still visible within one
  *  tick of crossing 30s and 60s. */
 const TICK_INTERVAL_MS = 5_000;
+
+/** Readable message for a failed apply. A 409 STATE_DRIFT / ALREADY_CLAIMED detail
+ *  is a JSON object the transport can't flatten, so ApiError.message degrades to
+ *  the bare status text ("Conflict") — phrase those; pass real details through. */
+function applyErrorMessage(e: unknown): string {
+  if (isApiError(e) && e.status === 409 && /^(conflict|http 409)$/i.test(e.message)) {
+    return 'Device state drifted or another admin already applied it. Refetch and retry.';
+  }
+  return e instanceof Error ? e.message : 'Apply failed.';
+}
 
 export function PortPanel({
   device,
@@ -358,7 +369,7 @@ export function PortPanel({
         {showNeighbors && (
           <Section title="Neighbor (LLDP)">
             <ul className="space-y-1.5">
-              {port.neighbors!.map((n, idx) => (
+              {(port.neighbors ?? []).map((n, idx) => (
                 <li
                   key={`${n.chassis_id}-${n.port_id}-${idx}`}
                   className="flex items-start gap-2 rounded-md border border-border bg-bg-elev-1 px-2.5 py-1.5 text-xs"
@@ -438,6 +449,12 @@ export function PortPanel({
                                   title: 'Applied',
                                   message: `#${req.id} pushed to ${device.name}`,
                                 }),
+                              onError: (e: unknown) =>
+                                pushToast({
+                                  kind: 'error',
+                                  title: 'Apply failed',
+                                  message: applyErrorMessage(e),
+                                }),
                             },
                           );
                         }}
@@ -461,6 +478,12 @@ export function PortPanel({
                                 kind: 'info',
                                 title: 'Rejected',
                                 message: `#${req.id} sent back to @${req.requested_by}`,
+                              }),
+                            onError: (e: unknown) =>
+                              pushToast({
+                                kind: 'error',
+                                title: 'Reject failed',
+                                message: e instanceof Error ? e.message : 'Reject failed.',
                               }),
                           },
                         );
@@ -512,6 +535,12 @@ export function PortPanel({
                           kind: 'success',
                           title: 'Applied',
                           message: `#${target.id} pushed to ${device.name}`,
+                        }),
+                      onError: (e: unknown) =>
+                        pushToast({
+                          kind: 'error',
+                          title: 'Apply failed',
+                          message: applyErrorMessage(e),
                         }),
                     },
                   );

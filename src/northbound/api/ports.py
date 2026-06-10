@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from northbound._lib.cache import CacheMiss, TTLCache
 from northbound.api.deps import get_current_user, require_admin
 from northbound.api.limiter import limiter, write_rate_key, write_rate_limit_provider
 from northbound.config import get_settings
@@ -58,9 +59,23 @@ from northbound.services.device_policy import assert_writable
 router = APIRouter(prefix="/api/devices", tags=["ports"])
 
 # Per-device running-config cache (separate concern from port_state; D2 lists
-# running config as a 30s in-mem per-device cache). SWAP POINT for Redis at
-# multi-worker scale, same as port_state._cache.
-_config_cache: dict[str, str] = {}
+# running config as a 30s in-mem per-device cache). TTL-bound + capacity-bound:
+# a plain dict would grow with the device count and serve arbitrarily stale
+# configs as cached=True forever. SWAP POINT for Redis at multi-worker scale,
+# same as port_state._cache.
+_config_cache: TTLCache[str] = TTLCache(
+    capacity=get_settings().port_state_cache_capacity,
+    default_ttl=get_settings().port_state_ttl_seconds,
+)
+
+
+def invalidate_device_caches(device_id: str) -> None:
+    """Drop all cached live state for a device (running config + port view).
+
+    Called on writes and on device offboarding so no stale entry outlives the
+    device or a config change."""
+    _config_cache.delete(device_id)
+    port_state.invalidate(device_id)
 
 
 async def _load_device(session: AsyncSession, device_id: str) -> Device:
@@ -164,13 +179,25 @@ async def _apply_direct_port_change(
             diff, confirm_seconds=get_settings().commit_confirm_seconds
         )
         if not result.success:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Apply failed: {result.error}",
-            )
+            raise DriverError(f"Apply failed: {result.error}")
         if result.confirm_token:
             await driver.confirm(result.confirm_token)  # make permanent (direct write)
     except DriverError as exc:
+        # The 502 propagates through get_session → rollback(), which would
+        # silently discard BOTH the backup row and any record of the attempt
+        # (worst case: apply succeeded, confirm failed → device touched, zero
+        # trace). Persist the failure audit + backup with an explicit commit
+        # before raising — same terminal-error commit boundary change_apply uses.
+        await audit.append_audit(
+            session,
+            user_id=admin.id,
+            action=action,
+            target_device_id=device.id,
+            target_port=port_name,
+            after={**after, "error": str(exc)},
+            result="error",
+        )
+        await session.commit()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Write failed: {exc}"
         ) from exc
@@ -186,8 +213,7 @@ async def _apply_direct_port_change(
         after=after,
         result="ok",
     )
-    _config_cache.pop(device.id, None)  # running-config changed
-    port_state.invalidate(device.id)  # live port view changed
+    invalidate_device_caches(device.id)  # running config + live port view changed
 
 
 @router.patch("/{device_id}/ports/{port_name:path}/description")
@@ -327,8 +353,10 @@ async def get_config(
 ) -> ConfigOut:
     """Running config (cached). ``?refresh=true`` re-fetches from the device."""
     device = await _load_device(session, device_id)
-    if not refresh and device_id in _config_cache:
-        return ConfigOut(config_text=_config_cache[device_id], cached=True)
+    if not refresh:
+        cached = _config_cache.get(device_id)
+        if not isinstance(cached, CacheMiss):
+            return ConfigOut(config_text=cached, cached=True)
     creds = _credentials_for(device)
     driver = driver_for(device, creds)
     try:
@@ -339,7 +367,7 @@ async def get_config(
         ) from exc
     finally:
         await driver.aclose()
-    _config_cache[device_id] = text
+    _config_cache.set(device_id, text)
     return ConfigOut(config_text=text, cached=False)
 
 

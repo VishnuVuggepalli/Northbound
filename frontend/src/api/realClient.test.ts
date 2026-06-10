@@ -2,7 +2,8 @@
  * Unit tests for the real fetch-based API client.
  *
  * Covers the load-bearing transport behaviors that the mock client can't:
- *   - Bearer token attached from the auth store on every request
+ *   - cookie-only auth: NO Authorization header (XSS can't read the cookie;
+ *     a JS-held bearer would hand a session to any injected script)
  *   - non-2xx → typed ApiError mapping (status + detail message)
  *   - 401 → session cleared + redirect to /login
  *   - the client selector defaults to the mock (offline-first)
@@ -21,7 +22,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 beforeEach(() => {
-  useAuthStore.setState({ user: null, token: null, isAuthenticated: false });
+  useAuthStore.setState({ user: null, isAuthenticated: false });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -31,9 +32,9 @@ afterEach(() => {
 });
 
 describe('realClient transport', () => {
-  test('attaches Bearer token from the auth store', async () => {
+  test('sends cookie-only auth: no Authorization header, credentials included', async () => {
     useAuthStore.getState().setSession({
-      access_token: 'tok-123',
+      access_token: 'tok-123', // returned by the API but deliberately NOT stored
       username: 'admin',
       role: 'admin',
     });
@@ -44,7 +45,8 @@ describe('realClient transport', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, init] = fetchMock.mock.calls[0]!;
-    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok-123');
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+    expect(init.credentials).toBe('include');
   });
 
   test('omits Authorization on the login (anonymous) request', async () => {
@@ -104,7 +106,6 @@ describe('realClient transport', () => {
 
     await expect(realClient.listDevices()).rejects.toMatchObject({ status: 401 });
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
-    expect(useAuthStore.getState().token).toBeNull();
     expect(assign).toHaveBeenCalledWith('/login');
   });
 

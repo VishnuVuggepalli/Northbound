@@ -17,6 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # Pin the signing secret before settings are first read (deterministic JWTs).
 os.environ["NB_SECRET_KEY"] = "unit-test-secret-key"
+# Registration defaults OFF (secure-by-default); these tests exercise it ON.
+# The disabled-path test overrides back to False explicitly.
+os.environ["NB_ALLOW_OPEN_REGISTRATION"] = "1"
 
 from northbound.api.limiter import limiter
 from northbound.auth.jwt import (

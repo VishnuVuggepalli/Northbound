@@ -4,7 +4,6 @@ import {
   useCreateL3Request,
   useCreateOspfRequest,
   useCreateVlanRequest,
-  useCreateVrfRequest,
   useL3Interfaces,
   useOspfInterfaces,
   useProtocolDetail,
@@ -21,8 +20,25 @@ import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
 import type { Device } from '@/models';
+import {
+  EMPTY_L3_FORM,
+  EMPTY_OSPF_FORM,
+  EMPTY_VLAN_FORM,
+  filingErrorToast,
+  type L3FormInitial,
+  type OspfFormInitial,
+  type VlanFormInitial,
+} from '@/components/device-system/support';
+import { VlanForm } from '@/components/device-system/VlanForm';
+import { L3Form } from '@/components/device-system/L3Form';
+import { OspfForm } from '@/components/device-system/OspfForm';
+import { VrfForm } from '@/components/device-system/VrfForm';
 
 type SubTab = 'overview' | 'interfaces' | 'vlans' | 'mac' | 'diagnostics';
+
+/** Inline-form opener: non-null mounts the form pre-filled; `seq` keys the form
+ *  so an Edit click re-seeds the fields even while the form is already open. */
+type FormState<T> = { seq: number; initial: T } | null;
 
 function SectionTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -46,34 +62,25 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
   const [macFilter, setMacFilter] = useState('');
   const [vlanFilter, setVlanFilter] = useState('');
   const [sub, setSub] = useState<SubTab>('overview');
+  // Mutations for the inline delete confirmations (the create/edit forms own
+  // their own mutation instances — see components/device-system/).
   const createVlan = useCreateVlanRequest();
-  const [addingVlan, setAddingVlan] = useState(false);
-  const [newVid, setNewVid] = useState('');
-  const [newName, setNewName] = useState('');
-  const [newDesc, setNewDesc] = useState('');
+  const createL3 = useCreateL3Request();
+  const createOspf = useCreateOspfRequest();
+  const [vlanForm, setVlanForm] = useState<FormState<VlanFormInitial>>(null);
+  const [l3Form, setL3Form] = useState<FormState<L3FormInitial>>(null);
+  const [ospfForm, setOspfForm] = useState<FormState<OspfFormInitial>>(null);
+  const [addingVrf, setAddingVrf] = useState(false);
   const [deleteVid, setDeleteVid] = useState<number | null>(null);
   const [deleteL3, setDeleteL3] = useState<
     { kind: 'svi' | 'loopback'; vid?: number; name?: string; label: string } | null
   >(null);
-  const createL3 = useCreateL3Request();
-  const [addingL3, setAddingL3] = useState(false);
-  const [l3Kind, setL3Kind] = useState<'svi' | 'loopback'>('svi');
-  const [l3Vid, setL3Vid] = useState('');
-  const [l3Name, setL3Name] = useState('');
-  const [l3Ip, setL3Ip] = useState('');
-  const [l3Mtu, setL3Mtu] = useState('');
-  const [l3Vrf, setL3Vrf] = useState('');
-  const createVrf = useCreateVrfRequest();
-  const [addingVrf, setAddingVrf] = useState(false);
-  const createOspf = useCreateOspfRequest();
-  const [addingOspf, setAddingOspf] = useState(false);
-  const [ospfTarget, setOspfTarget] = useState<'interface' | 'router-id'>('interface');
-  const [ospfIface, setOspfIface] = useState('');
-  const [ospfArea, setOspfArea] = useState('0.0.0.0');
-  const [ospfRouterId, setOspfRouterId] = useState('');
-  const [ospfCost, setOspfCost] = useState('');
-  const [vrfName, setVrfName] = useState('');
-  const [vrfDesc, setVrfDesc] = useState('');
+  const openVlanForm = (initial: VlanFormInitial) =>
+    setVlanForm((f) => ({ seq: (f?.seq ?? 0) + 1, initial }));
+  const openL3Form = (initial: L3FormInitial) =>
+    setL3Form((f) => ({ seq: (f?.seq ?? 0) + 1, initial }));
+  const openOspfForm = (initial: OspfFormInitial) =>
+    setOspfForm((f) => ({ seq: (f?.seq ?? 0) + 1, initial }));
   // A VLAN write must be filed as a change request; only on a writable device.
   const canWriteVlan = device.writable !== false && device.writes_enabled !== false;
 
@@ -253,7 +260,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                   kind="outline"
                   size="sm"
                   leftIcon={<Plus size={13} />}
-                  onClick={() => setAddingL3((v) => !v)}
+                  onClick={() => (l3Form ? setL3Form(null) : openL3Form(EMPTY_L3_FORM))}
                 >
                   Add L3
                 </Button>
@@ -261,7 +268,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                   kind="outline"
                   size="sm"
                   leftIcon={<Plus size={13} />}
-                  onClick={() => setAddingOspf((v) => !v)}
+                  onClick={() => (ospfForm ? setOspfForm(null) : openOspfForm(EMPTY_OSPF_FORM))}
                 >
                   OSPF
                 </Button>
@@ -269,315 +276,24 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
             ) : undefined
           }
         >
-          {addingOspf && (
-            <form
-              className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-warn/40 bg-warn/5 p-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                const cost = Number.parseInt(ospfCost, 10);
-                if (ospfTarget === 'router-id' && !ospfRouterId.trim()) {
-                  pushToast({ kind: 'error', title: 'router-id required' });
-                  return;
-                }
-                if (ospfTarget === 'interface' && (!ospfIface.trim() || !ospfArea.trim())) {
-                  pushToast({ kind: 'error', title: 'interface + area required' });
-                  return;
-                }
-                createOspf.mutate(
-                  {
-                    device_id: device.id,
-                    action: 'set',
-                    target: ospfTarget,
-                    router_id: ospfTarget === 'router-id' ? ospfRouterId.trim() : undefined,
-                    interface: ospfTarget === 'interface' ? ospfIface.trim() : undefined,
-                    area: ospfTarget === 'interface' ? ospfArea.trim() : undefined,
-                    cost:
-                      ospfTarget === 'interface' && Number.isFinite(cost) ? cost : undefined,
-                  },
-                  {
-                    onSuccess: () => {
-                      pushToast({
-                        kind: 'success',
-                        title: 'OSPF change requested',
-                        message: 'pending approval',
-                      });
-                      setAddingOspf(false);
-                      setOspfIface('');
-                      setOspfRouterId('');
-                      setOspfCost('');
-                    },
-                    onError: (err: unknown) =>
-                      pushToast({
-                        kind: 'error',
-                        title: 'Could not file request',
-                        message: err instanceof Error ? err.message : 'Failed',
-                      }),
-                  },
-                );
-              }}
-            >
-              <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                OSPF target
-                <select
-                  value={ospfTarget}
-                  onChange={(e) => setOspfTarget(e.target.value as 'interface' | 'router-id')}
-                  className="h-8 rounded-md border border-border bg-bg-elev-1 px-2 text-xs text-fg"
-                >
-                  <option value="interface">Interface → area</option>
-                  <option value="router-id">Router ID</option>
-                </select>
-              </label>
-              {ospfTarget === 'interface' ? (
-                <>
-                  <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                    Interface
-                    <Input
-                      value={ospfIface}
-                      onChange={(e) => setOspfIface(e.target.value)}
-                      className="h-8 w-32"
-                      placeholder="vlan1010"
-                      required
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                    Area
-                    <Input
-                      value={ospfArea}
-                      onChange={(e) => setOspfArea(e.target.value)}
-                      className="h-8 w-28"
-                      placeholder="0.0.0.0"
-                      required
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                    Cost (optional)
-                    <Input
-                      type="number"
-                      min={1}
-                      max={65535}
-                      value={ospfCost}
-                      onChange={(e) => setOspfCost(e.target.value)}
-                      className="h-8 w-24"
-                    />
-                  </label>
-                </>
-              ) : (
-                <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                  Router ID
-                  <Input
-                    value={ospfRouterId}
-                    onChange={(e) => setOspfRouterId(e.target.value)}
-                    className="h-8 w-36"
-                    placeholder="10.10.250.2"
-                    required
-                  />
-                </label>
-              )}
-              <Button type="submit" kind="primary" size="sm" disabled={createOspf.isPending}>
-                {createOspf.isPending ? 'Filing…' : 'Request OSPF'}
-              </Button>
-              <Button type="button" kind="ghost" size="sm" onClick={() => setAddingOspf(false)}>
-                Cancel
-              </Button>
-              <span className="basis-full text-[11px] text-fg-subtle">
-                Filing only — OSPF applies touch live routing; an admin reviews before apply.
-              </span>
-            </form>
+          {ospfForm && (
+            <OspfForm
+              key={ospfForm.seq}
+              deviceId={device.id}
+              initial={ospfForm.initial}
+              onClose={() => setOspfForm(null)}
+            />
           )}
-          {addingVrf && (
-            <form
-              className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-accent/30 bg-accent-soft p-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!vrfName.trim()) {
-                  pushToast({ kind: 'error', title: 'VRF name is required' });
-                  return;
-                }
-                createVrf.mutate(
-                  {
-                    device_id: device.id,
-                    action: 'create',
-                    name: vrfName.trim(),
-                    description: vrfDesc || undefined,
-                  },
-                  {
-                    onSuccess: () => {
-                      pushToast({
-                        kind: 'success',
-                        title: 'VRF change requested',
-                        message: `Create VRF ${vrfName.trim()} — pending approval`,
-                      });
-                      setAddingVrf(false);
-                      setVrfName('');
-                      setVrfDesc('');
-                    },
-                    onError: (err: unknown) =>
-                      pushToast({
-                        kind: 'error',
-                        title: 'Could not file request',
-                        message: err instanceof Error ? err.message : 'Failed',
-                      }),
-                  },
-                );
-              }}
-            >
-              <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                VRF name
-                <Input
-                  value={vrfName}
-                  onChange={(e) => setVrfName(e.target.value)}
-                  className="h-8 w-40"
-                  placeholder="tenant-a"
-                  autoFocus
-                  required
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                Description (optional)
-                <Input
-                  value={vrfDesc}
-                  onChange={(e) => setVrfDesc(e.target.value)}
-                  className="h-8 w-48"
-                  placeholder="free text"
-                />
-              </label>
-              <Button type="submit" kind="primary" size="sm" disabled={createVrf.isPending}>
-                {createVrf.isPending ? 'Filing…' : 'Request VRF'}
-              </Button>
-              <Button type="button" kind="ghost" size="sm" onClick={() => setAddingVrf(false)}>
-                Cancel
-              </Button>
-            </form>
+          {addingVrf && <VrfForm deviceId={device.id} onClose={() => setAddingVrf(false)} />}
+          {l3Form && (
+            <L3Form
+              key={l3Form.seq}
+              deviceId={device.id}
+              initial={l3Form.initial}
+              onClose={() => setL3Form(null)}
+            />
           )}
-          {addingL3 && (
-            <form
-              className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-accent/30 bg-accent-soft p-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!l3Ip.trim()) {
-                  pushToast({ kind: 'error', title: 'IPv4 (CIDR) is required' });
-                  return;
-                }
-                const vid = Number.parseInt(l3Vid, 10);
-                if (l3Kind === 'svi' && !Number.isFinite(vid)) {
-                  pushToast({ kind: 'error', title: 'SVI needs a VLAN id' });
-                  return;
-                }
-                const mtu = Number.parseInt(l3Mtu, 10);
-                createL3.mutate(
-                  {
-                    device_id: device.id,
-                    action: 'create',
-                    kind: l3Kind,
-                    vlan_id: l3Kind === 'svi' ? vid : undefined,
-                    name: l3Kind === 'loopback' ? l3Name || undefined : undefined,
-                    ipv4: l3Ip.trim(),
-                    mtu: Number.isFinite(mtu) ? mtu : undefined,
-                    vrf: l3Vrf.trim() || undefined,
-                  },
-                  {
-                    onSuccess: () => {
-                      pushToast({
-                        kind: 'success',
-                        title: 'L3 change requested',
-                        message: `Create ${l3Kind} — pending approval`,
-                      });
-                      setAddingL3(false);
-                      setL3Vid('');
-                      setL3Name('');
-                      setL3Ip('');
-                      setL3Mtu('');
-                      setL3Vrf('');
-                    },
-                    onError: (err: unknown) =>
-                      pushToast({
-                        kind: 'error',
-                        title: 'Could not file request',
-                        message: err instanceof Error ? err.message : 'Failed',
-                      }),
-                  },
-                );
-              }}
-            >
-              <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                Kind
-                <select
-                  value={l3Kind}
-                  onChange={(e) => setL3Kind(e.target.value as 'svi' | 'loopback')}
-                  className="h-8 rounded-md border border-border bg-bg-elev-1 px-2 text-xs text-fg"
-                >
-                  <option value="svi">SVI (VLAN interface)</option>
-                  <option value="loopback">Loopback</option>
-                </select>
-              </label>
-              {l3Kind === 'svi' ? (
-                <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                  VLAN id
-                  <Input
-                    type="number"
-                    min={1}
-                    max={4094}
-                    value={l3Vid}
-                    onChange={(e) => setL3Vid(e.target.value)}
-                    className="h-8 w-28"
-                    required
-                  />
-                </label>
-              ) : (
-                <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                  Name
-                  <Input
-                    value={l3Name}
-                    onChange={(e) => setL3Name(e.target.value)}
-                    className="h-8 w-32"
-                    placeholder="lo0"
-                    required
-                  />
-                </label>
-              )}
-              <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                IPv4 (CIDR)
-                <Input
-                  value={l3Ip}
-                  onChange={(e) => setL3Ip(e.target.value)}
-                  className="h-8 w-44"
-                  placeholder="10.10.250.2/16"
-                  required
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                MTU (optional)
-                <Input
-                  type="number"
-                  min={64}
-                  max={16360}
-                  value={l3Mtu}
-                  onChange={(e) => setL3Mtu(e.target.value)}
-                  className="h-8 w-24"
-                  placeholder="1500"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-fg-muted">
-                VRF (optional)
-                <Input
-                  value={l3Vrf}
-                  onChange={(e) => setL3Vrf(e.target.value)}
-                  className="h-8 w-32"
-                  placeholder="must already exist"
-                />
-              </label>
-              <Button type="submit" kind="primary" size="sm" disabled={createL3.isPending}>
-                {createL3.isPending ? 'Filing…' : 'Request L3'}
-              </Button>
-              <Button type="button" kind="ghost" size="sm" onClick={() => setAddingL3(false)}>
-                Cancel
-              </Button>
-              <span className="basis-full text-[11px] text-fg-subtle">
-                Files a change request — admin approves &amp; applies (commit-confirm).
-              </span>
-            </form>
-          )}
-          {l3.length === 0 && !addingL3 ? (
+          {l3.length === 0 && !l3Form ? (
             <p className="px-1 text-xs text-fg-subtle">No addressed interfaces reported.</p>
           ) : (
             <div className="px-1">
@@ -609,12 +325,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                               pushToast({ kind: 'success', title: `${deleteL3.label} delete requested` });
                               setDeleteL3(null);
                             },
-                            onError: (err: unknown) =>
-                              pushToast({
-                                kind: 'error',
-                                title: 'Could not file request',
-                                message: err instanceof Error ? err.message : 'Failed',
-                              }),
+                            onError: filingErrorToast,
                           },
                         )
                       }
@@ -630,6 +341,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                     ? ['Interface', 'Kind', 'IPv4', 'Gateway', 'MTU', 'Notes', '']
                     : ['Interface', 'Kind', 'IPv4', 'Gateway', 'MTU', 'Notes']
                 }
+                rowKeys={l3.map((i) => i.name)}
                 rows={l3.map((i) => {
                   const base = [
                     i.name,
@@ -640,10 +352,10 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                         : i.kind === 'management'
                           ? 'Management'
                           : 'LAG',
-                    i.ipv4,
-                    i.gateway,
-                    i.mtu != null ? String(i.mtu) : '',
-                    i.enabled ? i.detail : `disabled${i.detail ? ' · ' + i.detail : ''}`,
+                    i.ipv4 || null,
+                    i.gateway || null,
+                    i.mtu != null ? String(i.mtu) : null,
+                    i.enabled ? i.detail || null : `disabled${i.detail ? ' · ' + i.detail : ''}`,
                   ];
                   if (!canWriteVlan) return base;
                   // SVIs + loopbacks are user-managed via our change model (mgmt/LAG aren't).
@@ -658,14 +370,16 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                           type="button"
                           title={`Edit ${i.name}`}
                           aria-label={`Edit ${i.name}`}
-                          onClick={() => {
-                            setL3Kind(i.kind === 'svi' ? 'svi' : 'loopback');
-                            setL3Vid(i.kind === 'svi' ? String(vid) : '');
-                            setL3Name(i.kind === 'loopback' ? i.name : '');
-                            setL3Ip(i.ipv4);
-                            setL3Mtu(i.mtu != null ? String(i.mtu) : '');
-                            setAddingL3(true);
-                          }}
+                          onClick={() =>
+                            openL3Form({
+                              kind: i.kind === 'svi' ? 'svi' : 'loopback',
+                              vid: i.kind === 'svi' ? String(vid) : '',
+                              name: i.kind === 'loopback' ? i.name : '',
+                              ip: i.ipv4,
+                              mtu: i.mtu != null ? String(i.mtu) : '',
+                              vrf: '',
+                            })
+                          }
                           className="text-fg-subtle transition-colors hover:text-accent"
                         >
                           <Pencil size={13} />
@@ -706,14 +420,15 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                     ? ['Interface', 'Area', 'Cost', 'Hello', 'Dead', 'Passive', '']
                     : ['Interface', 'Area', 'Cost', 'Hello', 'Dead', 'Passive']
                 }
+                rowKeys={ospfIfaces.map((o) => o.name)}
                 rows={ospfIfaces.map((o) => {
                   const base = [
                     o.name,
-                    o.area,
-                    o.cost != null ? String(o.cost) : '',
-                    o.hello_interval != null ? String(o.hello_interval) : '',
-                    o.dead_interval != null ? String(o.dead_interval) : '',
-                    o.passive ? 'yes' : '',
+                    o.area || null,
+                    o.cost != null ? String(o.cost) : null,
+                    o.hello_interval != null ? String(o.hello_interval) : null,
+                    o.dead_interval != null ? String(o.dead_interval) : null,
+                    o.passive ? 'yes' : null,
                   ];
                   if (!canWriteVlan) return base;
                   return [
@@ -723,13 +438,15 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                         type="button"
                         title={`Edit OSPF ${o.name}`}
                         aria-label={`Edit OSPF ${o.name}`}
-                        onClick={() => {
-                          setOspfTarget('interface');
-                          setOspfIface(o.name);
-                          setOspfArea(o.area);
-                          setOspfCost(o.cost != null ? String(o.cost) : '');
-                          setAddingOspf(true);
-                        }}
+                        onClick={() =>
+                          openOspfForm({
+                            target: 'interface',
+                            iface: o.name,
+                            area: o.area,
+                            routerId: '',
+                            cost: o.cost != null ? String(o.cost) : '',
+                          })
+                        }
                         className="text-fg-subtle transition-colors hover:text-accent"
                       >
                         <Pencil size={13} />
@@ -752,12 +469,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                                   kind: 'success',
                                   title: `OSPF remove ${o.name} requested`,
                                 }),
-                              onError: (err: unknown) =>
-                                pushToast({
-                                  kind: 'error',
-                                  title: 'Could not file request',
-                                  message: err instanceof Error ? err.message : 'Failed',
-                                }),
+                              onError: filingErrorToast,
                             },
                           )
                         }
@@ -806,6 +518,8 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
           <div className="px-1">
             <DataTable
               columns={['VLAN', 'MAC address', 'Type', 'Age', 'Interface']}
+              // (vlan, mac) is the natural FDB key — stable under live filtering.
+              rowKeys={macRows.map((r) => `${r.vlan ?? '-'}|${r.mac}`)}
               rows={macRows.map((r) => [
                 String(r.vlan ?? '—'),
                 r.mac,
@@ -843,7 +557,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                 kind="outline"
                 size="sm"
                 leftIcon={<Plus size={13} />}
-                onClick={() => setAddingVlan((v) => !v)}
+                onClick={() => (vlanForm ? setVlanForm(null) : openVlanForm(EMPTY_VLAN_FORM))}
               >
                 Add VLAN
               </Button>
@@ -851,87 +565,13 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
           </span>
         }
       >
-        {addingVlan && (
-          <form
-            className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-accent/30 bg-accent-soft p-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const vid = Number.parseInt(newVid, 10);
-              if (!Number.isFinite(vid) || vid < 1 || vid > 4094) {
-                pushToast({ kind: 'error', title: 'VLAN id must be 1–4094' });
-                return;
-              }
-              createVlan.mutate(
-                {
-                  device_id: device.id,
-                  action: 'create',
-                  vlan_id: vid,
-                  name: newName || undefined,
-                  description: newDesc || undefined,
-                },
-                {
-                  onSuccess: () => {
-                    pushToast({
-                      kind: 'success',
-                      title: 'VLAN change requested',
-                      message: `Create VLAN ${vid} — pending approval`,
-                    });
-                    setAddingVlan(false);
-                    setNewVid('');
-                    setNewName('');
-                    setNewDesc('');
-                  },
-                  onError: (err: unknown) =>
-                    pushToast({
-                      kind: 'error',
-                      title: 'Could not file request',
-                      message: err instanceof Error ? err.message : 'Failed',
-                    }),
-                },
-              );
-            }}
-          >
-            <label className="flex flex-col gap-1 text-xs text-fg-muted">
-              VLAN id
-              <Input
-                type="number"
-                min={1}
-                max={4094}
-                value={newVid}
-                onChange={(e) => setNewVid(e.target.value)}
-                className="h-8 w-28"
-                autoFocus
-                required
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-fg-muted">
-              Name (optional)
-              <Input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                className="h-8 w-40"
-                placeholder="e.g. web-tier"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-fg-muted">
-              Description (optional)
-              <Input
-                value={newDesc}
-                onChange={(e) => setNewDesc(e.target.value)}
-                className="h-8 w-48"
-                placeholder="free text"
-              />
-            </label>
-            <Button type="submit" kind="primary" size="sm" disabled={createVlan.isPending}>
-              {createVlan.isPending ? 'Filing…' : 'Request VLAN'}
-            </Button>
-            <Button type="button" kind="ghost" size="sm" onClick={() => setAddingVlan(false)}>
-              Cancel
-            </Button>
-            <span className="basis-full text-[11px] text-fg-subtle">
-              Files a change request — an admin approves &amp; applies it (commit-confirm).
-            </span>
-          </form>
+        {vlanForm && (
+          <VlanForm
+            key={vlanForm.seq}
+            deviceId={device.id}
+            initial={vlanForm.initial}
+            onClose={() => setVlanForm(null)}
+          />
         )}
         {deleteVid !== null && (
           <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-danger/40 bg-danger/5 p-3 text-sm">
@@ -959,12 +599,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                         });
                         setDeleteVid(null);
                       },
-                      onError: (err: unknown) =>
-                        pushToast({
-                          kind: 'error',
-                          title: 'Could not file request',
-                          message: err instanceof Error ? err.message : 'Failed',
-                        }),
+                      onError: filingErrorToast,
                     },
                   )
                 }
@@ -974,7 +609,7 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
             </span>
           </div>
         )}
-        {vlans.length === 0 && !addingVlan ? (
+        {vlans.length === 0 && !vlanForm ? (
           <p className="px-1 text-xs text-fg-subtle">No VLANs reported.</p>
         ) : vlanRows.length === 0 ? (
           <p className="px-1 text-xs text-fg-subtle">No matching VLANs.</p>
@@ -986,12 +621,13 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                   ? ['VLAN', 'Name', 'Description', 'L3 (SVI)', 'Ports', '']
                   : ['VLAN', 'Name', 'Description', 'L3 (SVI)', 'Ports']
               }
+              rowKeys={vlanRows.map((v) => v.vlan_id)}
               rows={vlanRows.map((v) => {
                 const base = [
                   String(v.vlan_id),
-                  v.name,
-                  v.description,
-                  v.l3_interface,
+                  v.name || null,
+                  v.description || null,
+                  v.l3_interface || null,
                   String(v.port_count),
                 ];
                 if (!canWriteVlan) return base;
@@ -1005,10 +641,11 @@ export function DeviceSystemView({ device }: DeviceSystemViewProps) {
                       onClick={() => {
                         // Pre-fill the Add form → submit re-applies (edit-config
                         // merges, so this updates name/description in place).
-                        setNewVid(String(v.vlan_id));
-                        setNewName(v.name);
-                        setNewDesc(v.description);
-                        setAddingVlan(true);
+                        openVlanForm({
+                          vid: String(v.vlan_id),
+                          name: v.name,
+                          desc: v.description,
+                        });
                       }}
                       className="text-fg-subtle transition-colors hover:text-accent"
                     >
@@ -1096,7 +733,11 @@ function ProtocolGets({
               {t.rows.length === 0 ? (
                 <p className="text-xs text-fg-subtle">No entries.</p>
               ) : (
-                <DataTable columns={t.columns} rows={t.rows} />
+                <DataTable
+                  columns={t.columns}
+                  // API rows use '' for "no value" — map to null so the em dash shows.
+                  rows={t.rows.map((row) => row.map((c) => (c === '' ? null : c)))}
+                />
               )}
             </div>
           ))}

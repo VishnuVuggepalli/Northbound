@@ -11,6 +11,7 @@ import {
   useRequests,
   useSites,
 } from '@/api/queries';
+import { isApiError } from '@/api';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { useUIStore } from '@/store/ui';
@@ -18,6 +19,16 @@ import { pushToast } from '@/store/toast';
 import { cn } from '@/lib/cn';
 
 type SortKey = 'age' | 'env' | 'requester';
+
+/** Readable message for a failed apply. A 409 STATE_DRIFT / ALREADY_CLAIMED detail
+ *  is a JSON object the transport can't flatten, so ApiError.message degrades to
+ *  the bare status text ("Conflict") — phrase those; pass real details through. */
+function applyErrorMessage(e: unknown): string {
+  if (isApiError(e) && e.status === 409 && /^(conflict|http 409)$/i.test(e.message)) {
+    return 'Device state drifted or another admin already applied it. Refetch and retry.';
+  }
+  return e instanceof Error ? e.message : 'Apply failed.';
+}
 
 export function AdminQueuePage() {
   const user = useAuthStore((s) => s.user);
@@ -128,6 +139,12 @@ export function AdminQueuePage() {
                     {
                       onSuccess: () =>
                         pushToast({ kind: 'info', title: 'Approved', message: `#${id}` }),
+                      onError: (e: unknown) =>
+                        pushToast({
+                          kind: 'error',
+                          title: 'Approve failed',
+                          message: e instanceof Error ? e.message : 'Approve failed.',
+                        }),
                     },
                   )
                 }
@@ -137,6 +154,12 @@ export function AdminQueuePage() {
                     {
                       onSuccess: () =>
                         pushToast({ kind: 'success', title: 'Applied', message: `#${id}` }),
+                      onError: (e: unknown) =>
+                        pushToast({
+                          kind: 'error',
+                          title: 'Apply failed',
+                          message: applyErrorMessage(e),
+                        }),
                     },
                   )
                 }
@@ -146,6 +169,12 @@ export function AdminQueuePage() {
                     {
                       onSuccess: () =>
                         pushToast({ kind: 'info', title: 'Rejected', message: `#${id}` }),
+                      onError: (e: unknown) =>
+                        pushToast({
+                          kind: 'error',
+                          title: 'Reject failed',
+                          message: e instanceof Error ? e.message : 'Reject failed.',
+                        }),
                     },
                   )
                 }
