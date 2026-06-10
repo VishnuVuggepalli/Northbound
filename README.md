@@ -2,6 +2,21 @@
 
 A network engineer's doctor and helper for the day-to-day port change.
 
+## Screenshots
+
+A live Pica8 leaf (`leaf-01`) in the device view — 3D switch render, port grid with
+live VLAN state, and the change/diff workflow:
+
+![Device detail — leaf-01 port panel](docs/media/screenshots/04-device-detail.png)
+
+| Environments | Device list | Admin queue |
+|---|---|---|
+| ![Environment picker](docs/media/screenshots/02-dashboard.png) | ![Device list](docs/media/screenshots/03-device-list.png) | ![Admin queue](docs/media/screenshots/06-admin-queue.png) |
+
+🎥 **Full walkthrough video:** [`docs/media/northbound-tour.webm`](docs/media/northbound-tour.webm)
+(login → environments → live device → requests → queue → settings → about).
+More stills in [`docs/media/screenshots/`](docs/media/screenshots/).
+
 ## What Northbound is
 
 Northbound is a **request-mediated config-change workflow**. Alice needs port 14 on
