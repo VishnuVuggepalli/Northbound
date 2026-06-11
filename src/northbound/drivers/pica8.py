@@ -43,6 +43,7 @@ from northbound.drivers._protocol_gets import (
 from northbound.drivers.base import (
     Driver,
     DriverError,
+    NotSupported,
     ReachabilityError,
 )
 from northbound.drivers.registry import register
@@ -331,16 +332,28 @@ class Pica8Driver(Driver):
     # ---------- write ----------
 
     async def render_change(self, port: str, change: PortChange) -> ConfigDiff:
+        # DISABLED — trunk tagged-VLAN <vlan><members> member edits.
+        #
+        # INCIDENT (live Pica8 leaf-02): the old two-phase "clear-then-set" staged a
+        # destructive `<vlan> operation="remove"` (see the now-removed _clear_vlan_xml)
+        # into PicOS/xorplus's SHARED, PERSISTENT NETCONF candidate. The clear used
+        # operation="remove" but apply_change only switched to default-operation="none"
+        # for operation="delete", so the remove ran under the wrong default-operation.
+        # pica_netconf crashed merging the deletion ("Failed to merge deletions from
+        # rtrmgr", exit status 1), leaving an orphaned delete in xorp_rtrmgr that
+        # BLOCKED ALL COMMITS on the switch. This member-edit path was never
+        # live-validated for member CHANGES, so it is refused pending rework.
+        # Access-mode / single untagged-VLAN / description / mtu / enabled writes are
+        # unaffected and still go through the single-phase builder below.
+        if change.tagged_vlans and _effective_mode(change) == "trunk":
+            raise NotSupported(
+                "Pica8 trunk tagged-VLAN member edits are disabled pending rework "
+                "(caused NETCONF candidate corruption on a live switch); use the "
+                "device vendor UI."
+            )
         token = f"pica8-{uuid.uuid4().hex[:8]}"
         main = _build_edit_config_xml(port, change)
-        # Setting (non-empty) tagged VLANs on a trunk is a two-phase write: phase 1
-        # clears the keyed <members> list, phase 2 installs the new set. Otherwise
-        # a single payload suffices.
-        commands: tuple[str, ...]
-        if change.tagged_vlans and _effective_mode(change) == "trunk":
-            commands = (_clear_vlan_xml(port), main)
-        else:
-            commands = (main,)
+        commands: tuple[str, ...] = (main,)
         return ConfigDiff(
             summary=f"Update {port}",
             raw_before=f"<!-- previous state for {port} not captured -->",
@@ -425,27 +438,47 @@ class Pica8Driver(Driver):
                 confirm_deadline_at=None,
                 error="ConfigDiff missing pending_token or commands",
             )
-        # xorplus has no :confirmed-commit, so a commit is permanent immediately —
-        # there is no revert window. A change may need >1 edit (a trunk tagged-VLAN
-        # write is clear-then-set: phase 1 removes the keyed <members> list, phase 2
-        # merges the new set into the now-empty list). ALL edits are staged into ONE
-        # candidate and applied with a SINGLE commit, so the change is atomic: if the
-        # commit fails we discard and running config is untouched — never left in the
-        # mid-state where the clear committed but the set didn't (which would wipe a
-        # trunk's tagged VLANs).
+        # CANDIDATE HYGIENE (leaf-02 incident): PicOS/xorplus shares ONE persistent
+        # NETCONF candidate. A partially-staged edit that lingers there can crash the
+        # device's commit pipeline and block ALL future commits. So discard_changes()
+        # is bracketed around the whole apply — once on ENTRY (start clean; a prior
+        # apply that died after edit_config left its edit staged) and once in a FINALLY
+        # so EVERY exit (success, edit failure, commit failure, verify failure) leaves
+        # the candidate empty. discard only ever touches the UNCOMMITTED candidate,
+        # never committed/running config, so it is safe even after a successful commit.
+        with contextlib.suppress(Exception):
+            await self._netconf.discard_changes()
         try:
-            confirmed = await self._netconf.supports(":confirmed-commit")
-            # Clean candidate first: a prior apply that failed AFTER edit_config
-            # leaves its edit staged; without this, retries stack <interface> blocks
-            # → commit fails 'Duplicate key "interface:id"'. (discard only touches the
-            # uncommitted candidate, never the committed running config.)
+            return await self._stage_commit_verify(diff, token, confirm_seconds=confirm_seconds)
+        finally:
             with contextlib.suppress(Exception):
                 await self._netconf.discard_changes()
+
+    async def _stage_commit_verify(
+        self,
+        diff: ConfigDiff,
+        token: str,
+        *,
+        confirm_seconds: int,
+    ) -> ApplyResult:
+        # xorplus has no :confirmed-commit, so a commit is permanent immediately —
+        # there is no revert window. All edits stage into ONE candidate and apply with
+        # a SINGLE commit, so the change is atomic: if the commit fails we discard (see
+        # apply_change's finally) and running config is untouched.
+        try:
+            confirmed = await self._netconf.supports(":confirmed-commit")
             for xml_payload in diff.commands:
-                # A targeted delete (clearing a leaf) needs default-operation="none":
-                # only the operation-tagged node acts; under "merge" xorplus keeps the
-                # existing leaf. remove/(plain merge) work under the default merge.
-                default_op = "none" if 'operation="delete"' in xml_payload else None
+                # A targeted delete/remove (clearing a node) needs default-operation=
+                # "none": only the operation-tagged node acts; under "merge" xorplus
+                # keeps the existing node. Plain merges run under the default merge.
+                # NOTE: both "delete" AND "remove" must trip this — the leaf-02 incident
+                # was a "remove" that slipped through a delete-only check and ran under
+                # the wrong default-operation.
+                default_op = (
+                    "none"
+                    if ('operation="delete"' in xml_payload or 'operation="remove"' in xml_payload)
+                    else None
+                )
                 await self._netconf.edit_config(
                     target="candidate", config=xml_payload, default_operation=default_op
                 )
@@ -454,10 +487,6 @@ class Pica8Driver(Driver):
                 timeout=confirm_seconds if confirmed else None,
             )
         except Exception as exc:
-            # Don't leave the rejected edit staged in the candidate — it would
-            # collide with the next apply. Discard is best-effort.
-            with contextlib.suppress(Exception):
-                await self._netconf.discard_changes()
             return ApplyResult(
                 success=False,
                 confirm_token=None,
@@ -1537,19 +1566,15 @@ def _build_ospf_edit_config_xml(change: OspfChange) -> str:
     return etree.tostring(cfg, pretty_print=True).decode("utf-8")
 
 
-def _clear_vlan_xml(port: str) -> str:
-    """Phase-1 payload: remove a port's whole ``<vlan>`` subtree (clears members).
-
-    Run before a trunk tagged-VLAN set so the keyed <members> list starts empty
-    and the phase-2 merge can't collide ('Duplicate key "interface:id"').
-    """
-    cfg = etree.Element("config")
-    iface = etree.SubElement(cfg, "interface", nsmap={None: _XORPLUS_IFACE_NS})
-    ge = etree.SubElement(iface, "gigabit-ethernet")
-    etree.SubElement(ge, "name").text = port
-    eth = etree.SubElement(etree.SubElement(ge, "family"), "ethernet-switching")
-    etree.SubElement(eth, "vlan").set(f"{{{_NC_BASE_NS}}}operation", "remove")
-    return etree.tostring(cfg, pretty_print=True).decode("utf-8")
+# NOTE: the former ``_clear_vlan_xml`` helper was REMOVED after the live-switch
+# incident (Pica8 leaf-02). It emitted a standalone ``<vlan> operation="remove">``
+# as phase 1 of a two-phase trunk tagged-VLAN write; staged under the wrong
+# default-operation into PicOS's shared/persistent candidate it crashed pica_netconf
+# ("Failed to merge deletions from rtrmgr") and blocked all commits on the switch.
+# The two-phase path is disabled in render_change (raises NotSupported), so nothing
+# stages a destructive vlan-members remove/delete any more. Do NOT reintroduce a
+# standalone destructive clear without (a) operation-attr / default-operation
+# alignment and (b) guaranteed candidate-discard bracketing — see apply_change.
 
 
 def _append_switching(ge: etree._Element, change: PortChange) -> None:

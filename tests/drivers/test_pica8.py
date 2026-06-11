@@ -13,7 +13,7 @@ import pytest
 from lxml import etree  # type: ignore[attr-defined]  # lxml has no stubs; etree is C-extension
 
 from northbound._lib.transport.netconf_client import NetconfClient, NetconfParams
-from northbound.drivers.base import DriverError
+from northbound.drivers.base import DriverError, NotSupported
 from northbound.drivers.pica8 import (
     Pica8Driver,
     _build_edit_config_xml,
@@ -206,21 +206,27 @@ def test_render_change_explicit_trunk_native_and_tagged() -> None:
 
 
 @pytest.mark.asyncio
-async def test_render_change_trunk_tagged_is_two_phase() -> None:
-    # Trunk tagged-VLAN write = phase 1 clear (remove <vlan>) + phase 2 set members.
+async def test_render_change_trunk_tagged_member_edit_is_refused() -> None:
+    # INCIDENT (leaf-02): the old two-phase clear-then-set staged a destructive
+    # `<vlan> operation="remove"` into PicOS's SHARED, PERSISTENT candidate under the
+    # wrong default-operation; pica_netconf crashed merging the deletion and left an
+    # orphaned delete that blocked ALL commits on the switch. The trunk tagged-VLAN
+    # member-edit path is therefore disabled — render_change must REFUSE it.
     drv, _ = _make_driver()
-    diff = await drv.render_change(
-        "ge-1/1/1", PortChange(port_mode="trunk", untagged_vlan=10, tagged_vlans=[20, 30])
-    )
-    assert len(diff.commands) == 2
-    phase1 = etree.fromstring(diff.commands[0].encode())
-    assert (
-        phase1.find(".//{*}vlan").get("{urn:ietf:params:xml:ns:netconf:base:1.0}operation")
-        == "remove"
-    )
-    assert phase1.find(".//{*}members") is None  # phase 1 only clears
-    phase2 = etree.fromstring(diff.commands[1].encode())
-    assert phase2.find(".//{*}members/{*}id").text == "20,30"
+    with pytest.raises(NotSupported) as exc:
+        await drv.render_change(
+            "ge-1/1/1", PortChange(port_mode="trunk", untagged_vlan=10, tagged_vlans=[20, 30])
+        )
+    assert "trunk tagged-VLAN" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_render_change_trunk_tagged_inferred_mode_is_refused() -> None:
+    # No explicit port_mode, but a non-empty tagged set ⇒ effective mode trunk.
+    # Must be refused too (same corrupting path), not silently let through.
+    drv, _ = _make_driver()
+    with pytest.raises(NotSupported):
+        await drv.render_change("ge-1/1/1", PortChange(tagged_vlans=[20, 30]))
 
 
 @pytest.mark.asyncio
@@ -467,8 +473,9 @@ class _FakeManager:
         test_option: str | None = None,
         error_option: str | None = None,
     ) -> str:
-        # Signature mirrors REAL ncclient; record (target, config) for assertions.
-        self.calls.append(("edit_config", (target, config)))
+        # Signature mirrors REAL ncclient; record (target, config, default_operation)
+        # for assertions (default_operation matters for the leaf-02 remove/delete fix).
+        self.calls.append(("edit_config", (target, config, default_operation)))
         self._candidate.append(config)
         return "<ok/>"
 
@@ -516,7 +523,7 @@ async def test_apply_change_calls_commit_confirmed() -> None:
     assert result.success is True
     # First write call is edit_config to candidate.
     edit_call = next(c for c in fake.calls if c[0] == "edit_config")
-    target, payload = edit_call[1]
+    target, payload, _default_op = edit_call[1]
     assert target == "candidate"
     assert "<port-mode>access</port-mode>" in payload
     # Second write call is commit confirmed with the requested timeout.
@@ -541,22 +548,44 @@ async def test_apply_change_discards_candidate_before_edit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_apply_change_trunk_tagged_is_atomic_single_commit() -> None:
-    # A trunk tagged-VLAN write stages BOTH edits (clear + set) into one candidate
-    # and commits ONCE — atomic. A per-phase commit could leave the clear committed
-    # but the set not, wiping the trunk's tagged VLANs with no rollback.
+async def test_apply_change_runs_destructive_op_under_default_operation_none() -> None:
+    # leaf-02 incident root cause: a `<vlan> operation="remove"` ran under the wrong
+    # default-operation because apply_change only switched to default-operation="none"
+    # for operation="delete" — "remove" slipped through under merge. ANY staged payload
+    # carrying a destructive remove/delete MUST now be applied with default_operation=
+    # "none". The access-mode write legitimately emits a co-located <vlan> remove
+    # (trunk→access cleanup); assert it is staged under "none", never under merge.
     drv, fake = _make_driver()
-    diff = await drv.render_change(
-        "ge-1/1/1", PortChange(port_mode="trunk", untagged_vlan=10, tagged_vlans=[20, 30])
-    )
-    assert len(diff.commands) == 2  # clear + set
-    result = await drv.apply_change(diff)
-    assert result.success is True
+    diff = await drv.render_change("ge-1/1/1", PortChange(port_mode="access", untagged_vlan=10))
+    await drv.apply_change(diff)
+    saw_remove = False
+    for op, args in fake.calls:
+        if op != "edit_config":
+            continue
+        _target, payload, default_op = args
+        if 'operation="remove"' in payload or 'operation="delete"' in payload:
+            saw_remove = True
+            # The fix: a destructive remove/delete MUST run under default-operation
+            # "none" (only the tagged node acts), never under the implicit merge that
+            # corrupted the candidate on leaf-02.
+            assert default_op == "none"
+    assert saw_remove, "access write should emit the trunk→access <vlan> remove cleanup"
+
+
+@pytest.mark.asyncio
+async def test_apply_change_brackets_discard_on_entry_and_exit() -> None:
+    # leaf-02 incident hardening: a partially-staged edit must NEVER linger in the
+    # shared candidate. discard_changes() is bracketed — once on ENTRY (before any
+    # edit) and once on EXIT (finally), so the candidate is clean coming and going.
+    drv, fake = _make_driver()
+    diff = await drv.render_change("ge-1/1/1", PortChange(untagged_vlan=10))
+    await drv.apply_change(diff)
     ops = [c[0] for c in fake.calls]
-    assert ops.count("edit_config") == 2
-    assert ops.count("commit") == 1  # single commit → atomic
-    # both edits precede the one commit
-    assert ops.index("commit") > max(i for i, o in enumerate(ops) if o == "edit_config")
+    # entry discard precedes the first edit_config…
+    assert "discard_changes" in ops and "edit_config" in ops
+    assert ops.index("discard_changes") < ops.index("edit_config")
+    # …and a discard also runs AFTER the commit (the finally bracket).
+    assert ops.index("discard_changes", ops.index("commit")) > ops.index("commit")
 
 
 @pytest.mark.asyncio
