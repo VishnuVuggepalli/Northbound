@@ -7,7 +7,7 @@ out of the service.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from northbound.models.enums import UserRole
 
@@ -63,7 +63,7 @@ class UserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1)
     role: UserRole
-    email: str | None = Field(default=None, max_length=256)
+    email: EmailStr | None = Field(default=None, max_length=256)
 
 
 class PasswordChangeIn(BaseModel):
@@ -93,4 +93,4 @@ class RegisterRequest(BaseModel):
 
     username: str = Field(min_length=3, max_length=128)
     password: str = Field(min_length=8, max_length=256)
-    email: str | None = Field(default=None, max_length=256)
+    email: EmailStr | None = Field(default=None, max_length=256)

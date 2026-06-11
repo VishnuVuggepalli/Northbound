@@ -62,6 +62,10 @@ dependencies = [
  # with keep-alive ping + client-disconnect cleanup — not hand-rolled over a
  # bare StreamingResponse.
  "sse-starlette>=2.1",
+ # RFC 5321/5322 email validation backing Pydantic's EmailStr — used on the
+ # auth register / user-create DTOs so addresses are validated by a battle-tested
+ # library, not a hand-rolled regex.
+ "email-validator>=2.0",
 ]
 
 [project.optional-dependencies]

@@ -3,6 +3,7 @@ import { useCreateL3Request } from '@/api/queries';
 import { Input } from '@/shared/Input';
 import { Button } from '@/shared/Button';
 import { pushToast } from '@/store/toast';
+import { isPlausibleCidr } from '@/lib/format';
 import { FormField, FormShell } from './FormShell';
 import { filingErrorToast, type L3FormInitial } from './support';
 
@@ -22,6 +23,15 @@ export function L3Form({ deviceId, initial, onClose }: L3FormProps) {
   const [mtu, setMtu] = useState(initial.mtu);
   const [vrf, setVrf] = useState(initial.vrf);
 
+  const ipInvalid = ip.trim().length > 0 && !isPlausibleCidr(ip);
+  const parsedVidNum = Number.parseInt(vid, 10);
+  const vidInvalid =
+    kind === 'svi' && vid.trim().length > 0 && (parsedVidNum < 1 || parsedVidNum > 4094);
+  const parsedMtuNum = Number.parseInt(mtu, 10);
+  const mtuInvalid =
+    mtu.trim().length > 0 && (parsedMtuNum < 64 || parsedMtuNum > 16360);
+  const blockSubmit = ipInvalid || vidInvalid || mtuInvalid;
+
   return (
     <FormShell
       onSubmit={(e) => {
@@ -30,6 +40,7 @@ export function L3Form({ deviceId, initial, onClose }: L3FormProps) {
           pushToast({ kind: 'error', title: 'IPv4 (CIDR) is required' });
           return;
         }
+        if (blockSubmit) return;
         const parsedVid = Number.parseInt(vid, 10);
         if (kind === 'svi' && !Number.isFinite(parsedVid)) {
           pushToast({ kind: 'error', title: 'SVI needs a VLAN id' });
@@ -81,7 +92,14 @@ export function L3Form({ deviceId, initial, onClose }: L3FormProps) {
             onChange={(e) => setVid(e.target.value)}
             className="h-8 w-28"
             required
+            aria-invalid={vidInvalid}
+            aria-describedby={vidInvalid ? 'l3-vid-error' : undefined}
           />
+          {vidInvalid && (
+            <span id="l3-vid-error" role="alert" className="mt-1 block text-xs text-danger">
+              VLAN id must be 1–4094
+            </span>
+          )}
         </FormField>
       ) : (
         <FormField label="Name">
@@ -101,7 +119,14 @@ export function L3Form({ deviceId, initial, onClose }: L3FormProps) {
           className="h-8 w-44"
           placeholder="10.10.250.2/16"
           required
+          aria-invalid={ipInvalid}
+          aria-describedby={ipInvalid ? 'l3-ip-error' : undefined}
         />
+        {ipInvalid && (
+          <span id="l3-ip-error" role="alert" className="mt-1 block text-xs text-danger">
+            Not a valid IP/CIDR
+          </span>
+        )}
       </FormField>
       <FormField label="MTU (optional)">
         <Input
@@ -112,7 +137,14 @@ export function L3Form({ deviceId, initial, onClose }: L3FormProps) {
           onChange={(e) => setMtu(e.target.value)}
           className="h-8 w-24"
           placeholder="1500"
+          aria-invalid={mtuInvalid}
+          aria-describedby={mtuInvalid ? 'l3-mtu-error' : undefined}
         />
+        {mtuInvalid && (
+          <span id="l3-mtu-error" role="alert" className="mt-1 block text-xs text-danger">
+            MTU must be 64–16360
+          </span>
+        )}
       </FormField>
       <FormField label="VRF (optional)">
         <Input
@@ -122,7 +154,12 @@ export function L3Form({ deviceId, initial, onClose }: L3FormProps) {
           placeholder="must already exist"
         />
       </FormField>
-      <Button type="submit" kind="primary" size="sm" disabled={createL3.isPending}>
+      <Button
+        type="submit"
+        kind="primary"
+        size="sm"
+        disabled={createL3.isPending || blockSubmit}
+      >
         {createL3.isPending ? 'Filing…' : 'Request L3'}
       </Button>
       <Button type="button" kind="ghost" size="sm" onClick={onClose}>

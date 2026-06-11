@@ -7,10 +7,22 @@ from every response model so they can never be serialised out of the service.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import ipaddress
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from northbound.models.enums import DeviceRole
 from northbound.schemas.driver import Credentials, DriverCapabilities
+
+
+def _validate_ip_address(v: str) -> str:
+    """Reject anything that isn't a bare IPv4/IPv6 *address* (not a CIDR).
+
+    ``ipaddress.ip_address`` is the RFC-compliant stdlib parser — it raises
+    ``ValueError`` on garbage, which Pydantic surfaces as a ValidationError.
+    """
+    ipaddress.ip_address(v)  # raises ValueError → ValidationError
+    return v
 
 
 class CredentialsIn(BaseModel):
@@ -45,6 +57,11 @@ class ConnectionTestIn(BaseModel):
     prefer_native_api: bool = True
     credentials: CredentialsIn = Field(default_factory=CredentialsIn)
 
+    @field_validator("mgmt_ip")
+    @classmethod
+    def _mgmt_ip_is_ip_address(cls, v: str) -> str:
+        return _validate_ip_address(v)
+
 
 class DiscoverIn(ConnectionTestIn):
     """Body of ``POST /api/devices/discover`` — same shape as test-connection."""
@@ -62,6 +79,11 @@ class DeviceCreateIn(BaseModel):
     ssh_user: str | None = Field(default=None, max_length=128)
     prefer_native_api: bool = True
     credentials: CredentialsIn = Field(default_factory=CredentialsIn)
+
+    @field_validator("mgmt_ip")
+    @classmethod
+    def _mgmt_ip_is_ip_address(cls, v: str) -> str:
+        return _validate_ip_address(v)
 
 
 class CredentialsRotateIn(BaseModel):

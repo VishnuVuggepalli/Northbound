@@ -287,6 +287,15 @@ class PortChange(BaseModel):
     mtu: Annotated[int, Field(ge=64, le=16360)] | None = None
     enabled: bool | None = None  # maps to <disable> (disable = not enabled)
 
+    @field_validator("bmc_ip")
+    @classmethod
+    def _bmc_ip_is_ip_address(cls, v: str | None) -> str | None:
+        """Optional IPv4/IPv6 *address* (not a CIDR). Empty/None clears the
+        field and is allowed; any non-empty value must parse."""
+        if v:
+            ipaddress.ip_address(v)  # raises ValueError → ValidationError
+        return v
+
 
 class VlanChange(BaseModel):
     """Device-level VLAN-database change (create or delete a VLAN id).

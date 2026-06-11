@@ -1,6 +1,7 @@
 /**
  * Time and unit formatters used across the UI.
  */
+import ipaddr from 'ipaddr.js';
 
 /** "1 device", "32 ports" — count + singular/plural noun. */
 export function plural(count: number, noun: string, pluralForm?: string): string {
@@ -45,12 +46,39 @@ export function formatSpeed(mbps: number | null): string {
   return `${mbps} Mbps`;
 }
 
-/** Dotted-quad IPv4 validator — four numeric octets, each 0–255. */
+/**
+ * Strict dotted-quad IPv4 validator, RFC-aligned with the Python backend.
+ *
+ * Backed by `ipaddr.js` (`IPv4.isValid`) rather than a hand-rolled regex.
+ * ipaddr.js by itself accepts leading-zero octets (`01.02.03.04`), but the
+ * backend's `ipaddress.ip_address` rejects them — so we additionally reject any
+ * octet with a leading zero (unless it is exactly `"0"`) to match. Used for
+ * router-id, BMC, and mgmt IP fields (addresses, not CIDRs).
+ */
 export function isPlausibleIp(s: string): boolean {
-  if (!s) return false;
-  const octets = s.split('.');
-  if (octets.length !== 4) return false;
-  return octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255);
+  if (!s || !ipaddr.IPv4.isValid(s)) return false;
+  return s.split('.').every((o) => o === '0' || !o.startsWith('0'));
+}
+
+/**
+ * IP-with-prefix validator for SVI / loopback addresses (e.g. `10.10.250.2/16`).
+ * Backed by `ipaddr.js` `parseCIDR`, which covers both v4 and v6 with a prefix
+ * and mirrors the backend's `ipaddress.ip_interface` check. A bare address with
+ * no prefix is rejected.
+ */
+export function isPlausibleCidr(s: string): boolean {
+  try {
+    ipaddr.parseCIDR(s.trim());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** OSPF area-id: a plain non-negative integer OR a dotted quad (0.0.0.0). */
+export function isPlausibleArea(s: string): boolean {
+  const v = s.trim();
+  return /^\d+$/.test(v) || isPlausibleIp(v);
 }
 
 /** Initials for avatar from a full name. */

@@ -6,9 +6,10 @@ single view. Credentials never cross this boundary.
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from northbound.services.port_state import PortStateView
 
@@ -63,6 +64,15 @@ class PortMetadataPatchIn(BaseModel):
     host_model: str | None = Field(default=None, max_length=256)
     bmc_ip: str | None = Field(default=None, max_length=64)
     notes: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("bmc_ip")
+    @classmethod
+    def _bmc_ip_is_ip_address(cls, v: str | None) -> str | None:
+        """Optional IPv4/IPv6 *address* (not a CIDR). Empty/None clears the
+        field and is allowed; any non-empty value must parse."""
+        if v:
+            ipaddress.ip_address(v)  # raises ValueError → ValidationError
+        return v
 
 
 class PortDescriptionIn(BaseModel):

@@ -3,6 +3,7 @@ import { useCreateOspfRequest } from '@/api/queries';
 import { Input } from '@/shared/Input';
 import { Button } from '@/shared/Button';
 import { pushToast } from '@/store/toast';
+import { isPlausibleArea, isPlausibleIp } from '@/lib/format';
 import { FormField, FormShell } from './FormShell';
 import { filingErrorToast, type OspfFormInitial } from './support';
 
@@ -21,6 +22,15 @@ export function OspfForm({ deviceId, initial, onClose }: OspfFormProps) {
   const [routerId, setRouterId] = useState(initial.routerId);
   const [cost, setCost] = useState(initial.cost);
 
+  const routerIdInvalid =
+    target === 'router-id' && routerId.trim().length > 0 && !isPlausibleIp(routerId);
+  const areaInvalid =
+    target === 'interface' && area.trim().length > 0 && !isPlausibleArea(area);
+  const parsedCostNum = Number.parseInt(cost, 10);
+  const costInvalid =
+    cost.trim().length > 0 && (parsedCostNum < 1 || parsedCostNum > 65535);
+  const blockSubmit = routerIdInvalid || areaInvalid || costInvalid;
+
   return (
     <FormShell
       tone="warn"
@@ -35,6 +45,7 @@ export function OspfForm({ deviceId, initial, onClose }: OspfFormProps) {
           pushToast({ kind: 'error', title: 'interface + area required' });
           return;
         }
+        if (blockSubmit) return;
         createOspf.mutate(
           {
             device_id: deviceId,
@@ -87,7 +98,14 @@ export function OspfForm({ deviceId, initial, onClose }: OspfFormProps) {
               className="h-8 w-28"
               placeholder="0.0.0.0"
               required
+              aria-invalid={areaInvalid}
+              aria-describedby={areaInvalid ? 'ospf-area-error' : undefined}
             />
+            {areaInvalid && (
+              <span id="ospf-area-error" role="alert" className="mt-1 block text-xs text-danger">
+                Area must be an integer or dotted-quad
+              </span>
+            )}
           </FormField>
           <FormField label="Cost (optional)">
             <Input
@@ -97,7 +115,14 @@ export function OspfForm({ deviceId, initial, onClose }: OspfFormProps) {
               value={cost}
               onChange={(e) => setCost(e.target.value)}
               className="h-8 w-24"
+              aria-invalid={costInvalid}
+              aria-describedby={costInvalid ? 'ospf-cost-error' : undefined}
             />
+            {costInvalid && (
+              <span id="ospf-cost-error" role="alert" className="mt-1 block text-xs text-danger">
+                Cost must be 1–65535
+              </span>
+            )}
           </FormField>
         </>
       ) : (
@@ -108,10 +133,22 @@ export function OspfForm({ deviceId, initial, onClose }: OspfFormProps) {
             className="h-8 w-36"
             placeholder="10.10.250.2"
             required
+            aria-invalid={routerIdInvalid}
+            aria-describedby={routerIdInvalid ? 'ospf-routerid-error' : undefined}
           />
+          {routerIdInvalid && (
+            <span id="ospf-routerid-error" role="alert" className="mt-1 block text-xs text-danger">
+              Not a valid IPv4 address
+            </span>
+          )}
         </FormField>
       )}
-      <Button type="submit" kind="primary" size="sm" disabled={createOspf.isPending}>
+      <Button
+        type="submit"
+        kind="primary"
+        size="sm"
+        disabled={createOspf.isPending || blockSubmit}
+      >
         {createOspf.isPending ? 'Filing…' : 'Request OSPF'}
       </Button>
       <Button type="button" kind="ghost" size="sm" onClick={onClose}>
