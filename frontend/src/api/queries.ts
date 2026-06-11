@@ -385,14 +385,6 @@ export function useApplyRequest() {
   });
 }
 
-export function useConfirmRequest() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id }: { id: string }) => api.confirmRequest(id),
-    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
-  });
-}
-
 export function useTestConnection() {
   return useMutation({ mutationFn: api.testConnection });
 }

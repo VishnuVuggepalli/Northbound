@@ -9,7 +9,7 @@ interface SkeletonProps {
  * differently from "empty". Uses a design-token surface and `animate-pulse`
  * (globally neutralized under `prefers-reduced-motion`). Decorative → aria-hidden.
  */
-export function Skeleton({ className }: SkeletonProps) {
+function Skeleton({ className }: SkeletonProps) {
   return <div className={cn('animate-pulse rounded bg-bg-elev-2', className)} aria-hidden />;
 }
 

@@ -29,7 +29,7 @@ type PlatformInfo = components['schemas']['PlatformInfo'];
 type DriverCapabilities = components['schemas']['DriverCapabilities'];
 
 /** ISO-8601 (or epoch-ms number) → epoch ms, with a null passthrough. */
-export function toEpochMs(value: string | number | null | undefined): number | null {
+function toEpochMs(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined) return null;
   if (typeof value === 'number') return value;
   const parsed = Date.parse(value);
@@ -47,7 +47,7 @@ const KNOWN_PLATFORMS: readonly Platform[] = [
 ];
 
 /** Coerce the backend's free-form `platform` string into the UI union. */
-export function toPlatform(raw: string): Platform {
+function toPlatform(raw: string): Platform {
   return (KNOWN_PLATFORMS as readonly string[]).includes(raw) ? (raw as Platform) : 'mock';
 }
 

@@ -35,8 +35,3 @@ def get_driver_class(platform_id: str) -> type[Driver]:
 def all_platforms() -> dict[str, type[Driver]]:
     """Snapshot of the current registry (defensive copy)."""
     return dict(_REGISTRY)
-
-
-def _clear_for_tests() -> None:
-    """Test-only: wipe the registry. Never call from app code."""
-    _REGISTRY.clear()

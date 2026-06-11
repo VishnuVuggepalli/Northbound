@@ -11,11 +11,4 @@ import * as realClient from './realClient';
 
 export const apiClient = realClient;
 
-export type {
-  ConfirmOnboardResult,
-  CreateRequestInput,
-  DiscoverResult,
-  LoginResult,
-  TestConnectionResult,
-} from './client.types';
-export { ApiError, isApiError } from './errors';
+export { isApiError } from './errors';

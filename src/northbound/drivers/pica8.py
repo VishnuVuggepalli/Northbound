@@ -690,16 +690,6 @@ def _child_text(el: etree._Element, name: str) -> str | None:
     return None
 
 
-def _has_child(el: etree._Element, name: str) -> bool:
-    """True if a first-level child element by local name exists.
-
-    Used for boolean tags like ``<disable/>`` where presence — not text
-    content — is the signal. ``_child_text`` can't distinguish missing from
-    empty self-closing.
-    """
-    return any(_localname(child.tag) == name for child in el)
-
-
 # Physical-port element local-names in the real PicOS xorplus interface model
 # (``http://pica8.com/xorplus/interface``). Each is a sibling list entry under
 # ``<interface>``, NOT a Junos ``<interface><name>`` node — verified live on

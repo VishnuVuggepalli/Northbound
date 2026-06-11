@@ -9,9 +9,7 @@
 
 import type { components } from './schema.gen';
 
-export type Schemas = components['schemas'];
+type Schemas = components['schemas'];
 
 export type SettingsOut = Schemas['SettingsOut'];
 export type SettingsPatch = Schemas['SettingsPatch'];
-export type DeviceOut = Schemas['DeviceOut'];
-export type PortStateOut = Schemas['PortStateOut'];

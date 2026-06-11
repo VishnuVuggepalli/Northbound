@@ -133,21 +133,3 @@ class SnmpClient:
                 return out
 
             return await asyncio.wait_for(_collect(), timeout=self._params.timeout_seconds)
-
-    async def bulk_get(self, oids: list[str]) -> list[Any]:
-        # Try replay only if every oid has a fixture; otherwise punt to live.
-        if self._replay_dir is not None:
-            replayed: list[Any] = []
-            for oid in oids:
-                value = await self._from_replay(oid)
-                if value is None:
-                    replayed = []
-                    break
-                replayed.append(value)
-            if replayed:
-                return replayed
-        async with self._sem:
-            transport = self._real_transport()
-            return await asyncio.wait_for(
-                transport.multiget(oids), timeout=self._params.timeout_seconds
-            )

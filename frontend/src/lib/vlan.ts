@@ -16,7 +16,7 @@ export interface VlanZone {
   hue: number;
 }
 
-export const VLAN_ZONES: Readonly<Record<number, VlanZone>> = {
+const VLAN_ZONES: Readonly<Record<number, VlanZone>> = {
   10: { name: 'mgmt', hue: 220 },
   20: { name: 'storage', hue: 280 },
   50: { name: 'dmz', hue: 25 },
