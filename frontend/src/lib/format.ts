@@ -75,6 +75,22 @@ export function isPlausibleCidr(s: string): boolean {
   }
 }
 
+// One RFC 1123 label: 1..63 chars, alphanumeric + internal hyphen, no
+// leading/trailing hyphen. Mirrors the backend `_HOSTNAME_LABEL_RE`.
+const HOSTNAME_LABEL_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
+
+/**
+ * RFC 1123 host name: <=253 total, dot-separated labels each 1..63 chars,
+ * alphanumeric + hyphen, no leading/trailing hyphen. Case-insensitive.
+ *
+ * Mirrors the backend `DeviceCreateIn.name` validator so the wizard rejects a
+ * bad device name inline before the request is sent.
+ */
+export function isPlausibleHostname(s: string): boolean {
+  if (!s || s.length > 253) return false;
+  return s.split('.').every((label) => HOSTNAME_LABEL_RE.test(label));
+}
+
 /** OSPF area-id: a plain non-negative integer OR a dotted quad (0.0.0.0). */
 export function isPlausibleArea(s: string): boolean {
   const v = s.trim();

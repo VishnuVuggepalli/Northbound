@@ -13,6 +13,20 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # URL-safe slug: lowercase alnum, internal hyphens, 1-64 chars. Stable/immutable.
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+# Any C0/C1 control char (incl. CR/LF/TAB). A site ``name`` is a human display
+# label (the hostname-shaped identifier is ``slug``), so spaces and printable
+# punctuation are legitimate ("Edge DR", "West Coast") — but control characters
+# never are, and CR/LF is the same config/log-injection vector guarded elsewhere.
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _validate_display_name(v: str) -> str:
+    v = v.strip()
+    if not v:
+        raise ValueError("name must not be blank")
+    if _CONTROL_RE.search(v):
+        raise ValueError("name must not contain control characters")
+    return v
 
 
 class SiteCreateIn(BaseModel):
@@ -31,11 +45,21 @@ class SiteCreateIn(BaseModel):
             )
         return v
 
+    @field_validator("name")
+    @classmethod
+    def _name_no_control_chars(cls, v: str) -> str:
+        return _validate_display_name(v)
+
 
 class SiteUpdateIn(BaseModel):
     """Body of ``PATCH /api/sites/{id}`` — rename only (slug is immutable)."""
 
     name: str = Field(min_length=1, max_length=128)
+
+    @field_validator("name")
+    @classmethod
+    def _name_no_control_chars(cls, v: str) -> str:
+        return _validate_display_name(v)
 
 
 class SiteOut(BaseModel):

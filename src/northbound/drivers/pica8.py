@@ -882,19 +882,62 @@ def _parse_l3_interfaces_xml(xml: str) -> list[L3Interface]:
             )
         )
 
-    # LAGs: <aggregated-ethernet><name>ae0</name>... (members best-effort)
-    for ae in root.iter():
-        if _localname(ae.tag) != "aggregated-ethernet":
-            continue
-        members = [_child_text(m, "name") or "" for m in ae.iter() if _localname(m.tag) == "member"]
+    # LAGs: <aggregated-ethernet><name>ae0</name>... — surface member ports and
+    # key LACP params best-effort (never crash if a field is absent). Two member
+    # shapes are tolerated: a forward <member><name> list under the ae, and the
+    # xorplus reverse-pointer where a physical port's <ether-options> child names
+    # the ae it belongs to (the exact 802.3ad element name isn't grounded, so we
+    # match any ether-options descendant text equal to an ae name).
+    ae_els = [el for el in root.iter() if _localname(el.tag) == "aggregated-ethernet"]
+    ae_names = {(_child_text(ae, "name") or "").strip() for ae in ae_els} - {""}
+    reverse_members = _lag_reverse_members(root, ae_names)
+    for ae in ae_els:
+        name = (_child_text(ae, "name") or "").strip()
         out.append(
-            L3Interface(
-                name=_child_text(ae, "name") or "",
-                kind="aggregated",
-                detail=", ".join(m for m in members if m),
-            )
+            L3Interface(name=name, kind="aggregated", detail=_lag_detail(ae, name, reverse_members))
         )
     return out
+
+
+def _lag_reverse_members(root: etree._Element, ae_names: set[str]) -> dict[str, list[str]]:
+    """Map ae-name -> member ports via the xorplus reverse pointer: a physical
+    port carries an ``<ether-options>`` child whose text is the ae it joins."""
+    out: dict[str, list[str]] = {}
+    if not ae_names:
+        return out
+    for eo in root.iter():
+        if _localname(eo.tag) != "ether-options":
+            continue
+        port = eo.getparent()
+        port_name = (_child_text(port, "name") or "").strip() if port is not None else ""
+        if not port_name:
+            continue
+        for child in eo.iter():
+            ref = (child.text or "").strip()
+            if child is not eo and ref in ae_names:
+                out.setdefault(ref, []).append(port_name)
+    return out
+
+
+def _lag_detail(ae: etree._Element, name: str, reverse_members: dict[str, list[str]]) -> str:
+    """One free-form line for a LAG: members + LACP enable/mode/rate, best-effort."""
+    members = [_child_text(m, "name") or "" for m in ae.iter() if _localname(m.tag) == "member"]
+    members = [m for m in members if m] or reverse_members.get(name, [])
+    bits: list[str] = []
+    if members:
+        bits.append("members " + ", ".join(members))
+    # <aggregated-ether-options><lacp><enable>true</enable> ... <rate>fast</rate>
+    lacp = next((el for el in ae.iter() if _localname(el.tag) == "lacp"), None)
+    if lacp is not None:
+        enable = (_child_text(lacp, "enable") or "").strip().lower()
+        rate = (_child_text(lacp, "rate") or "").strip().lower()
+        mode = (_child_text(lacp, "mode") or "").strip().lower()
+        lacp_bits = [b for b in (mode, rate) if b]
+        if enable in ("", "true"):
+            bits.append("LACP" + (f" ({', '.join(lacp_bits)})" if lacp_bits else ""))
+        elif enable == "false":
+            bits.append("LACP off")
+    return " · ".join(bits)
 
 
 def _has_ancestor(el: etree._Element, ancestor_localname: str) -> bool:
@@ -1164,8 +1207,20 @@ def _detail_stp(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
 
 
 def _detail_lacp(el: etree._Element) -> tuple[list[tuple[str, str]], str]:
+    # System priority lives directly under <lacp>; per-interface fast/slow rate
+    # lives under <lacp><interface><name>ae0</name><rate>fast</rate>. Surface both
+    # best-effort — a block with neither yields empty (no crash).
     prio = _child_text(el, "priority")
-    return ([("System priority", prio)], f"priority {prio}") if prio else ([], "")
+    params: list[tuple[str, str]] = []
+    if prio:
+        params.append(("System priority", prio))
+    for iface in _iter_local(el, "interface"):
+        iname = (_child_text(iface, "name") or "").strip()
+        rate = (_child_text(iface, "rate") or "").strip()
+        if iname and rate:
+            params.append((iname, f"rate {rate}"))
+    summary = f"priority {prio}" if prio else ""
+    return params, summary
 
 
 def _detail_lbd(el: etree._Element) -> tuple[list[tuple[str, str]], str]:

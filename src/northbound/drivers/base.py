@@ -19,6 +19,7 @@ from northbound.schemas.driver import (
     DriverCapabilities,
     L3Change,
     L3Interface,
+    LagChange,
     Neighbor,
     OspfChange,
     OspfInterfaceInfo,
@@ -163,6 +164,18 @@ class Driver(ABC):
     async def render_ospf_change(self, change: OspfChange) -> ConfigDiff:
         """Render an OSPFv2 config change. Default: unsupported."""
         raise NotSupported(f"{self.platform_id}: render_ospf_change not supported")
+
+    async def render_lag_change(self, change: LagChange) -> ConfigDiff:
+        """Render a link-aggregation (LAG / LACP) change. ALWAYS unsupported.
+
+        SAFETY — DO NOT override this in any concrete driver. This is a DISABLED
+        scaffold for FUTURE lab-validated work: a LAG write reshapes bond
+        membership + LACP on a live fabric uplink, and an un-live-validated
+        device-write path already corrupted production Pica8 leaf-02 (the
+        trunk-VLAN incident). Until a render is validated against a lab device,
+        every driver MUST inherit this default and raise :class:`NotSupported`.
+        """
+        raise NotSupported(f"{self.platform_id}: render_lag_change not supported")
 
     async def apply_change(self, diff: ConfigDiff, *, confirm_seconds: int = 60) -> ApplyResult:
         raise NotSupported(f"{self.platform_id}: apply_change not supported")

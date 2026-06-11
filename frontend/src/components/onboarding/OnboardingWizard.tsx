@@ -13,7 +13,7 @@ import { Input, Textarea } from '@/shared/Input';
 import { Badge } from '@/shared/Badge';
 import { PlatformIcon } from '@/shared/PlatformIcon';
 import { cn } from '@/lib/cn';
-import { isPlausibleIp } from '@/lib/format';
+import { isPlausibleHostname, isPlausibleIp } from '@/lib/format';
 import {
   usePlatforms,
   useTestConnection,
@@ -90,7 +90,7 @@ export function OnboardingWizard() {
       case 1:
         return !!draft.platform_id;
       case 2:
-        return !!draft.name && !!draft.env && !!draft.role;
+        return isPlausibleHostname(draft.name) && !!draft.env && !!draft.role;
       case 3:
         return isPlausibleIp(draft.mgmt_ip) && draft.port > 0;
       case 4: {
@@ -374,6 +374,9 @@ function Step2Identity({ draft, update }: { draft: OnboardingDraft; update: Upda
     }
   };
 
+  const nameDirty = draft.name.length > 0;
+  const nameValid = isPlausibleHostname(draft.name);
+
   return (
     <div className="space-y-4">
       <Field label="Device name">
@@ -381,7 +384,15 @@ function Step2Identity({ draft, update }: { draft: OnboardingDraft; update: Upda
           value={draft.name}
           onChange={(e) => update({ name: e.target.value })}
           placeholder="lab-leaf-4"
+          aria-invalid={nameDirty && !nameValid}
+          aria-describedby={nameDirty && !nameValid ? 'onboard-name-error' : undefined}
+          autoComplete="off"
         />
+        {nameDirty && !nameValid && (
+          <span id="onboard-name-error" role="alert" className="mt-1 block text-xs text-danger">
+            Use a hostname: letters, digits, hyphens (e.g. lab-leaf-4).
+          </span>
+        )}
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Site">

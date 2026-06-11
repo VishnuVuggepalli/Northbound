@@ -18,6 +18,7 @@ from northbound.drivers.registry import all_platforms
 from northbound.schemas.driver import (
     ApplyResult,
     ConfigDiff,
+    LagChange,
     Neighbor,
     PortChange,
     PortState,
@@ -54,6 +55,21 @@ async def test_capabilities_consistent(driver: Driver) -> None:
         await driver.confirm("token")
     with pytest.raises(NotSupported):
         await driver.revert("token")
+
+
+@pytest.mark.asyncio
+async def test_lag_change_is_unsupported_on_every_driver(driver: Driver) -> None:
+    """LAG/LACP WRITE is a DISABLED scaffold for FUTURE lab-validated work.
+
+    No concrete driver implements ``render_lag_change`` — every one inherits the
+    ABC default that raises :class:`NotSupported`. This is asserted UNCONDITIONALLY
+    (even for ``writable`` drivers) so a live LAG write can never slip in without
+    this test failing. See the leaf-02 trunk-VLAN incident for why an un-live-
+    validated device write path is never shipped enabled.
+    """
+    change = LagChange(action="create", name="ae0", members=["te-1/1/1", "te-1/1/2"])
+    with pytest.raises(NotSupported):
+        await driver.render_lag_change(change)
 
 
 @pytest.mark.asyncio

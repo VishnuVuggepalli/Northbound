@@ -11,7 +11,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from northbound.schemas.driver import L3Change, OspfChange, PortChange, VlanChange, VrfChange
+from northbound.schemas.driver import (
+    L3Change,
+    LagChange,
+    OspfChange,
+    PortChange,
+    VlanChange,
+    VrfChange,
+)
 
 # --- CR/LF rejection: the CLI-injection vector -------------------------------
 
@@ -89,3 +96,50 @@ def test_ospf_area_dotted_or_int() -> None:
     OspfChange(action="set", target="interface", interface="vlan10", area="0")
     with pytest.raises(ValidationError):
         OspfChange(action="set", target="interface", interface="vlan10", area="evil")
+
+
+# --- LagChange: DISABLED write scaffold, but its DTO still validates ----------
+# (No driver renders a LAG change — see test_contract.py — but the payload shape
+#  is hardened now so the FUTURE lab-validated write inherits clean input.)
+
+
+def test_lag_change_create_valid() -> None:
+    c = LagChange(
+        action="create",
+        name="ae0",
+        members=["te-1/1/1", "te-1/1/2"],
+        lacp_mode="active",
+        lacp_rate="fast",
+    )
+    assert c.name == "ae0" and c.members == ("te-1/1/1", "te-1/1/2")
+    assert c.lacp_mode == "active" and c.lacp_rate == "fast"
+
+
+def test_lag_change_delete_needs_only_name() -> None:
+    c = LagChange(action="delete", name="Po1")
+    assert c.action == "delete" and c.members == ()
+
+
+def test_lag_change_create_requires_members() -> None:
+    with pytest.raises(ValidationError):
+        LagChange(action="create", name="ae0")
+
+
+def test_lag_change_rejects_crlf_name() -> None:
+    with pytest.raises(ValidationError):
+        LagChange(action="create", name="ae0\nno shutdown", members=["te-1/1/1"])
+
+
+def test_lag_change_rejects_crlf_member() -> None:
+    with pytest.raises(ValidationError):
+        LagChange(action="create", name="ae0", members=["te-1/1/1\nevil"])
+
+
+def test_lag_change_rejects_blank_name() -> None:
+    with pytest.raises(ValidationError):
+        LagChange(action="create", name="", members=["te-1/1/1"])
+
+
+def test_lag_change_rejects_bad_lacp_mode() -> None:
+    with pytest.raises(ValidationError):
+        LagChange(action="create", name="ae0", members=["te-1/1/1"], lacp_mode="bogus")

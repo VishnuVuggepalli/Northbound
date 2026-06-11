@@ -8,11 +8,36 @@ from every response model so they can never be serialised out of the service.
 from __future__ import annotations
 
 import ipaddress
+import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from northbound.models.enums import DeviceRole
 from northbound.schemas.driver import Credentials, DriverCapabilities
+
+# One RFC 1123 label: 1..63 chars, alnum + internal hyphen, no leading/trailing
+# hyphen. Underscores are NOT permitted (that's RFC 952/1123, not DNS-SD).
+_HOSTNAME_LABEL_RE = re.compile(r"^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")
+
+
+def _validate_hostname(v: str) -> str:
+    """RFC 1123 host name: <=253 total, dot-separated labels each 1..63 chars,
+    alphanumeric + hyphen, no leading/trailing hyphen. Case-insensitive.
+
+    Device names in Northbound are host-style identifiers (e.g. ``lab-leaf-1``,
+    ``spine01.fabric.example``), so we enforce real hostname rules at the system
+    boundary rather than accepting free text that could carry CR/LF or shell
+    metacharacters downstream.
+    """
+    if len(v) > 253:
+        raise ValueError("name must be <=253 characters (RFC 1123)")
+    labels = v.split(".")
+    if any(not _HOSTNAME_LABEL_RE.match(label) for label in labels):
+        raise ValueError(
+            "name must be an RFC 1123 hostname: dot-separated labels of 1..63 "
+            "alphanumeric/hyphen characters, no leading/trailing hyphen"
+        )
+    return v
 
 
 def _validate_ip_address(v: str) -> str:
@@ -79,6 +104,11 @@ class DeviceCreateIn(BaseModel):
     ssh_user: str | None = Field(default=None, max_length=128)
     prefer_native_api: bool = True
     credentials: CredentialsIn = Field(default_factory=CredentialsIn)
+
+    @field_validator("name")
+    @classmethod
+    def _name_is_hostname(cls, v: str) -> str:
+        return _validate_hostname(v)
 
     @field_validator("mgmt_ip")
     @classmethod

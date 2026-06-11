@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isPlausibleArea, isPlausibleCidr, isPlausibleIp } from './format';
+import {
+  isPlausibleArea,
+  isPlausibleCidr,
+  isPlausibleHostname,
+  isPlausibleIp,
+} from './format';
 
 describe('isPlausibleIp', () => {
   it('accepts a valid dotted-quad', () => {
@@ -51,5 +56,33 @@ describe('isPlausibleArea', () => {
   it('rejects garbage', () => {
     expect(isPlausibleArea('x')).toBe(false);
     expect(isPlausibleArea('-1')).toBe(false);
+  });
+});
+
+describe('isPlausibleHostname', () => {
+  it('accepts RFC 1123 hostname labels', () => {
+    expect(isPlausibleHostname('lab-leaf-1')).toBe(true);
+    expect(isPlausibleHostname('dc-1')).toBe(true);
+    expect(isPlausibleHostname('mock-switch-01')).toBe(true);
+    expect(isPlausibleHostname('a')).toBe(true);
+    expect(isPlausibleHostname('Leaf-2')).toBe(true); // case-insensitive
+    expect(isPlausibleHostname('spine01.fabric.example')).toBe(true); // multi-label
+  });
+
+  it('rejects leading/trailing hyphens and bad chars', () => {
+    expect(isPlausibleHostname('-leaf')).toBe(false);
+    expect(isPlausibleHostname('leaf-')).toBe(false);
+    expect(isPlausibleHostname('leaf 02')).toBe(false); // whitespace
+    expect(isPlausibleHostname('leaf_02')).toBe(false); // underscore
+    expect(isPlausibleHostname('bad/slash')).toBe(false);
+    expect(isPlausibleHostname('a..b')).toBe(false); // empty label
+    expect(isPlausibleHostname('x\ny')).toBe(false); // newline injection
+  });
+
+  it('rejects empty and over-long values', () => {
+    expect(isPlausibleHostname('')).toBe(false);
+    expect(isPlausibleHostname('a'.repeat(64))).toBe(false); // label > 63
+    const label = 'a'.repeat(63);
+    expect(isPlausibleHostname([label, label, label, label].join('.'))).toBe(false); // > 253
   });
 });

@@ -1029,3 +1029,90 @@ def test_detail_bgp_lists_neighbors_with_remote_as() -> None:
     assert d["Neighbor 10.0.0.2"] == "remote-AS 65001"
     assert d["Neighbor 10.0.0.3"] == "remote-AS 65002"
     assert "AS 65000" in summary and "2 peers" in summary
+
+
+# --------------------------------------------------------------------------- #
+# LAG / LACP read enrichment (members + LACP params, best-effort)
+# --------------------------------------------------------------------------- #
+def test_parse_l3_lag_forward_member_list() -> None:
+    """Junos-style <aggregated-ethernet> with explicit <member> children."""
+    from northbound.drivers.pica8 import _parse_l3_interfaces_xml
+
+    xml = """<data><interface xmlns="http://pica8.com/xorplus/interface">
+      <aggregated-ethernet><name>ae0</name>
+        <member><name>te-1/1/1</name></member>
+        <member><name>te-1/1/2</name></member>
+        <aggregated-ether-options><lacp><enable>true</enable></lacp></aggregated-ether-options>
+      </aggregated-ethernet></interface></data>"""
+    l3 = {i.name: i for i in _parse_l3_interfaces_xml(xml)}
+    assert "ae0" in l3 and l3["ae0"].kind == "aggregated"
+    # members surfaced in the free-form detail field
+    assert "te-1/1/1" in l3["ae0"].detail and "te-1/1/2" in l3["ae0"].detail
+    # LACP enable surfaced
+    assert "LACP" in l3["ae0"].detail
+
+
+def test_parse_l3_lag_reverse_pointer_members() -> None:
+    """xorplus shape: membership lives on the physical port via an
+    ether-options child pointing back at the ae (no forward <member> list).
+
+    The literal NETCONF element name for the 802.3ad reference isn't grounded
+    (CLI token ``802.3ad`` is not a legal XML element name); the parser matches
+    any ``ether-options`` descendant whose text equals an ae name, so it works
+    regardless of the exact wrapper tag PicOS emits."""
+    from northbound.drivers.pica8 import _parse_l3_interfaces_xml
+
+    xml = """<data><interface xmlns="http://pica8.com/xorplus/interface">
+      <aggregated-ethernet><name>ae1</name>
+        <aggregated-ether-options><lacp><enable>true</enable></lacp></aggregated-ether-options>
+      </aggregated-ethernet>
+      <gigabit-ethernet><name>ge-1/1/3</name>
+        <ether-options><aggregate>ae1</aggregate></ether-options></gigabit-ethernet>
+      <gigabit-ethernet><name>ge-1/1/4</name>
+        <ether-options><aggregate>ae1</aggregate></ether-options></gigabit-ethernet>
+      <gigabit-ethernet><name>ge-1/1/5</name>
+        <ether-options><aggregate>ae2</aggregate></ether-options></gigabit-ethernet>
+    </interface></data>"""
+    l3 = {i.name: i for i in _parse_l3_interfaces_xml(xml)}
+    assert "ae1" in l3
+    # only ge-1/1/3 and ge-1/1/4 point at ae1; ge-1/1/5 belongs to ae2
+    assert "ge-1/1/3" in l3["ae1"].detail and "ge-1/1/4" in l3["ae1"].detail
+    assert "ge-1/1/5" not in l3["ae1"].detail
+
+
+def test_parse_l3_lag_never_crashes_on_empty_ae() -> None:
+    """A bare <aggregated-ethernet> with no members/options must not crash."""
+    from northbound.drivers.pica8 import _parse_l3_interfaces_xml
+
+    xml = """<data><interface xmlns="http://pica8.com/xorplus/interface">
+      <aggregated-ethernet><name>ae9</name></aggregated-ethernet></interface></data>"""
+    l3 = {i.name: i for i in _parse_l3_interfaces_xml(xml)}
+    assert "ae9" in l3 and l3["ae9"].kind == "aggregated"
+
+
+def test_detail_lacp_surfaces_priority_and_rate() -> None:
+    """_detail_lacp surfaces system-priority and per-interface fast/slow rate."""
+    from northbound.drivers.pica8 import _detail_lacp
+
+    el = etree.fromstring(
+        b"""<lacp xmlns="http://pica8.com/xorplus/lacp">
+          <priority>1000</priority>
+          <interface><name>ae0</name><rate>fast</rate></interface>
+          <interface><name>ae1</name><rate>slow</rate></interface>
+        </lacp>"""
+    )
+    params, summary = _detail_lacp(el)
+    d = dict(params)
+    assert d["System priority"] == "1000"
+    assert "ae0" in d and "fast" in d["ae0"]
+    assert "ae1" in d and "slow" in d["ae1"]
+    assert "priority 1000" in summary
+
+
+def test_detail_lacp_no_priority_no_crash() -> None:
+    """LACP block with neither priority nor interfaces yields empty, no crash."""
+    from northbound.drivers.pica8 import _detail_lacp
+
+    el = etree.fromstring(b'<lacp xmlns="http://pica8.com/xorplus/lacp"></lacp>')
+    params, summary = _detail_lacp(el)
+    assert params == [] and summary == ""

@@ -370,6 +370,39 @@ class OspfChange(BaseModel):
         return self
 
 
+class LagChange(BaseModel):
+    """A link-aggregation (LAG / LACP) change — DISABLED write scaffold.
+
+    SAFETY: there is intentionally NO concrete-driver implementation of
+    ``render_lag_change``; every driver inherits the ABC default that raises
+    :class:`~northbound.drivers.base.NotSupported`. This DTO exists only so a
+    FUTURE, lab-validated LAG write inherits hardened input validation — it is
+    NOT wired to any apply branch or API endpoint today.
+
+    Why so cautious: a Northbound trunk-VLAN write that was authored from docs
+    and never live-validated corrupted a production Pica8 switch (leaf-02). A
+    LAG write touches bond membership + LACP on a live fabric uplink — strictly
+    more dangerous — so it ships disabled until validated on a lab device.
+
+    - ``name`` is the aggregate interface (``ae0`` on PicOS, ``Po1`` on Arista/Cisco).
+    - ``members`` are the physical member ports; required for ``create``.
+    - ``lacp_mode`` / ``lacp_rate`` are optional LACP knobs.
+    """
+
+    action: Literal["create", "delete"]
+    name: str = Field(min_length=1, max_length=64, pattern=_NO_CRLF)
+    members: tuple[Annotated[str, Field(min_length=1, max_length=64, pattern=_NO_CRLF)], ...] = ()
+    lacp_mode: Literal["active", "passive"] | None = None
+    lacp_rate: Literal["fast", "slow"] | None = None
+    system_priority: int | None = Field(default=None, ge=0, le=65535)
+
+    @model_validator(mode="after")
+    def _check(self) -> LagChange:
+        if self.action == "create" and not self.members:
+            raise ValueError("create requires at least one member port")
+        return self
+
+
 class L3Change(BaseModel):
     """A routed-interface change: create/delete an SVI (VLAN interface) or a
     loopback, with an optional IPv4 address.
