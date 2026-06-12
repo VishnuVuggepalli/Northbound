@@ -1,7 +1,7 @@
 [
-  {".id":"*1","name":"ether1","type":"ether","disabled":"false","running":"true","mtu":"1500","mac-address":"AA:BB:CC:00:00:01","comment":"uplink"},
-  {".id":"*2","name":"ether2","type":"ether","disabled":"true","running":"false","mtu":"1500","mac-address":"AA:BB:CC:00:00:02","comment":""},
-  {".id":"*3","name":"bridge1","type":"bridge","disabled":"false","running":"true","mtu":"1500","mac-address":"AA:BB:CC:00:00:03","comment":""},
+  {".id":"*1","name":"ether1","type":"ether","disabled":"false","running":"true","mtu":"1500","mac-address":"AA:BB:CC:00:00:01","comment":"uplink","rx-byte":"1610612736","tx-byte":"524288000","rx-packet":"1500000","tx-packet":"900000","tx-queue-drop":"12"},
+  {".id":"*2","name":"ether2","type":"ether","disabled":"true","running":"false","mtu":"1500","mac-address":"AA:BB:CC:00:00:02","comment":"","rx-byte":"0","tx-byte":"0","rx-packet":"0","tx-packet":"0","tx-queue-drop":"0"},
+  {".id":"*3","name":"bridge1","type":"bridge","disabled":"false","running":"true","mtu":"1500","mac-address":"AA:BB:CC:00:00:03","comment":"","rx-byte":"2048","tx-byte":"4096","rx-packet":"16","tx-packet":"32","tx-queue-drop":"0"},
   {".id":"*4","name":"vlan100","type":"vlan","disabled":"false","running":"true","mtu":"1500","mac-address":"AA:BB:CC:00:00:03","comment":"mgmt-svi"},
   {".id":"*9","name":"Ethernet1","type":"ether","disabled":"false","running":"true","mtu":"1500","mac-address":"AA:BB:CC:00:00:09","comment":""}
 ]

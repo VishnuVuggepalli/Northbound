@@ -1,0 +1,5 @@
+[
+  {".id":"*1","dst-address":"0.0.0.0/0","gateway":"192.168.88.254","immediate-gw":"192.168.88.254%ether1","distance":"1","active":"true","routing-table":"main","static":"true"},
+  {".id":"*2","dst-address":"192.168.88.0/24","gateway":"bridge1","immediate-gw":"bridge1","distance":"0","active":"true","routing-table":"main","connect":"true"},
+  {".id":"*3","dst-address":"10.0.0.0/8","gateway":"192.168.88.253","distance":"1","active":"false","routing-table":"main","static":"true"}
+]

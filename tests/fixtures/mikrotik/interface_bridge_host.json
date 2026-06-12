@@ -1,0 +1,32 @@
+[
+  {
+    ".id": "*1",
+    "mac-address": "AA:BB:CC:00:11:22",
+    "on-interface": "ether1",
+    "bridge": "bridge1",
+    "vid": "100",
+    "dynamic": "true",
+    "local": "false",
+    "external": "true",
+    "age": "5m30s"
+  },
+  {
+    ".id": "*2",
+    "mac-address": "AA:BB:CC:00:33:44",
+    "on-interface": "ether2",
+    "bridge": "bridge1",
+    "dynamic": "false",
+    "local": "false",
+    "external": "false"
+  },
+  {
+    ".id": "*3",
+    "mac-address": "AA:BB:CC:00:55:66",
+    "on-interface": "bridge1",
+    "bridge": "bridge1",
+    "vid": "200",
+    "dynamic": "false",
+    "local": "true",
+    "external": "false"
+  }
+]

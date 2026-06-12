@@ -47,11 +47,14 @@ from northbound.schemas.driver import (
     DiscoveryResult,
     DriverCapabilities,
     L3Interface,
+    MacEntry,
     MgmtService,
     Neighbor,
     PortChange,
     PortState,
+    ProtocolDetail,
     ProtocolStatus,
+    ProtocolTable,
     SystemInfo,
     TestResult,
     VlanInfo,
@@ -260,7 +263,47 @@ class MikrotikDriver(Driver):
             if s.get("name")
         )
         protocols = (ProtocolStatus(name="lldp", enabled=True),)
-        return SystemInfo(protocols=protocols, services=svc, facts=facts)
+
+        # L2 forwarding (MAC) table from the bridge host table. mac_supported is
+        # True once we successfully read it (even if empty) so the UI can tell
+        # "no hosts learned" apart from "driver can't read it".
+        mac_table: tuple[MacEntry, ...] = ()
+        mac_supported = True
+        try:
+            hosts = await self._get("interface/bridge/host")
+            mac_table = tuple(_mac_entry(h) for h in hosts if h.get("mac-address"))
+        except DriverError:
+            mac_supported = False
+
+        return SystemInfo(
+            protocols=protocols,
+            services=svc,
+            facts=facts,
+            mac_table=mac_table,
+            mac_supported=mac_supported,
+        )
+
+    async def get_protocol_detail(self, slug: str) -> ProtocolDetail:
+        """Live operational tables for the System tab's Diagnostics slugs.
+
+        Each maps to a RouterOS REST menu read. An unknown slug returns empty
+        (base behaviour); a read failure is surfaced as ``error`` so the UI shows
+        "couldn't read" rather than a misleading "no entries".
+        """
+        builders = {
+            "Counters": ("interface", _counters_table),
+            "ARP": ("ip/arp", _arp_table),
+            "Routing": ("ip/route", _route_table),
+        }
+        spec = builders.get(slug)
+        if spec is None:
+            return ProtocolDetail(slug=slug)
+        menu, build = spec
+        try:
+            rows = await self._get(menu)
+        except DriverError as exc:
+            return ProtocolDetail(slug=slug, error=str(exc))
+        return ProtocolDetail(slug=slug, tables=(build(rows),))
 
     # ---------- write (immediate REST PATCH; no commit-confirm) ----------
 
@@ -404,6 +447,116 @@ def _l3_kind(iface_type: str) -> str:
     if t in ("bonding", "bond"):
         return "aggregated"
     return "management"
+
+
+def _mac_entry(row: dict[str, Any]) -> MacEntry:
+    """One /interface/bridge/host row → MacEntry.
+
+    RouterOS REST returns every value as a string — including booleans (``"true"``
+    / ``"false"``) and numbers — so each field is coerced explicitly. ``vid`` is
+    present only when the bridge runs vlan-filtering; absent → no VLAN context
+    (``None``, not 0). A host owned by the bridge itself (``local``) is labelled
+    Local; a non-dynamic entry is Static; otherwise Dynamic.
+    """
+    vid = row.get("vid")
+    if str(row.get("local", "")).lower() == "true":
+        kind = "Local"
+    elif str(row.get("dynamic", "")).lower() == "false":
+        kind = "Static"
+    else:
+        kind = "Dynamic"
+    age = row.get("age")
+    return MacEntry(
+        vlan=int(vid) if vid not in (None, "") else None,
+        mac=str(row.get("mac-address", "")),
+        interface=str(row.get("on-interface", "")),
+        type=kind,
+        age=str(age) if age else None,
+    )
+
+
+def _human_bytes(v: object) -> str:
+    """RouterOS REST returns counters as strings; render a byte count human-
+    readably ("1.5 GB"). Non-numeric/absent → em dash."""
+    try:
+        n = float(int(str(v)))
+    except (TypeError, ValueError):
+        return "—"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{int(n)} B" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
+def _counters_table(rows: list[dict[str, Any]]) -> ProtocolTable:
+    """/interface rows → interface traffic counters. Only fields confirmed on the
+    generic /interface menu are used (rx/tx byte+packet, tx-queue-drop)."""
+    out = tuple(
+        (
+            str(r.get("name", "")),
+            _human_bytes(r.get("rx-byte")),
+            _human_bytes(r.get("tx-byte")),
+            str(r.get("rx-packet", "") or ""),
+            str(r.get("tx-packet", "") or ""),
+            str(r.get("tx-queue-drop", "") or ""),
+        )
+        for r in rows
+        if r.get("name")
+    )
+    return ProtocolTable(
+        title="Interface counters",
+        columns=("Interface", "RX", "TX", "RX pkts", "TX pkts", "TX drops"),
+        rows=out,
+    )
+
+
+def _arp_status(row: dict[str, Any]) -> str:
+    """Prefer the explicit ``status`` enum; fall back to the ``complete`` flag."""
+    status = row.get("status")
+    if status:
+        return str(status)
+    return "complete" if str(row.get("complete", "")).lower() == "true" else "incomplete"
+
+
+def _arp_table(rows: list[dict[str, Any]]) -> ProtocolTable:
+    """/ip/arp rows → ARP table (IP ↔ MAC ↔ port, resolution status)."""
+    out = tuple(
+        (
+            str(r.get("address", "")),
+            str(r.get("mac-address", "") or "—"),
+            str(r.get("interface", "")),
+            _arp_status(r),
+        )
+        for r in rows
+        if r.get("address")
+    )
+    return ProtocolTable(
+        title="ARP entries",
+        columns=("IP address", "MAC", "Interface", "Status"),
+        rows=out,
+    )
+
+
+def _route_table(rows: list[dict[str, Any]]) -> ProtocolTable:
+    """/ip/route rows → IPv4 FIB. ``immediate-gw`` (v7) is the resolved next-hop
+    after recursion; ``gateway`` is what was configured."""
+    out = tuple(
+        (
+            str(r.get("dst-address", "")),
+            str(r.get("gateway", "") or ""),
+            str(r.get("immediate-gw", "") or ""),
+            str(r.get("distance", "") or ""),
+            "yes" if str(r.get("active", "")).lower() == "true" else "no",
+        )
+        for r in rows
+        if r.get("dst-address")
+    )
+    return ProtocolTable(
+        title="IPv4 routes",
+        columns=("Destination", "Gateway", "Next-hop", "Distance", "Active"),
+        rows=out,
+    )
 
 
 def _neighbor_from(row: dict[str, Any]) -> Neighbor:

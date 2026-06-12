@@ -122,6 +122,116 @@ async def test_test_credentials_reports_version() -> None:
     assert "7.14.2" in (result.platform_version or "")
 
 
+@pytest.mark.asyncio
+async def test_get_system_info_reads_bridge_host_mac_table() -> None:
+    """The MAC/forwarding table comes from /interface/bridge/host. RouterOS REST
+    returns all values as strings (incl. booleans), so the parser must coerce
+    dynamic/local and map vid → VLAN (absent → None)."""
+    drv, _ = _driver()
+    info = await drv.get_system_info()
+    assert info.mac_supported is True
+    table = {e.mac: e for e in info.mac_table}
+    assert len(table) == 3
+
+    dyn = table["AA:BB:CC:00:11:22"]
+    assert dyn.type == "Dynamic"
+    assert dyn.interface == "ether1"  # on-interface, not bridge
+    assert dyn.vlan == 100  # vid coerced to int
+    assert dyn.age == "5m30s"
+
+    # vlan-filtering off on this row → vid absent → no VLAN context (not 0)
+    static = table["AA:BB:CC:00:33:44"]
+    assert static.type == "Static"
+    assert static.vlan is None
+    assert static.age is None
+
+    # the bridge's own MAC is labelled Local
+    assert table["AA:BB:CC:00:55:66"].type == "Local"
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_counters_table() -> None:
+    """Diagnostics → Counters reads /interface and humanizes byte counters."""
+    drv, _ = _driver()
+    detail = await drv.get_protocol_detail("Counters")
+    assert detail.error is None
+    assert len(detail.tables) == 1
+    t = detail.tables[0]
+    assert t.columns[:3] == ("Interface", "RX", "TX")
+    by_if = {row[0]: row for row in t.rows}
+    assert by_if["ether1"][1] == "1.5 GB"  # 1610612736 bytes humanized
+    assert by_if["ether1"][5] == "12"  # tx-queue-drop passthrough
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_arp_table() -> None:
+    """Diagnostics → ARP reads /ip/arp; incomplete entries surface their status."""
+    drv, _ = _driver()
+    detail = await drv.get_protocol_detail("ARP")
+    rows = {row[0]: row for row in detail.tables[0].rows}
+    assert rows["192.168.88.10"][1] == "AA:BB:CC:00:0A:01"
+    assert rows["192.168.88.10"][3] == "reachable"
+    # no MAC yet → em dash, status incomplete
+    assert rows["192.168.88.11"][1] == "—"
+    assert rows["192.168.88.11"][3] == "incomplete"
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_routing_table() -> None:
+    """Diagnostics → Routing reads /ip/route; v7 immediate-gw is the next-hop."""
+    drv, _ = _driver()
+    detail = await drv.get_protocol_detail("Routing")
+    rows = {row[0]: row for row in detail.tables[0].rows}
+    default = rows["0.0.0.0/0"]
+    assert default[2] == "192.168.88.254%ether1"  # immediate-gw
+    assert default[4] == "yes"  # active
+    assert rows["10.0.0.0/8"][4] == "no"  # inactive route
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_unknown_slug_is_empty() -> None:
+    drv, _ = _driver()
+    detail = await drv.get_protocol_detail("Optics")
+    assert detail.tables == ()
+    assert detail.error is None
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_read_error_surfaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A read failure is reported as `error`, not a misleading empty table."""
+    drv, _ = _driver()
+
+    async def _boom(menu: str) -> Any:
+        raise DriverError("device unreachable")
+
+    monkeypatch.setattr(drv, "_get", _boom)
+    detail = await drv.get_protocol_detail("ARP")
+    assert detail.error == "device unreachable"
+    assert detail.tables == ()
+
+
+@pytest.mark.asyncio
+async def test_get_system_info_mac_unsupported_on_read_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bridge-host read failure degrades to mac_supported=False — it must not
+    sink the whole system view (protocols/services/facts still return)."""
+    drv, _ = _driver()
+
+    real_get = drv._get
+
+    async def _flaky(menu: str) -> Any:
+        if menu == "interface/bridge/host":
+            raise DriverError("host table unavailable")
+        return await real_get(menu)
+
+    monkeypatch.setattr(drv, "_get", _flaky)
+    info = await drv.get_system_info()
+    assert info.mac_supported is False
+    assert info.mac_table == ()
+    assert info.facts.os_version  # rest of the snapshot survived
+
+
 # --------------------------------------------------------------------------- #
 # writes
 # --------------------------------------------------------------------------- #

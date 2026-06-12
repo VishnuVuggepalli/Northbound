@@ -1,0 +1,5 @@
+[
+  {".id":"*1","address":"192.168.88.10","mac-address":"AA:BB:CC:00:0A:01","interface":"bridge1","complete":"true","dynamic":"true","status":"reachable"},
+  {".id":"*2","address":"192.168.88.11","mac-address":"","interface":"bridge1","complete":"false","dynamic":"true","status":"incomplete"},
+  {".id":"*3","address":"192.168.88.1","mac-address":"AA:BB:CC:00:00:03","interface":"bridge1","complete":"true","dynamic":"false"}
+]
