@@ -5,6 +5,7 @@ import { RequestRow } from '@/components/requests/RequestRow';
 import {
   useApplyRequest,
   useApproveRequest,
+  useCancelRequest,
   useDevices,
   useAllPorts,
   useRejectRequest,
@@ -55,6 +56,7 @@ export function RequestsPage() {
   const reject = useRejectRequest();
   const requestChanges = useRequestChanges();
   const resubmit = useResubmitRequest();
+  const cancel = useCancelRequest();
 
   const [filter, setFilter] = useState<FilterKey>('all');
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -212,6 +214,21 @@ export function RequestsPage() {
                           kind: 'error',
                           title: 'Resubmit failed',
                           message: e instanceof Error ? e.message : 'Resubmit failed.',
+                        }),
+                    },
+                  )
+                }
+                onCancel={(id) =>
+                  cancel.mutate(
+                    { id },
+                    {
+                      onSuccess: () =>
+                        pushToast({ kind: 'info', title: 'Request deleted', message: `#${id}` }),
+                      onError: (e: unknown) =>
+                        pushToast({
+                          kind: 'error',
+                          title: 'Delete failed',
+                          message: e instanceof Error ? e.message : 'Could not delete request.',
                         }),
                     },
                   )

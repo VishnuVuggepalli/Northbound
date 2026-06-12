@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRight, ChevronDown, ChevronRight, ExternalLink, History } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronRight, ExternalLink, History, Trash2 } from 'lucide-react';
 import { Button } from '@/shared/Button';
 import { Input, Textarea } from '@/shared/Input';
 import { VlanChip } from '@/shared/VlanChip';
@@ -33,9 +33,21 @@ interface RequestRowProps {
   onReject?: (id: string, comment: string) => void;
   onRequestChanges?: (id: string, comment: string) => void;
   onResubmit?: (id: string, input: { untagged_vlan?: number; reason?: string }) => void;
+  onCancel?: (id: string) => void;
   onOpenPort?: (deviceId: string, portName: string, env: Device['env']) => void;
   lastBackupAgoMs?: number;
 }
+
+// Non-applied states a request may be withdrawn from (soft-cancel). Applying /
+// awaiting_confirm / applied / reverted carry device-change history and are not
+// cancellable — the backend enforces this too (409).
+const CANCELLABLE: ReadonlySet<ChangeRequest['status']> = new Set([
+  'pending',
+  'needs_revision',
+  'approved',
+  'rejected',
+  'failed',
+]);
 
 export function RequestRow({
   request,
@@ -51,6 +63,7 @@ export function RequestRow({
   onReject,
   onRequestChanges,
   onResubmit,
+  onCancel,
   onOpenPort,
   lastBackupAgoMs = 4 * 60 * 60 * 1000,
 }: RequestRowProps) {
@@ -58,6 +71,7 @@ export function RequestRow({
   const [panel, setPanel] = useState<null | 'reject' | 'changes'>(null);
   const [comment, setComment] = useState('');
   const [resubmitting, setResubmitting] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [resubVlan, setResubVlan] = useState(String(request.requested_changes.untagged_vlan ?? ''));
   const [resubReason, setResubReason] = useState(request.reason);
   const [confirmingApply, setConfirmingApply] = useState(false);
@@ -235,6 +249,29 @@ export function RequestRow({
                 </Button>
               </div>
             </div>
+          ) : confirmingCancel ? (
+            <div className="space-y-2 rounded-md border border-danger/30 bg-danger/5 p-3">
+              <div className="text-xs text-fg">
+                Delete this request? It moves to <strong>Cancelled</strong> and leaves the
+                review queue. The history is kept for the audit trail; this can’t be undone.
+              </div>
+              <div className="flex justify-end gap-1.5">
+                <Button kind="ghost" size="sm" onClick={() => setConfirmingCancel(false)}>
+                  Keep
+                </Button>
+                <Button
+                  kind="danger"
+                  size="sm"
+                  leftIcon={<Trash2 size={12} />}
+                  onClick={() => {
+                    onCancel?.(request.id);
+                    setConfirmingCancel(false);
+                  }}
+                >
+                  Delete request
+                </Button>
+              </div>
+            </div>
           ) : (
             <div className="flex flex-wrap items-center justify-end gap-2">
               {onOpenPort && (
@@ -296,6 +333,19 @@ export function RequestRow({
                     Reject…
                   </Button>
                 </>
+              )}
+              {/* Soft-delete: owner (mine view) or admin (queue) may withdraw a
+                  non-applied request. Backend re-checks authz + state (409). */}
+              {onCancel && CANCELLABLE.has(request.status) && (
+                <Button
+                  kind="ghost"
+                  size="sm"
+                  leftIcon={<Trash2 size={12} />}
+                  onClick={() => setConfirmingCancel(true)}
+                  title="Withdraw this request"
+                >
+                  Delete
+                </Button>
               )}
             </div>
           )}

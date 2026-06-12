@@ -5,6 +5,7 @@ import { RequestRow } from '@/components/requests/RequestRow';
 import {
   useApplyRequest,
   useApproveRequest,
+  useCancelRequest,
   useDevices,
   useAllPorts,
   useRejectRequest,
@@ -44,6 +45,7 @@ export function AdminQueuePage() {
   const approve = useApproveRequest();
   const apply = useApplyRequest();
   const reject = useRejectRequest();
+  const cancel = useCancelRequest();
 
   const [envFilter, setEnvFilter] = useState<string>('all');
   const [sort, setSort] = useState<SortKey>('age');
@@ -174,6 +176,21 @@ export function AdminQueuePage() {
                           kind: 'error',
                           title: 'Reject failed',
                           message: e instanceof Error ? e.message : 'Reject failed.',
+                        }),
+                    },
+                  )
+                }
+                onCancel={(id) =>
+                  cancel.mutate(
+                    { id },
+                    {
+                      onSuccess: () =>
+                        pushToast({ kind: 'info', title: 'Request deleted', message: `#${id}` }),
+                      onError: (e: unknown) =>
+                        pushToast({
+                          kind: 'error',
+                          title: 'Delete failed',
+                          message: e instanceof Error ? e.message : 'Could not delete request.',
                         }),
                     },
                   )

@@ -145,3 +145,58 @@ describe('realClient transport', () => {
     expect(platforms[0]!.web_ui_url_template).toBe('https://{mgmt_ip}/');
   });
 });
+
+describe('running config + backups', () => {
+  test('getDeviceConfig hits the real config endpoint and returns the dump', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ config_text: 'hostname leaf-01\n!\n', cached: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const cfg = await realClient.getDeviceConfig('dev-1');
+    expect(cfg.config_text).toContain('hostname leaf-01');
+    expect(cfg.cached).toBe(false);
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain('/api/devices/dev-1/config');
+    expect(String(url)).not.toContain('refresh');
+  });
+
+  test('getDeviceConfig?refresh=true forces a re-fetch', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ config_text: 'x', cached: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await realClient.getDeviceConfig('dev-1', true);
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain('refresh=true');
+  });
+
+  test('backupNow POSTs to the backup endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { id: 'b1', device_id: 'dev-1', fetched_at: '2026-06-11T00:00:00Z', fetched_by: 'u1' },
+        201,
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const b = await realClient.backupNow('dev-1');
+    expect(b.id).toBe('b1');
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain('/api/devices/dev-1/config/backup');
+    expect(init.method).toBe('POST');
+  });
+
+  test('getBackupDiff requests the diff for a specific backup', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ backup_id: 'b1', diff: '+ added line' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const d = await realClient.getBackupDiff('dev-1', 'b1');
+    expect(d.diff).toContain('added line');
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toContain('/api/devices/dev-1/config/backups/b1/diff');
+  });
+});

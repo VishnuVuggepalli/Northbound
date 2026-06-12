@@ -34,6 +34,8 @@ export const queryKeys = {
   vlans: (deviceId: string) => ['devices', deviceId, 'vlans'] as const,
   l3: (deviceId: string) => ['devices', deviceId, 'l3-interfaces'] as const,
   ospfInterfaces: (deviceId: string) => ['devices', deviceId, 'ospf-interfaces'] as const,
+  deviceConfig: (deviceId: string) => ['devices', deviceId, 'config'] as const,
+  deviceBackups: (deviceId: string) => ['devices', deviceId, 'backups'] as const,
   settings: () => ['settings'] as const,
 } as const;
 
@@ -62,6 +64,51 @@ export function useDevice(id: string | null | undefined) {
     queryKey: queryKeys.device(id ?? ''),
     queryFn: () => api.getDevice(id as string),
     enabled: !!id,
+  });
+}
+
+/** Full running config (real device dump). ``enabled`` gates the fetch so the
+ *  admin-only config view doesn't request it for non-admins. */
+export function useDeviceConfig(deviceId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.deviceConfig(deviceId),
+    queryFn: () => api.getDeviceConfig(deviceId),
+    enabled: enabled && !!deviceId,
+  });
+}
+
+/** Stored config backups for a device, newest first. */
+export function useDeviceBackups(deviceId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.deviceBackups(deviceId),
+    queryFn: () => api.listConfigBackups(deviceId),
+    enabled: enabled && !!deviceId,
+  });
+}
+
+/** Unified diff of a stored backup vs the live running config. Lazily fetched
+ *  (only when the diff panel is open and a backup exists). */
+export function useBackupDiff(
+  deviceId: string,
+  backupId: string | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['devices', deviceId, 'backups', backupId ?? '', 'diff'],
+    queryFn: () => api.getBackupDiff(deviceId, backupId as string),
+    enabled: enabled && !!deviceId && !!backupId,
+  });
+}
+
+/** Take a fresh backup now, then refresh the backup list + config view. */
+export function useBackupNow(deviceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.backupNow(deviceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.deviceBackups(deviceId) });
+      qc.invalidateQueries({ queryKey: queryKeys.deviceConfig(deviceId) });
+    },
   });
 }
 
@@ -339,6 +386,16 @@ export function useApproveRequest() {
   return useMutation({
     mutationFn: ({ id, reviewer }: { id: string; reviewer: string }) =>
       api.approveRequest(id, reviewer),
+    onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
+  });
+}
+
+/** Soft-cancel (withdraw) a request. Owner-or-admin; server enforces both the
+ *  authz and the non-applied-state rule. */
+export function useCancelRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.cancelRequest(id),
     onSuccess: (req) => invalidateRequestsAndPorts(qc, req.device_id),
   });
 }

@@ -677,6 +677,15 @@ export async function confirmRequest(id: string): Promise<ChangeRequest> {
   return mapRequest(req);
 }
 
+/** Soft-delete (withdraw) a request. Returns the now-`cancelled` request; the
+ *  row + event history are retained server-side. Owner-or-admin only. */
+export async function cancelRequest(id: string): Promise<ChangeRequest> {
+  const req = await request<RequestOut>(`/api/requests/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  return mapRequest(req);
+}
+
 /* -------------------------------------------------------------------------
  * Audit
  * ------------------------------------------------------------------------- */
@@ -786,4 +795,51 @@ export async function getSettings(): Promise<RuntimeSettings> {
 
 export async function updateSettings(patch: SettingsPatch): Promise<RuntimeSettings> {
   return request<RuntimeSettings>('/api/settings', { method: 'PATCH', body: patch });
+}
+
+/* -------------------------------------------------------------------------
+ * Running config + backups — the REAL device config (full NETCONF/NAPALM
+ * dump), not the client-side approximation rendered from the port list.
+ * ------------------------------------------------------------------------- */
+
+/** Full running config of a device. ``refresh`` bypasses the server cache. */
+export interface DeviceConfig {
+  config_text: string;
+  cached: boolean;
+}
+
+/** Metadata for one stored config backup row (newest-first from the list API). */
+export interface ConfigBackupMeta {
+  id: string;
+  device_id: string;
+  fetched_at: string;
+  fetched_by: string;
+}
+
+/** Unified diff of a stored backup against the live running config. */
+export interface BackupDiff {
+  backup_id: string;
+  diff: string;
+}
+
+export async function getDeviceConfig(id: string, refresh = false): Promise<DeviceConfig> {
+  return request<DeviceConfig>(`/api/devices/${encodeURIComponent(id)}/config`, {
+    query: refresh ? { refresh: true } : undefined,
+  });
+}
+
+export async function listConfigBackups(id: string): Promise<ConfigBackupMeta[]> {
+  return request<ConfigBackupMeta[]>(`/api/devices/${encodeURIComponent(id)}/config/backups`);
+}
+
+export async function backupNow(id: string): Promise<ConfigBackupMeta> {
+  return request<ConfigBackupMeta>(`/api/devices/${encodeURIComponent(id)}/config/backup`, {
+    method: 'POST',
+  });
+}
+
+export async function getBackupDiff(id: string, backupId: string): Promise<BackupDiff> {
+  return request<BackupDiff>(
+    `/api/devices/${encodeURIComponent(id)}/config/backups/${encodeURIComponent(backupId)}/diff`,
+  );
 }

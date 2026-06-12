@@ -11,6 +11,7 @@ const LABELS: Record<ChangeRequestStatus, string> = {
   rejected: 'Rejected',
   reverted: 'Reverted',
   failed: 'Failed',
+  cancelled: 'Cancelled',
 };
 
 const VARIANT: Record<ChangeRequestStatus, Parameters<typeof Badge>[0]['variant']> = {
@@ -23,6 +24,7 @@ const VARIANT: Record<ChangeRequestStatus, Parameters<typeof Badge>[0]['variant'
   rejected: 'muted',
   reverted: 'muted',
   failed: 'danger',
+  cancelled: 'muted',
 };
 
 export function StatusBadge({ status }: { status: ChangeRequestStatus }) {

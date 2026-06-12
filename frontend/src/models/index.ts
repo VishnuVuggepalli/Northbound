@@ -124,7 +124,8 @@ export type ChangeRequestStatus =
   | 'applied'
   | 'rejected'
   | 'reverted'
-  | 'failed';
+  | 'failed'
+  | 'cancelled';
 
 export interface RequestedChanges {
   untagged_vlan?: number;

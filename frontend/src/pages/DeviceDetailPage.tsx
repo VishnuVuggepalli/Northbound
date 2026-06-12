@@ -289,7 +289,7 @@ export function DeviceDetailPage() {
             </div>
           </div>
           ))}
-        {tab === 'config' && <DeviceConfigView device={device} ports={ports} user={user!} />}
+        {tab === 'config' && <DeviceConfigView device={device} user={user!} />}
         {tab === 'system' && <DeviceSystemView device={device} />}
       </div>
 
