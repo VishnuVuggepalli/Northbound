@@ -184,7 +184,12 @@ class MikrotikSwosDriver(Driver):
         # a switch with VLANs disabled still returns ports with link/speed only.
         fwd = await self._get("fwd.b")
         vlans = await self._get_array("vlan.b")
-        return _merge_ports(link, fwd, vlans)
+        # Per-port RX/TX byte counters (best-effort: a stats read failure must
+        # not break the port list).
+        stats: dict[str, Any] = {}
+        with contextlib.suppress(DriverError):
+            stats = await self._get("stats.b")
+        return _merge_ports(link, fwd, vlans, stats)
 
     async def get_neighbors(self, port: str | None = None) -> list[Neighbor]:
         return []  # SwOS exposes no LLDP/neighbor table via the .b endpoints
@@ -410,6 +415,7 @@ def _merge_ports(
     link: dict[str, Any],
     fwd: dict[str, Any] | None = None,
     vlans: list[dict[str, Any]] | None = None,
+    stats: dict[str, Any] | None = None,
 ) -> list[PortState]:
     """link.b (+ fwd.b + vlan.b) → PortState list.
 
@@ -428,6 +434,7 @@ def _merge_ports(
 
     dvid = (fwd or {}).get("dvid", []) or []
     membership = _vlan_membership(vlans or [])
+    has_stats = bool(stats)
 
     out: list[PortState] = []
     for i in range(count):
@@ -452,6 +459,8 @@ def _merge_ports(
                 bmc_ip="",
                 notes="",
                 services={},
+                rx_bytes=_stat_lo_hi(stats or {}, "rb", "rbh", i) if has_stats else None,
+                tx_bytes=_stat_lo_hi(stats or {}, "tb", "tbh", i) if has_stats else None,
             )
         )
     return out

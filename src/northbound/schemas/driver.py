@@ -59,6 +59,11 @@ class PortState:
     bmc_ip: str
     notes: str
     services: dict[str, bool] = field(default_factory=dict)
+    # Live interface counters (cumulative bytes). Optional — only drivers that
+    # read per-port stats populate them; None means "driver exposes no counters",
+    # distinct from 0 ("no traffic seen").
+    rx_bytes: int | None = None
+    tx_bytes: int | None = None
 
 
 @dataclass(frozen=True)

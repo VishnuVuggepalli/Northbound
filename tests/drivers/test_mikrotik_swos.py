@@ -110,6 +110,40 @@ async def test_get_ports_count_names_and_link_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_ports_populates_byte_counters_from_stats() -> None:
+    """get_ports reads stats.b and sets per-port 64-bit RX/TX byte counters."""
+    drv, fake = _driver()
+    ports = await drv.get_ports()
+    assert "/stats.b" in fake.calls
+    # Every port gets a counter (>= 0), not None, once stats.b is read.
+    assert all(p.rx_bytes is not None and p.tx_bytes is not None for p in ports)
+    # A busy port shows a large 64-bit value (low/high words combined).
+    assert max(p.rx_bytes or 0 for p in ports) > 1_000_000_000
+
+
+@pytest.mark.asyncio
+async def test_get_ports_counters_none_when_stats_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stats.b read failure leaves counters None (no traffic data) without
+    breaking the port list."""
+    drv, _ = _driver()
+    real = drv._get
+
+    async def _flaky(endpoint: str) -> Any:
+        if endpoint == "stats.b":
+            from northbound.drivers.base import DriverError
+
+            raise DriverError("stats unavailable")
+        return await real(endpoint)
+
+    monkeypatch.setattr(drv, "_get", _flaky)
+    ports = await drv.get_ports()
+    assert len(ports) == 26
+    assert all(p.rx_bytes is None and p.tx_bytes is None for p in ports)
+
+
+@pytest.mark.asyncio
 async def test_get_ports_vlans_from_fwd_and_vlan_b() -> None:
     """untagged = fwd.b dvid (matches the per-port access VLAN in the name);
     tagged = vlan.b members minus the default. Real CSS326 fixtures."""

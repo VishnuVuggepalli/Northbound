@@ -21,6 +21,8 @@ function port(over: Partial<Port> = {}): Port {
     bmc_ip: '',
     notes: '',
     services: {},
+    rx_bytes: null,
+    tx_bytes: null,
     traffic: 0,
     last_change: 0,
     ...over,

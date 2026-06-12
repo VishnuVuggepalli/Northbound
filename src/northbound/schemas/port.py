@@ -28,6 +28,8 @@ class PortStateOut(BaseModel):
     tagged_vlans: list[int] = Field(default_factory=list)
     description: str = ""
     services: dict[str, bool] = Field(default_factory=dict)
+    rx_bytes: int | None = None
+    tx_bytes: int | None = None
     # Human fields (DB metadata, falling back to live).
     host_model: str = ""
     bmc_ip: str = ""
@@ -50,6 +52,8 @@ class PortStateOut(BaseModel):
             tagged_vlans=list(p.tagged_vlans),
             description=p.description,
             services=dict(p.services),
+            rx_bytes=p.rx_bytes,
+            tx_bytes=p.tx_bytes,
             host_model=view.host_model,
             bmc_ip=view.bmc_ip,
             notes=view.notes,

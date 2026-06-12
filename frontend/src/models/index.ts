@@ -95,6 +95,9 @@ export interface Port {
   bmc_ip: string;
   notes: string;
   services: PortServices;
+  /** Live cumulative RX/TX byte counters; null when the driver exposes none. */
+  rx_bytes: number | null;
+  tx_bytes: number | null;
   /** 0..1 — drives the LED pulse intensity in 3D and 2D. */
   traffic: number;
   /** Epoch ms of the last change. */

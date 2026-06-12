@@ -11,7 +11,7 @@ import { Diff } from '@/components/Diff';
 import { PortConfigEditor } from '@/components/PortConfigEditor';
 import { VendorActions } from '@/components/VendorActions';
 import { portToRequestedChanges, mergeChange } from '@/lib/config';
-import { fmtAge, formatSpeed, timeAgo, timeAgoMin } from '@/lib/format';
+import { fmtAge, formatBytes, formatSpeed, timeAgo, timeAgoMin } from '@/lib/format';
 import type { ThemeMode } from '@/lib/palette';
 import type {
   AuditEntry,
@@ -298,6 +298,16 @@ export function PortPanel({
             <KV label="Speed">{formatSpeed(port.speed_mbps)}</KV>
             <KV label="Duplex">{port.duplex ?? '—'}</KV>
             <KV label="MTU">{port.mtu}</KV>
+            {port.rx_bytes != null && (
+              <KV label="RX">
+                <span className="nb-mono text-[11px]">{formatBytes(port.rx_bytes)}</span>
+              </KV>
+            )}
+            {port.tx_bytes != null && (
+              <KV label="TX">
+                <span className="nb-mono text-[11px]">{formatBytes(port.tx_bytes)}</span>
+              </KV>
+            )}
           </dl>
           <div className="mt-3 rounded-md border border-border bg-bg-elev-1 p-2.5 text-xs">
             <div className="flex items-center justify-between">

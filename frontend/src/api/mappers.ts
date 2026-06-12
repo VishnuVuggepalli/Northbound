@@ -144,6 +144,8 @@ export function mapPort(p: PortStateOut, deviceId: string, index: number): Port 
     // (pica8/NETCONF) don't model per-port protocol flags -> {} -> the panel's
     // Services section hides itself. No synthesized always-false chips.
     services,
+    rx_bytes: p.rx_bytes ?? null,
+    tx_bytes: p.tx_bytes ?? null,
     traffic: 0,
     last_change: toEpochMs(p.last_human_edit_at) ?? Date.now(),
   };

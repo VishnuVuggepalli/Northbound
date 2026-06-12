@@ -826,7 +826,17 @@ export interface paths {
         get: operations["get_request_api_requests__request_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Cancel Request
+         * @description Soft-delete (withdraw) a request. The owner may cancel their own; an admin
+         *     may cancel any. Only NON-APPLIED states are cancellable (pending,
+         *     needs_revision, approved, rejected, failed) — a request that is applying or
+         *     has applied keeps its device-change history and returns 409.
+         *
+         *     A foreign id for a non-admin returns 404 (no existence leak), mirroring the
+         *     read-path authz. The row is kept; one ``cancelled`` event is appended.
+         */
+        delete: operations["cancel_request_api_requests__request_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1143,7 +1153,7 @@ export interface components {
          * ChangeRequestStatus
          * @enum {string}
          */
-        ChangeRequestStatus: "pending" | "needs_revision" | "approved" | "rejected" | "applying" | "awaiting_confirm" | "applied" | "failed" | "reverted";
+        ChangeRequestStatus: "pending" | "needs_revision" | "approved" | "rejected" | "applying" | "awaiting_confirm" | "applied" | "failed" | "reverted" | "cancelled";
         /**
          * ConfigOut
          * @description Running config snapshot.
@@ -1665,6 +1675,10 @@ export interface components {
             services?: {
                 [key: string]: boolean;
             };
+            /** Rx Bytes */
+            rx_bytes?: number | null;
+            /** Tx Bytes */
+            tx_bytes?: number | null;
             /**
              * Host Model
              * @default
@@ -3495,6 +3509,37 @@ export interface operations {
         };
     };
     get_request_api_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_request_api_requests__request_id__delete: {
         parameters: {
             query?: never;
             header?: never;

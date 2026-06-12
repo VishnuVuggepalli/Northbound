@@ -46,6 +46,19 @@ export function formatSpeed(mbps: number | null): string {
   return `${mbps} Mbps`;
 }
 
+/** Human-readable byte count ("1.5 GB"); null/undefined → em dash. */
+export function formatBytes(n: number | null | undefined): string {
+  if (n == null) return '—';
+  let v = n;
+  for (const unit of ['B', 'KB', 'MB', 'GB', 'TB']) {
+    if (v < 1024 || unit === 'TB') {
+      return unit === 'B' ? `${Math.round(v)} B` : `${v.toFixed(1)} ${unit}`;
+    }
+    v /= 1024;
+  }
+  return `${v.toFixed(1)} TB`;
+}
+
 /**
  * Strict dotted-quad IPv4 validator, RFC-aligned with the Python backend.
  *

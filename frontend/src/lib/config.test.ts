@@ -39,6 +39,8 @@ const port: Port = {
   bmc_ip: '10.0.0.55',
   notes: '',
   services: { lldp: true, stp: true, mstp: false, lacp: false, bgp: false, ospf: false, erspan: false },
+  rx_bytes: null,
+  tx_bytes: null,
   traffic: 0.4,
   last_change: 0,
 };
