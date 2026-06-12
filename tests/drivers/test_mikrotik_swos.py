@@ -152,3 +152,75 @@ async def test_read_only_and_no_neighbors() -> None:
     assert await drv.get_neighbors() == []
     with pytest.raises(NotSupported):
         await drv.render_change("Port1", PortChange(description="x"))
+
+
+# --------------------------------------------------------------------------- #
+# host (MAC) table + Diagnostics counters — captured live from the CSS326
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_get_system_info_mac_table_from_dhost() -> None:
+    """get_system_info reads /!dhost.b: adr→MAC, vid→VLAN, prt→0-based port
+    index resolved to its link.b name (the learned MACs are on the SFP uplink)."""
+    drv, fake = _driver()
+    info = await drv.get_system_info()
+    assert info.mac_supported is True
+    assert len(info.mac_table) == 5
+    first = info.mac_table[0]
+    assert first.mac == "04:f4:1c:57:3b:d7"
+    assert first.vlan == 117  # vid 0x0075
+    assert first.interface == "SFP1"  # prt 0x18 = index 24 → link.b nm[24]
+    assert first.type == "Dynamic"
+    assert "/!dhost.b" in fake.calls
+
+
+@pytest.mark.asyncio
+async def test_get_system_info_mac_unsupported_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A host-table read failure degrades to mac_supported=False without sinking
+    the rest of the snapshot (facts still resolve)."""
+    drv, _ = _driver()
+    real = drv._get_array
+
+    async def _flaky(endpoint: str) -> Any:
+        if endpoint == "!dhost.b":
+            from northbound.drivers.base import DriverError
+
+            raise DriverError("host table truncated")
+        return await real(endpoint)
+
+    monkeypatch.setattr(drv, "_get_array", _flaky)
+    info = await drv.get_system_info()
+    assert info.mac_supported is False
+    assert info.mac_table == ()
+    assert info.facts.model == "CSS326-24G-2S+"
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_counters_and_histogram() -> None:
+    """Diagnostics 'Counters' returns two tables from stats.b: traffic counters
+    (64-bit bytes + rtp/ttp packets) and the RMON packet-size histogram."""
+    drv, _ = _driver()
+    detail = await drv.get_protocol_detail("Counters")
+    assert detail.error is None
+    titles = [t.title for t in detail.tables]
+    assert titles == ["Port counters", "Packet-size histogram"]
+
+    counters = detail.tables[0]
+    assert counters.columns == ("Port", "RX", "TX", "RX pkts", "TX pkts")
+    assert len(counters.rows) == 26  # one row per port
+    # RX bytes are humanized (64-bit low/high combined), packets are integers
+    rx = counters.rows[1][1]
+    assert rx[-1] in {"B", "KB", "MB", "GB", "TB"} or rx.endswith("B")
+
+    hist = detail.tables[1]
+    assert hist.columns == ("Port", "64", "65-127", "128-255", "256-511", "512-1023", "1024+")
+    assert len(hist.rows) == 26
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_non_counter_slug_empty() -> None:
+    """SwOS is L2-only: Routing/ARP/Optics slugs return empty (no such tables)."""
+    drv, _ = _driver()
+    for slug in ("Routing", "ARP", "Optics"):
+        detail = await drv.get_protocol_detail(slug)
+        assert detail.tables == ()
+        assert detail.error is None

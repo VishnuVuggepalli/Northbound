@@ -1,0 +1,1 @@
+[{adr:'04f41c573bd7',vid:0x0075,prt:0x18},{adr:'262c4c302709',vid:0x000c,prt:0x18},{adr:'000c29c7c3ce',vid:0x0073,prt:0x18},{adr:'3cecefe6721c',vid:0x0072,prt:0x18},{adr:'c0470ee10c89',vid:0x000b,prt:0x18}]

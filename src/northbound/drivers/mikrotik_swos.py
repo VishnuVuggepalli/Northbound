@@ -41,8 +41,11 @@ from northbound.schemas.driver import (
     DiscoveryResult,
     DriverCapabilities,
     L3Interface,
+    MacEntry,
     Neighbor,
     PortState,
+    ProtocolDetail,
+    ProtocolTable,
     SystemInfo,
     TestResult,
     VlanInfo,
@@ -218,7 +221,39 @@ class MikrotikSwosDriver(Driver):
             base_mac=_hex_mac(sysb.get("mac", "")),
             uptime=_uptime(sysb.get("upt", 0)),
         )
-        return SystemInfo(facts=facts)
+
+        # L2 host (MAC) table from the dynamic-host endpoint. Each entry is
+        # {adr:'<hex mac>', vid:0x<vlan>, prt:0x<port-index>}; prt is a 0-based
+        # index into link.b's port list (same numbering as the link/en bitmasks).
+        # Verified live against a CSS326-24G-2S+ on SwOS 2.18.
+        mac_table: tuple[MacEntry, ...] = ()
+        mac_supported = True
+        try:
+            names = _port_names(await self._get("link.b"))
+            hosts = await self._get_array("!dhost.b")
+            mac_table = tuple(_host_entry(h, names) for h in hosts if h.get("adr"))
+        except DriverError:
+            mac_supported = False
+
+        return SystemInfo(facts=facts, mac_table=mac_table, mac_supported=mac_supported)
+
+    async def get_protocol_detail(self, slug: str) -> ProtocolDetail:
+        """SwOS is an L2 switch — its only operational tables are the per-port
+        statistics. Maps the Diagnostics 'Counters' slug to stats.b (traffic
+        counters + RMON packet-size histogram). Routing/ARP/Optics don't apply
+        on a pure switch, so they fall through to the empty base result.
+        """
+        if slug != "Counters":
+            return ProtocolDetail(slug=slug)
+        try:
+            names = _port_names(await self._get("link.b"))
+            stats = await self._get("stats.b")
+        except DriverError as exc:
+            return ProtocolDetail(slug=slug, error=str(exc))
+        return ProtocolDetail(
+            slug=slug,
+            tables=(_counters_table(names, stats), _histogram_table(names, stats)),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -416,3 +451,84 @@ def _merge_ports(
             )
         )
     return out
+
+
+def _port_names(link: dict[str, Any]) -> list[str]:
+    """Decode link.b's ``nm`` (hex-ASCII user labels) into a port-indexed list."""
+    return [_hex_ascii(n) if isinstance(n, str) else "" for n in (link.get("nm") or [])]
+
+
+def _host_entry(row: dict[str, Any], names: list[str]) -> MacEntry:
+    """One !dhost.b row → MacEntry. ``adr`` is a bare-hex MAC, ``vid`` the VLAN
+    (0 → none), ``prt`` a 0-based port index into ``names``. The endpoint is the
+    dynamic (learned) table, so every entry is Dynamic; SwOS carries no age."""
+    prt = int(row.get("prt", 0) or 0)
+    vid = int(row.get("vid", 0) or 0)
+    name = names[prt] if 0 <= prt < len(names) else ""
+    return MacEntry(
+        vlan=vid or None,
+        mac=_hex_mac(str(row.get("adr", ""))),
+        interface=name or f"Port{prt + 1}",
+        type="Dynamic",
+        age=None,
+    )
+
+
+def _stat_lo_hi(stats: dict[str, Any], lo_key: str, hi_key: str, i: int) -> int:
+    """Combine a SwOS 64-bit counter split across low/high 32-bit arrays:
+    ``(high << 32) | low``. Verified pairing (rb/rbh, tb/tbh) on a live CSS326."""
+    lo = stats.get(lo_key) or []
+    hi = stats.get(hi_key) or []
+    val = int(lo[i]) if i < len(lo) else 0
+    if i < len(hi):
+        val |= int(hi[i]) << 32
+    return val
+
+
+def _stat(stats: dict[str, Any], key: str, i: int) -> int:
+    arr = stats.get(key) or []
+    return int(arr[i]) if i < len(arr) else 0
+
+
+def _human_bytes(n: int) -> str:
+    f = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if f < 1024 or unit == "TB":
+            return f"{int(f)} B" if unit == "B" else f"{f:.1f} {unit}"
+        f /= 1024
+    return f"{f:.1f} TB"
+
+
+def _counters_table(names: list[str], stats: dict[str, Any]) -> ProtocolTable:
+    """stats.b → per-port traffic counters. Bytes are 64-bit (low/high pair);
+    rtp/ttp are RX/TX total packets — verified on a live CSS326 to equal the
+    sum of unicast+broadcast+multicast packet counters."""
+    rows = tuple(
+        (
+            names[i] or f"Port{i + 1}",
+            _human_bytes(_stat_lo_hi(stats, "rb", "rbh", i)),
+            _human_bytes(_stat_lo_hi(stats, "tb", "tbh", i)),
+            str(_stat(stats, "rtp", i)),
+            str(_stat(stats, "ttp", i)),
+        )
+        for i in range(len(names))
+    )
+    return ProtocolTable(
+        title="Port counters",
+        columns=("Port", "RX", "TX", "RX pkts", "TX pkts"),
+        rows=rows,
+    )
+
+
+def _histogram_table(names: list[str], stats: dict[str, Any]) -> ProtocolTable:
+    """stats.b RMON packet-size histogram (p64..p1k buckets) per port."""
+    keys = ("p64", "p65", "p128", "p256", "p512", "p1k")
+    rows = tuple(
+        (names[i] or f"Port{i + 1}", *(str(_stat(stats, k, i)) for k in keys))
+        for i in range(len(names))
+    )
+    return ProtocolTable(
+        title="Packet-size histogram",
+        columns=("Port", "64", "65-127", "128-255", "256-511", "512-1023", "1024+"),
+        rows=rows,
+    )
