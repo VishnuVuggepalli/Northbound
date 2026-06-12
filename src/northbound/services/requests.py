@@ -41,19 +41,27 @@ from northbound.services.device_policy import assert_writable
 # ---------------------------------------------------------------------------
 
 # Legal transitions: from_status -> set of permitted to_status.
+#
+# CANCELLED is the soft-delete sink: reachable only from NON-APPLIED states
+# (the request never touched a device, so withdrawing it is safe). It is
+# deliberately UNREACHABLE from applying/awaiting_confirm/applied/reverted —
+# those carry device-change history that must not be erasable.
 _LEGAL: dict[S, frozenset[S]] = {
-    S.PENDING: frozenset({S.APPROVED, S.REJECTED, S.APPLYING, S.NEEDS_REVISION}),
+    S.PENDING: frozenset({S.APPROVED, S.REJECTED, S.APPLYING, S.NEEDS_REVISION, S.CANCELLED}),
     # Requester resubmits (→ PENDING) or it's rejected outright. NEEDS_REVISION is
     # NOT terminal — that's what makes the review loop two-way.
-    S.NEEDS_REVISION: frozenset({S.PENDING, S.REJECTED}),
-    S.APPROVED: frozenset({S.APPLYING, S.REJECTED}),
+    S.NEEDS_REVISION: frozenset({S.PENDING, S.REJECTED, S.CANCELLED}),
+    S.APPROVED: frozenset({S.APPLYING, S.REJECTED, S.CANCELLED}),
     S.APPLYING: frozenset({S.AWAITING_CONFIRM, S.APPLIED, S.FAILED}),
     S.AWAITING_CONFIRM: frozenset({S.APPLIED, S.FAILED, S.REVERTED}),
-    # Terminal states — no outgoing transitions.
+    # REJECTED / FAILED are decision-terminal but may still be cleared by a cancel
+    # (they never applied). APPLIED / REVERTED keep device history → no exit.
     S.APPLIED: frozenset(),
-    S.FAILED: frozenset(),
-    S.REJECTED: frozenset(),
+    S.FAILED: frozenset({S.CANCELLED}),
+    S.REJECTED: frozenset({S.CANCELLED}),
     S.REVERTED: frozenset(),
+    # Terminal soft-delete sink.
+    S.CANCELLED: frozenset(),
 }
 
 
@@ -550,6 +558,41 @@ async def request_changes(
         target_device_id=request.device_id,
         target_port=request.port_name,
         after={"comment": comment},
+        result="ok",
+    )
+    await session.flush()
+    return request
+
+
+async def cancel_request(
+    session: AsyncSession,
+    request: ChangeRequest,
+    actor: User,
+) -> ChangeRequest:
+    """Soft-delete: any non-applied state → cancelled. The row and its event
+    history are kept (compliance trail); we only append the CANCELLED transition.
+
+    ``record_transition`` enforces the state machine: a request that is applying,
+    awaiting_confirm, applied, or reverted is not in ``_LEGAL[... -> CANCELLED]``,
+    so it raises :class:`IllegalTransition` (→ 409 at the API). Object-level authz
+    (owner-or-admin) is enforced at the route, not here.
+    """
+    await record_transition(
+        session,
+        request,
+        to_status=S.CANCELLED,
+        actor=actor.id,
+        payload={"by": actor.id, "role": actor.role.value},
+    )
+    request.reviewed_at = dt.datetime.now(tz=dt.UTC)
+    session.add(request)
+    await audit.append_audit(
+        session,
+        user_id=actor.id,
+        action="request.cancelled",
+        target_device_id=request.device_id,
+        target_port=request.port_name,
+        after={"role": actor.role.value},
         result="ok",
     )
     await session.flush()

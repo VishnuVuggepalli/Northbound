@@ -399,6 +399,32 @@ async def resubmit_request(
     return await _request_out(session, req)
 
 
+@router.delete("/{request_id}", response_model=RequestOut)
+@limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
+async def cancel_request(
+    request: Request,
+    request_id: str,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> RequestOut:
+    """Soft-delete (withdraw) a request. The owner may cancel their own; an admin
+    may cancel any. Only NON-APPLIED states are cancellable (pending,
+    needs_revision, approved, rejected, failed) — a request that is applying or
+    has applied keeps its device-change history and returns 409.
+
+    A foreign id for a non-admin returns 404 (no existence leak), mirroring the
+    read-path authz. The row is kept; one ``cancelled`` event is appended.
+    """
+    req = await _load_request(session, request_id)
+    if user.role != UserRole.ADMIN and req.requested_by != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+    try:
+        req = await requests.cancel_request(session, req, user)
+    except IllegalTransition as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return await _request_out(session, req)
+
+
 @router.post("/{request_id}/apply", response_model=RequestOut)
 @limiter.limit(write_rate_limit_provider, key_func=write_rate_key)
 async def apply_request(

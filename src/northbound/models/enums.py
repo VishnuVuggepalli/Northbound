@@ -40,3 +40,7 @@ class ChangeRequestStatus(StrEnum):
     APPLIED = "applied"
     FAILED = "failed"
     REVERTED = "reverted"
+    # Soft delete: the requester (own) or an admin withdrew the request before it
+    # was applied. Terminal, and the row + its event history are retained so the
+    # audit/compliance trail stays intact (we never hard-delete a request).
+    CANCELLED = "cancelled"

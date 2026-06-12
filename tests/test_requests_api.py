@@ -761,3 +761,105 @@ async def test_approved_request_can_be_rejected(
     )
     assert rejected.status_code == 200
     assert rejected.json()["status"] == "rejected"
+
+
+# --- DELETE /{id}: soft-cancel (withdraw) -----------------------------------
+# Soft delete only: the row + its event history are retained (compliance), the
+# status moves to CANCELLED. Owner may cancel their own; admin may cancel any;
+# only NON-APPLIED states are cancellable.
+
+
+@pytest.mark.asyncio
+async def test_cancel_own_pending_request(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, _, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+
+    cancelled = await client.delete(f"/api/requests/{req_id}", headers=_bearer(alice))
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_admin_can_cancel_any_request(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+
+    cancelled = await client.delete(f"/api/requests/{req_id}", headers=_bearer(admin))
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_foreign_request_404(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """A non-admin cancelling someone else's request gets 404 (no existence
+    leak), mirroring the read-path authz."""
+    session, _, alice, leaf, _ = seeded
+    bob = User(username="bob", password_hash=hash_password("c"), role=UserRole.REQUESTER)
+    session.add(bob)
+    await session.flush()
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+
+    resp = await client.delete(f"/api/requests/{req_id}", headers=_bearer(bob))
+    assert resp.status_code == 404
+    # untouched
+    still = await client.get(f"/api/requests/{req_id}", headers=_bearer(alice))
+    assert still.json()["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_cancel_applied_request_409(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """An applied request keeps its device-change history → not cancellable."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    await client.post(f"/api/requests/{req_id}/approve", headers=_bearer(admin))
+    await client.post(f"/api/requests/{req_id}/apply", headers=_bearer(admin))
+    await client.post(f"/api/requests/{req_id}/confirm", headers=_bearer(admin))
+
+    resp = await client.delete(f"/api/requests/{req_id}", headers=_bearer(admin))
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_cancel_rejected_request_ok(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """REJECTED never applied → an admin may clear it away with a cancel."""
+    _, admin, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    await client.post(
+        f"/api/requests/{req_id}/reject", headers=_bearer(admin), json={"comment": "no"}
+    )
+
+    cancelled = await client.delete(f"/api/requests/{req_id}", headers=_bearer(admin))
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_appends_timeline_event(
+    client: AsyncClient, seeded: tuple[AsyncSession, User, User, Device, Device]
+) -> None:
+    """The cancel is recorded (not a hard delete) — a `cancelled` transition row
+    must show up on the timeline so the audit trail survives."""
+    _, _, alice, leaf, _ = seeded
+    created = await client.post("/api/requests", headers=_bearer(alice), json=_create_body(leaf.id))
+    req_id = created.json()["id"]
+    await client.delete(f"/api/requests/{req_id}", headers=_bearer(alice))
+
+    timeline = await client.get(f"/api/requests/{req_id}/timeline", headers=_bearer(alice))
+    assert timeline.status_code == 200
+    to_states = [e["to_status"] for e in timeline.json()]
+    assert "cancelled" in to_states
