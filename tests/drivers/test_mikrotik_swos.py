@@ -196,13 +196,13 @@ async def test_get_system_info_mac_unsupported_on_error(monkeypatch: pytest.Monk
 
 @pytest.mark.asyncio
 async def test_diagnostics_counters_and_histogram() -> None:
-    """Diagnostics 'Counters' returns two tables from stats.b: traffic counters
-    (64-bit bytes + rtp/ttp packets) and the RMON packet-size histogram."""
+    """Diagnostics 'Counters' returns three tables from stats.b: traffic counters
+    (64-bit bytes + rtp/ttp packets), errors, and the RMON packet-size histogram."""
     drv, _ = _driver()
     detail = await drv.get_protocol_detail("Counters")
     assert detail.error is None
     titles = [t.title for t in detail.tables]
-    assert titles == ["Port counters", "Packet-size histogram"]
+    assert titles == ["Port counters", "Errors", "Packet-size histogram"]
 
     counters = detail.tables[0]
     assert counters.columns == ("Port", "RX", "TX", "RX pkts", "TX pkts")
@@ -211,7 +211,11 @@ async def test_diagnostics_counters_and_histogram() -> None:
     rx = counters.rows[1][1]
     assert rx[-1] in {"B", "KB", "MB", "GB", "TB"} or rx.endswith("B")
 
-    hist = detail.tables[1]
+    errors = detail.tables[1]
+    assert errors.columns[0] == "Port" and "RX FCS" in errors.columns
+    assert len(errors.rows) == 26
+
+    hist = detail.tables[2]
     assert hist.columns == ("Port", "64", "65-127", "128-255", "256-511", "512-1023", "1024+")
     assert len(hist.rows) == 26
 

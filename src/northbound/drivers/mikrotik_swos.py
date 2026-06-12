@@ -252,7 +252,11 @@ class MikrotikSwosDriver(Driver):
             return ProtocolDetail(slug=slug, error=str(exc))
         return ProtocolDetail(
             slug=slug,
-            tables=(_counters_table(names, stats), _histogram_table(names, stats)),
+            tables=(
+                _counters_table(names, stats),
+                _errors_table(names, stats),
+                _histogram_table(names, stats),
+            ),
         )
 
 
@@ -518,6 +522,19 @@ def _counters_table(names: list[str], stats: dict[str, Any]) -> ProtocolTable:
         columns=("Port", "RX", "TX", "RX pkts", "TX pkts"),
         rows=rows,
     )
+
+
+def _errors_table(names: list[str], stats: dict[str, Any]) -> ProtocolTable:
+    """stats.b error counters. Keys are doc-derived (RMON/EtherLike naming) and
+    confirmed present on a live CSS326: rfcs=RX FCS, rae=RX align, rov=RX
+    overflow, fr=RX fragments, tcl=TX collisions. A healthy link reads all-zero."""
+    cols = ("Port", "RX FCS", "RX align", "RX overflow", "RX fragments", "TX coll")
+    keys = ("rfcs", "rae", "rov", "fr", "tcl")
+    rows = tuple(
+        (names[i] or f"Port{i + 1}", *(str(_stat(stats, k, i)) for k in keys))
+        for i in range(len(names))
+    )
+    return ProtocolTable(title="Errors", columns=cols, rows=rows)
 
 
 def _histogram_table(names: list[str], stats: dict[str, Any]) -> ProtocolTable:
