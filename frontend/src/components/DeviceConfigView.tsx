@@ -128,7 +128,7 @@ export function DeviceConfigView({ device, user }: DeviceConfigViewProps) {
                 {isApiError(config.error) ? config.error.message : 'Device unreachable'}
               </div>
             </div>
-            <Button kind="secondary" size="sm" onClick={() => config.refetch()}>
+            <Button kind="outline" size="sm" onClick={() => config.refetch()}>
               Retry
             </Button>
           </div>
