@@ -3,6 +3,29 @@
 Status: proposed
 Scope: `frontend/` only unless a step is explicitly marked **backend**.
 
+## Scope: switches only
+
+This design covers **switches** — `DeviceRole` `leaf` and `spine`
+(`models/index.ts:30`). Nothing else gets a faceplate.
+
+Why that costs nothing:
+
+- `router` and `vpn` are **already write-locked** — `isWriteLocked` returns true
+  for both (`lib/devicePolicy.ts:36`). The faceplate is an interaction surface
+  for changing ports; on a device you cannot write to, it would be decoration.
+- Both devices in the live inventory are switches: **leaf-01** (`pica8`,
+  `role=leaf`) and **swos-css326** (`mikrotik_swos`, `role=leaf`). They are the
+  concrete targets — one NETCONF/fiber platform and one SwOS/copper platform,
+  which is a useful spread for layout inference.
+- Patchdocs' device taxonomy — patch panels, gateways, UPSs, cable managers,
+  floor devices (access points, cameras, printers, telecom outlets) — has **no
+  Northbound equivalent and is explicitly not being built**. Northbound only
+  knows devices it can log into and configure.
+
+If routers ever become writable, the same renderer applies unchanged — a router
+is a faceplate with fewer, differently-named ports. That is a reason not to
+hardcode "switch" into the component's API, not a reason to build for it now.
+
 ## The one rule this design exists to enforce
 
 > **A change request pins the port it was filed against. If the live device no
@@ -162,6 +185,42 @@ references and **none of them refine it** — the comment is false and should be
 deleted. Consequence: every pica8 device renders 48 SFP cages regardless of the
 port inventory the backend actually discovered.
 
+### The two real inventories (read from the live API)
+
+These are the acceptance cases. Any inference has to get both right.
+
+**leaf-01** — `pica8`, 32 ports, speeds 40000 / 100000 Mbps:
+
+```
+xe-1/1/1 … xe-1/1/32          (one group, 32 QSFP cages)
+```
+
+The stereotype says `sfp-48`. The device is a **32-port QSFP** switch. So the
+current faceplate is wrong on the only pica8 we own — wrong cage type and wrong
+count. This is the concrete failure the redesign fixes.
+
+**swos-css326** — `mikrotik_swos`, 26 ports, speeds 1000 / 10000 Mbps:
+
+```
+Port1-Ian-BMC-16, Port2-Roh-240, Port3-116, … Port24-114   (24 copper)
+SFP1, SFP2-111                                              (2 fiber uplinks)
+```
+
+Two lessons from this one:
+
+1. **It is genuinely two port groups** — 24 copper + 2 SFP+ uplinks, with
+   different prefixes and connector types. That is exactly the Patchdocs
+   port-group model, arrived at from real data rather than copied.
+2. **Port names carry operator text.** `Port1-Ian-BMC-16` is `Port` + index +
+   arbitrary user label. The parser must extract the group prefix and the
+   numeric index and treat the remainder as a label — it must not assume a
+   clean structural name. Contrast `xe-1/1/5`, which is purely structural.
+
+So inference needs: prefix + index extraction tolerant of trailing free text,
+grouping by prefix, and connector type from speed (1G copper vs 10G+ fiber vs
+40G/100G QSFP). `rj45-24-2sfp` happens to be right for the SwOS box by luck —
+that coincidence should not be mistaken for the guess working.
+
 This is why the faceplate cannot currently be trusted as documentation: it draws
 a *platform stereotype*, not *this device*.
 
@@ -205,8 +264,9 @@ to surface, by the same rule as a pinned port reference.
 `Switch3D` then consumes `Faceplate` instead of `PortKind`. `PortKind` stays
 only as the fallback stereotype.
 
-> Routers and switches use the same renderer — a router is just a faceplate with
-> fewer, differently-named ports. No separate component. **No rack view.**
+> Switches only (see Scope). The component takes a port list and a layout, not a
+> device role — so it stays reusable if routers ever become writable, without
+> anything being built for them now. **No rack view.**
 
 ### 2. Pinned references and drift (the rule)
 
