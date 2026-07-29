@@ -221,6 +221,30 @@ async def test_render_change_trunk_tagged_member_edit_is_refused() -> None:
 
 
 @pytest.mark.asyncio
+async def test_render_change_trunk_empty_tagged_is_refused() -> None:
+    # Regression: clearing ALL tagged VLANs on a trunk (tagged_vlans=[]) is still a
+    # member edit — _build_edit_config_xml emits `<vlan operation="remove">` for it,
+    # the exact destructive payload this guard exists to block. The guard used a
+    # truthiness test, so the empty list (falsy) fell through unrefused.
+    drv, _ = _make_driver()
+    with pytest.raises(NotSupported) as exc:
+        await drv.render_change(
+            "ge-1/1/1", PortChange(port_mode="trunk", untagged_vlan=10, tagged_vlans=[])
+        )
+    assert "trunk tagged-VLAN" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_render_change_access_intent_empty_tagged_still_allowed() -> None:
+    # The request flow sends untagged + tagged=[] with NO port_mode to mean access
+    # intent. That infers mode "access", so the trunk guard must NOT catch it —
+    # widening the guard to `is not None` must not break this path.
+    drv, _ = _make_driver()
+    diff = await drv.render_change("ge-1/1/1", PortChange(untagged_vlan=100, tagged_vlans=[]))
+    assert diff.commands
+
+
+@pytest.mark.asyncio
 async def test_render_change_trunk_tagged_inferred_mode_is_refused() -> None:
     # No explicit port_mode, but a non-empty tagged set ⇒ effective mode trunk.
     # Must be refused too (same corrupting path), not silently let through.
