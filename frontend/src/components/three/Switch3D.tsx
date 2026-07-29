@@ -49,21 +49,102 @@ const PORT_BODY: Record<PortLayout['type'], { w: number; h: number }> = {
 function facePalette(theme: ThemeMode) {
   return theme === 'dark'
     ? {
-        chassis: 0x39424e,
-        front: 0x2a313a,
-        top: 0x4b5563,
-        bezel: 0x7c8899, // light rim against dark cage
-        cage: 0x0d1217,
+        // Deliberately mid-grey, not near-black: a dark chassis on a dark page
+        // leaves the whole faceplate with nothing to catch the key light.
+        chassis: 0x4d5766,
+        front: 0x39424e,
+        top: 0x5d6878,
+        bezel: 0x9aa7b8, // bright machined rim — the main port separator
+        cage: 0x0b1015, // dark cage mouth, so the rim reads against it
         slot: 0x05080b,
+        pin: 0xd0aa3c, // gold contacts
+        shield: 0x8b98a8, // EMI shield / cage lip on fibre ports
       }
     : {
         chassis: 0xbcc3cd, // light chassis, so dark cages stand out
         front: 0x99a2ae,
         top: 0xd2d8e0,
-        bezel: 0x4a545f, // dark rim against light chassis
-        cage: 0x1e242b,
-        slot: 0x11161b,
+        bezel: 0x39424e, // dark rim against light chassis
+        cage: 0x171c22,
+        slot: 0x0d1116,
+        pin: 0xb8912a,
+        shield: 0x6d7886,
       };
+}
+
+/**
+ * The recognisable face of each connector type.
+ *
+ * A plain dark rectangle reads as "a hole", not as a port. Real panels are
+ * identifiable at a glance because RJ45 has a latch keyway and gold contacts
+ * while SFP/QSFP are letterbox cage mouths with a metal lip — so we model
+ * exactly those cues. Only the per-port path draws this detail; the instanced
+ * path (>60 ports) stays simple, where the extra geometry would cost far more
+ * than it communicates.
+ */
+function ConnectorFace({
+  type,
+  body,
+  palette,
+}: {
+  type: PortLayout['type'];
+  body: { w: number; h: number };
+  palette: ReturnType<typeof facePalette>;
+}) {
+  if (type === 'rj45') {
+    const ow = body.w * 0.72;
+    const oh = body.h * 0.5;
+    const cy = body.h * 0.07; // opening sits high; keyway hangs below it
+    return (
+      <>
+        {/* Main opening */}
+        <mesh position={[0, cy, 0.07]}>
+          <boxGeometry args={[ow, oh, 0.06]} />
+          <meshBasicMaterial color={palette.slot} />
+        </mesh>
+        {/* Latch keyway — the notch that makes an RJ45 unmistakable */}
+        <mesh position={[0, cy - oh / 2 - 0.035, 0.07]}>
+          <boxGeometry args={[ow * 0.36, 0.09, 0.06]} />
+          <meshBasicMaterial color={palette.slot} />
+        </mesh>
+        {/* 8 gold contacts along the top of the opening */}
+        {Array.from({ length: 8 }, (_, i) => (
+          <mesh
+            key={i}
+            position={[-ow / 2 + (ow * (i + 0.5)) / 8, cy + oh * 0.2, 0.088]}
+          >
+            <boxGeometry args={[ow / 18, oh * 0.42, 0.02]} />
+            <meshStandardMaterial color={palette.pin} metalness={0.85} roughness={0.32} />
+          </mesh>
+        ))}
+      </>
+    );
+  }
+
+  // SFP / SFP+ / QSFP — a letterbox cage mouth behind a metal shield lip.
+  const ow = body.w * 0.82;
+  const oh = body.h * (type === 'qsfp' ? 0.52 : 0.46);
+  return (
+    <>
+      {/* Shield lip around the mouth */}
+      <mesh position={[0, 0, 0.065]}>
+        <boxGeometry args={[ow + 0.05, oh + 0.05, 0.05]} />
+        <meshStandardMaterial color={palette.shield} metalness={0.8} roughness={0.35} />
+      </mesh>
+      {/* Cage mouth */}
+      <mesh position={[0, 0, 0.08]}>
+        <boxGeometry args={[ow, oh, 0.05]} />
+        <meshBasicMaterial color={palette.slot} />
+      </mesh>
+      {/* QSFP mouths are taller and carry a visible divider rib */}
+      {type === 'qsfp' && (
+        <mesh position={[0, 0, 0.095]}>
+          <boxGeometry args={[ow * 0.9, 0.018, 0.02]} />
+          <meshStandardMaterial color={palette.shield} metalness={0.7} roughness={0.4} />
+        </mesh>
+      )}
+    </>
+  );
 }
 
 const BRAND_COLOR: Record<Device['platform'], number> = {
@@ -144,10 +225,7 @@ function PortMesh({ port, type, position, selected, onPick, palette }: PortMeshP
         <boxGeometry args={[body.w, body.h, 0.18]} />
         <meshStandardMaterial color={palette.cage} metalness={0.6} roughness={0.5} />
       </mesh>
-      <mesh position={[0, 0, 0.07]}>
-        <boxGeometry args={[body.w * 0.78, body.h * (type === 'rj45' ? 0.72 : 0.55), 0.06]} />
-        <meshBasicMaterial color={palette.slot} />
-      </mesh>
+      <ConnectorFace type={type} body={body} palette={palette} />
       {/* LED */}
       <mesh position={[-body.w * 0.2, -body.h / 2 + 0.07, 0.1]}>
         <boxGeometry args={[body.w * 0.42, 0.05, 0.04]} />
@@ -338,10 +416,18 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
     <>
       {/* Instrument lighting: soft fill + a warm key + a cool accent rim so
           the chassis reads as a real material under control-room light. */}
-      <ambientLight intensity={0.55} />
-      <directionalLight position={[4, 6, 5]} intensity={0.78} />
-      <directionalLight position={[-5, 2, -3]} intensity={0.4} color={0x7fa8ff} />
-      <directionalLight position={[0, -3, 6]} intensity={0.18} color={0x9fd0ff} />
+      {/* Dark theme gets a stronger key and a dedicated front fill: with the
+          page background near-black there is no bounce light, so without this
+          the machined bezels never catch a highlight and the panel flattens
+          back into a slab. */}
+      <ambientLight intensity={theme === 'dark' ? 0.72 : 0.6} />
+      <directionalLight position={[4, 6, 5]} intensity={theme === 'dark' ? 1.05 : 0.85} />
+      <directionalLight position={[-5, 2, -3]} intensity={0.42} color={0x7fa8ff} />
+      <directionalLight
+        position={[0, 1, 9]}
+        intensity={theme === 'dark' ? 0.75 : 0.35}
+        color={0xcfe2ff}
+      />
 
       {/* Chassis body — meshStandardMaterial (low metalness, mid roughness) so
           the flat faces catch a subtle specular off the key/rim lights and
