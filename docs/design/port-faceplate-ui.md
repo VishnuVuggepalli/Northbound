@@ -14,9 +14,67 @@ the violation is named with a `file:line` anchor.
 
 ## Reference — Patchdocs, and where we deliberately diverge
 
-`patchdocs.io` and `docs.patchdocs.io` both return HTTP 403 to automated
-fetches, so the product description below comes from its public marketing and
-docs listings, not from a first-hand read of the app.
+Sources: `docs.patchdocs.io/features/device-library`,
+`/core-concepts/resource-types`, `/features/rack-editor`, `patchdocs.io/features`,
+and the `06-Device-Library.webm` product demo — read in a real browser session
+(these URLs 403 automated fetchers, so plain HTTP clients see nothing).
+
+### Their faceplate model, concretely
+
+This is the part worth copying, because it is a good model and it settles the
+"do we need SVG artwork" question:
+
+- The device face is **a grid — two port rows per rack unit** — and every
+  element occupies whole grid cells. Devices are 1–8 RU.
+- Ports live in **port groups**: rectangular blocks sharing a connector type, a
+  label prefix, and one numbering sequence. Max 99 ports per group.
+- Group settings are exactly four things: **Prefix** (≤4 chars), **Counting
+  Direction**, **Connector Type** (RJ45/copper, or fiber LC/SC/E2000/ST/MPO),
+  and fiber mode / connector gender.
+- **Port numbers are computed, never typed.** *Top-to-bottom* numbers down each
+  column then moves right — which yields the classic switch faceplate, odd on
+  top (1,3,5…), even on the bottom (2,4,6…). *Left-to-right* numbers across each
+  row. Groups sharing a prefix continue one sequence, ordered left to right,
+  with the Back side continuing after the Front.
+- Extra elements are only **text fields** and **icons** (1×1 to 2×2 cells).
+- Front / Back faces for rear-panel ports.
+
+So a faceplate is rectangles on a grid plus a numbering rule. The photoreal
+switch renders on the marketing site are **not** how the app draws devices.
+
+**Consequence for us: no SVG assets and no drawing library.** React renders SVG
+natively; the whole faceplate is a `<rect>` grid driven by (group, rows, cols,
+prefix, direction). What Patchdocs asks a human to assemble by drag-and-drop,
+Northbound can derive from discovered port names — `xe-1/1/5` already encodes
+group and index, and the two-rows-per-RU + odd-top/even-bottom convention is
+the same physical reality both products are drawing.
+
+### The cautionary finding — why our drift rule is right
+
+Patchdocs' template is the source of truth, and reality loses when they
+disagree. From their own docs:
+
+> "Editing a custom device template that is already deployed triggers a
+> destructive rebuild — every connection on every deployed instance is
+> permanently deleted, along with VLAN and SFP assignments."
+
+and:
+
+> "If the new template is taller than the original, any deployed instance that
+> no longer fits in its rack is permanently deleted and not rebuilt."
+
+They mitigate with a typed-name confirmation and a downloadable PDF impact
+report — i.e. the damage is accepted as unavoidable and merely documented.
+
+That is the exact failure mode this design forbids. **A template must never be
+able to destroy recorded reality.** In Northbound the device is the source of
+truth, the faceplate is a rendering of discovered ports, and a template (if we
+ever add one) is a presentation override. When template and live inventory
+disagree, we flag drift — we never rebuild, never delete connections, never
+silently re-resolve. This is the same rule stated at the top of this document,
+and Patchdocs is the worked example of what violating it costs.
+
+The rest of the product description below comes from the same sources.
 
 What Patchdocs does (from its features page):
 
