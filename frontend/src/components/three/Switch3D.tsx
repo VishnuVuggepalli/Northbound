@@ -28,11 +28,43 @@ interface PortLayout {
 // the per-platform stereotype survives only as that module's empty-list
 // fallback. Keeping a second table here would let the two drift apart.
 
-const PORT_BODY: Record<PortLayout['type'], { w: number; h: number; color: number }> = {
-  rj45: { w: 0.42, h: 0.46, color: 0x0a0d10 },
-  sfp: { w: 0.4, h: 0.32, color: 0x0c1014 },
-  qsfp: { w: 0.46, h: 0.38, color: 0x0c1014 },
+/** Cage footprint per connector type. Colour comes from the theme palette. */
+const PORT_BODY: Record<PortLayout['type'], { w: number; h: number }> = {
+  rj45: { w: 0.42, h: 0.46 },
+  sfp: { w: 0.4, h: 0.32 },
+  qsfp: { w: 0.46, h: 0.38 },
 };
+
+/**
+ * Chassis + cage colours per theme.
+ *
+ * The previous values were near-black cages (0x0a0d10) on a near-black front
+ * inset (0x1f242b) with no rim, so the whole faceplate read as one solid slab
+ * and individual ports were invisible — in BOTH themes. The light theme was
+ * also darker than the dark one, which is backwards.
+ *
+ * Each cage now gets a `bezel` rim that contrasts with both the chassis and the
+ * cage interior, so a port reads as a distinct object regardless of theme.
+ */
+function facePalette(theme: ThemeMode) {
+  return theme === 'dark'
+    ? {
+        chassis: 0x39424e,
+        front: 0x2a313a,
+        top: 0x4b5563,
+        bezel: 0x7c8899, // light rim against dark cage
+        cage: 0x0d1217,
+        slot: 0x05080b,
+      }
+    : {
+        chassis: 0xbcc3cd, // light chassis, so dark cages stand out
+        front: 0x99a2ae,
+        top: 0xd2d8e0,
+        bezel: 0x4a545f, // dark rim against light chassis
+        cage: 0x1e242b,
+        slot: 0x11161b,
+      };
+}
 
 const BRAND_COLOR: Record<Device['platform'], number> = {
   cisco: 0x1ba0c4,
@@ -57,6 +89,7 @@ interface PortMeshProps {
   position: [number, number, number];
   selected: boolean;
   onPick: (port: Port) => void;
+  palette: ReturnType<typeof facePalette>;
 }
 
 function ledColorFor(port: Port): number {
@@ -65,7 +98,7 @@ function ledColorFor(port: Port): number {
   return 0x1f242a;
 }
 
-function PortMesh({ port, type, position, selected, onPick }: PortMeshProps) {
+function PortMesh({ port, type, position, selected, onPick, palette }: PortMeshProps) {
   const body = PORT_BODY[type];
   const ledRef = useRef<THREE.MeshBasicMaterial>(null);
   const baseLed = useMemo(() => ledColorFor(port), [port]);
@@ -97,15 +130,23 @@ function PortMesh({ port, type, position, selected, onPick }: PortMeshProps) {
 
   return (
     <group position={position} onClick={handlePick}>
+      {/* Bezel — a rim slightly larger than the cage, sitting just behind it.
+          This is what makes an individual port visible: without it the cage is
+          a dark rectangle on a dark faceplate and the whole panel reads as one
+          slab. Contrasts against the chassis in both themes. */}
+      <mesh position={[0, 0, -0.02]}>
+        <boxGeometry args={[body.w + 0.08, body.h + 0.08, 0.16]} />
+        <meshStandardMaterial color={palette.bezel} metalness={0.55} roughness={0.45} />
+      </mesh>
       {/* Port body — solid metallic shroud so the cage reads as a real
           recessed connector housing, not a flat dark patch. */}
       <mesh>
         <boxGeometry args={[body.w, body.h, 0.18]} />
-        <meshStandardMaterial color={body.color} metalness={0.6} roughness={0.5} />
+        <meshStandardMaterial color={palette.cage} metalness={0.6} roughness={0.5} />
       </mesh>
       <mesh position={[0, 0, 0.07]}>
         <boxGeometry args={[body.w * 0.78, body.h * (type === 'rj45' ? 0.72 : 0.55), 0.06]} />
-        <meshBasicMaterial color={0x05080b} />
+        <meshBasicMaterial color={palette.slot} />
       </mesh>
       {/* LED */}
       <mesh position={[-body.w * 0.2, -body.h / 2 + 0.07, 0.1]}>
@@ -142,10 +183,19 @@ interface InstancedPortGridProps {
   type: PortLayout['type'];
   selected: string | null;
   onPick: (port: Port) => void;
+  palette: ReturnType<typeof facePalette>;
 }
 
-function InstancedPortGrid({ ports, positions, type, selected, onPick }: InstancedPortGridProps) {
+function InstancedPortGrid({
+  ports,
+  positions,
+  type,
+  selected,
+  onPick,
+  palette,
+}: InstancedPortGridProps) {
   const body = PORT_BODY[type];
+  const bezelRef = useRef<THREE.InstancedMesh>(null);
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const ledRef = useRef<THREE.InstancedMesh>(null);
   const stripeRef = useRef<THREE.InstancedMesh>(null);
@@ -155,7 +205,7 @@ function InstancedPortGrid({ ports, positions, type, selected, onPick }: Instanc
   // port counts the whole-board pulse reads as ambient noise rather than
   // distinct ports, so we keep them static.
   useEffect(() => {
-    if (!meshRef.current || !ledRef.current || !stripeRef.current) return;
+    if (!meshRef.current || !ledRef.current || !stripeRef.current || !bezelRef.current) return;
     const dummy = new THREE.Object3D();
     const ledColor = new THREE.Color();
     const stripe = new THREE.Color();
@@ -165,6 +215,12 @@ function InstancedPortGrid({ ports, positions, type, selected, onPick }: Instanc
       dummy.position.copy(pos);
       dummy.updateMatrix();
       meshRef.current!.setMatrixAt(i, dummy.matrix);
+
+      // Bezel sits just behind the cage so it shows as a rim around it.
+      dummy.position.set(pos.x, pos.y, pos.z - 0.02);
+      dummy.updateMatrix();
+      bezelRef.current!.setMatrixAt(i, dummy.matrix);
+      dummy.position.copy(pos);
 
       // LED instance
       dummy.position.set(pos.x - body.w * 0.2, pos.y - body.h / 2 + 0.07, pos.z + 0.1);
@@ -186,6 +242,7 @@ function InstancedPortGrid({ ports, positions, type, selected, onPick }: Instanc
       stripeRef.current!.setColorAt(i, stripe);
     });
     meshRef.current.instanceMatrix.needsUpdate = true;
+    bezelRef.current.instanceMatrix.needsUpdate = true;
     ledRef.current.instanceMatrix.needsUpdate = true;
     stripeRef.current.instanceMatrix.needsUpdate = true;
     if (ledRef.current.instanceColor) ledRef.current.instanceColor.needsUpdate = true;
@@ -214,13 +271,20 @@ function InstancedPortGrid({ ports, positions, type, selected, onPick }: Instanc
 
   return (
     <>
+      {/* Bezel rim behind every cage — same purpose as in PortMesh: without it
+          the cages are dark rectangles on a dark faceplate and no individual
+          port is discernible. */}
+      <instancedMesh ref={bezelRef} args={[undefined, undefined, ports.length]}>
+        <boxGeometry args={[body.w + 0.08, body.h + 0.08, 0.16]} />
+        <meshStandardMaterial color={palette.bezel} metalness={0.55} roughness={0.45} />
+      </instancedMesh>
       <instancedMesh
         ref={meshRef}
         args={[undefined, undefined, ports.length]}
         onClick={handlePick}
       >
         <boxGeometry args={[body.w, body.h, 0.18]} />
-        <meshStandardMaterial color={body.color} metalness={0.6} roughness={0.5} />
+        <meshStandardMaterial color={palette.cage} metalness={0.6} roughness={0.5} />
       </instancedMesh>
       <instancedMesh ref={ledRef} args={[undefined, undefined, ports.length]}>
         <boxGeometry args={[1, 1, 1]} />
@@ -256,9 +320,10 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
   // (0x1c2127 / 0x121518) sat almost on top of the background and the switch
   // vanished. Lambert + ambient 0.55 darkens these further at render, so they
   // are pitched well above the backdrop on purpose.
-  const chassisColor = theme === 'dark' ? 0x343c46 : 0x2a3038;
-  const frontColor = theme === 'dark' ? 0x252d35 : 0x1f242b;
-  const topColor = theme === 'dark' ? 0x404a55 : 0x3a4250;
+  const palette = facePalette(theme);
+  const chassisColor = palette.chassis;
+  const frontColor = palette.front;
+  const topColor = palette.top;
   const brand = BRAND_COLOR[device.platform];
 
   const chassisW = isFreebsd ? 6 : Math.max(6, layout.cols * 0.55 + 2);
@@ -311,6 +376,7 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
           type={layout.type}
           selected={selectedPort}
           onPick={onPick}
+          palette={palette}
         />
       ) : (
         ports.map((port, i) => {
@@ -324,6 +390,7 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
               position={[p.x, p.y, p.z]}
               selected={port.name === selectedPort}
               onPick={onPick}
+              palette={palette}
             />
           );
         })
