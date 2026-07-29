@@ -14,9 +14,9 @@
  * Breakout (PCS lanes) is handled here rather than in the renderer. A 40G/100G
  * cage split into 4×10G/4×25G reports several sub-interfaces for ONE physical
  * cage; drawing one rectangle per sub-interface is wrong physically and made
- * ports outnumber the faceplate grid — see the note at Switch3D.tsx:363-368,
- * where over-running positions crashed the instanced renderer. Here the lanes
- * collapse back into a single slot that knows it carries several ports.
+ * ports outnumber the faceplate grid, which crashed the old WebGL renderer's
+ * instanced meshes. Here the lanes collapse back into a single slot that knows
+ * it carries several ports.
  *
  * Pure: no React, no fetching. Everything is derived from the Port list.
  */

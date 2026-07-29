@@ -74,31 +74,42 @@ export interface FaceplateGeometry {
  * owner and is not re-derived here.
  */
 export function layoutFaceplate(faceplate: Faceplate): FaceplateGeometry {
+  // Pass 1 — measure. Nothing is positioned yet, because vertical centring
+  // needs the tallest bank, which is not known until every bank is measured.
+  let cursorX = PAD_X + BRAND_W + GROUP_GAP;
+  const measured = faceplate.groups.map((group) => {
+    const cage = CAGE[group.connector] ?? CAGE.unknown;
+    const w = group.cols * cage.w + Math.max(0, group.cols - 1) * GAP_X;
+    const h = group.rows * cage.h + Math.max(0, group.rows - 1) * GAP_Y;
+    const x = cursorX;
+    cursorX += w + GROUP_GAP;
+    return { group, cage, x, w, h };
+  });
+
+  const maxGroupH = measured.reduce((m, g) => Math.max(m, g.h), 0);
+  const innerH = maxGroupH + LABEL_H;
+  const width = cursorX - GROUP_GAP + PAD_X;
+  const height = innerH + PAD_Y * 2;
+
+  // Pass 2 — place, with each bank's centring offset folded straight into its
+  // final y. Everything is built already-correct; nothing is repositioned after
+  // construction. The previous version pushed boxes at y = PAD_Y and then
+  // mutated them in a nested loop, which was both O(groups x cages) and a
+  // mutation-after-construction the house style forbids.
   const groups: GroupBox[] = [];
   const cages: CageBox[] = [];
 
-  let cursorX = PAD_X + BRAND_W + GROUP_GAP;
-  let maxGroupH = 0;
+  measured.forEach(({ group, cage, x, w, h }, groupIndex) => {
+    // Banks shorter than the tallest (uplinks beside a two-row bank) sit
+    // mid-height, as on a real panel.
+    const top = PAD_Y + (maxGroupH - h) / 2;
 
-  faceplate.groups.forEach((group, groupIndex) => {
-    const cage = CAGE[group.connector] ?? CAGE.unknown;
-    const groupW = group.cols * cage.w + Math.max(0, group.cols - 1) * GAP_X;
-    const groupH = group.rows * cage.h + Math.max(0, group.rows - 1) * GAP_Y;
-    maxGroupH = Math.max(maxGroupH, groupH);
-
-    groups.push({
-      x: cursorX,
-      y: PAD_Y,
-      w: groupW,
-      h: groupH,
-      prefix: group.prefix,
-      connector: group.connector,
-    });
+    groups.push({ x, y: top, w, h, prefix: group.prefix, connector: group.connector });
 
     for (const slot of group.slots) {
       cages.push({
-        x: cursorX + slot.col * (cage.w + GAP_X),
-        y: PAD_Y + slot.row * (cage.h + GAP_Y),
+        x: x + slot.col * (cage.w + GAP_X),
+        y: top + slot.row * (cage.h + GAP_Y),
         w: cage.w,
         h: cage.h,
         id: slot.id,
@@ -108,25 +119,7 @@ export function layoutFaceplate(faceplate: Faceplate): FaceplateGeometry {
         groupIndex,
       });
     }
-
-    cursorX += groupW + GROUP_GAP;
   });
-
-  const innerH = maxGroupH + LABEL_H;
-  const width = cursorX - GROUP_GAP + PAD_X;
-  const height = innerH + PAD_Y * 2;
-
-  // Groups shorter than the tallest (uplinks beside a two-row bank) are centred
-  // vertically, which is how mixed-height banks sit on a real panel.
-  for (const group of groups) {
-    const shift = (maxGroupH - group.h) / 2;
-    if (shift > 0) {
-      group.y += shift;
-      for (const c of cages) {
-        if (groups[c.groupIndex] === group) c.y += shift;
-      }
-    }
-  }
 
   return {
     width,

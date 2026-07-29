@@ -49,7 +49,7 @@ export function PortCage({ cage, selected, pending, vlanColor, onSelect }: PortC
       tabIndex={0}
       aria-label={`Port ${cage.id}${primary ? `, ${primary.state}` : ''}`}
       aria-pressed={selected}
-      className="cursor-pointer outline-none [&:focus-visible>.cage-shell]:stroke-accent"
+      className="group cursor-pointer outline-none [&:focus-visible>.cage-shell]:stroke-accent"
       onClick={() => primary && onSelect(primary.name)}
       onKeyDown={(e) => {
         if ((e.key === 'Enter' || e.key === ' ') && primary) {

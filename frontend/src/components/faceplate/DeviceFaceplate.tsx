@@ -52,6 +52,13 @@ export function DeviceFaceplate({
     return set;
   }, [requests, device.id]);
 
+  // One pass over the cages, indexed by bank.
+  const cageCountByGroup = useMemo(() => {
+    const counts: number[] = new Array(geo.groups.length).fill(0);
+    for (const c of geo.cages) counts[c.groupIndex] += 1;
+    return counts;
+  }, [geo]);
+
   const provisional = faceplate.source === 'platform-fallback';
 
   return (
@@ -112,17 +119,19 @@ export function DeviceFaceplate({
             {device.platform}
           </text>
 
-          {/* Per-bank caption: media type and cage count */}
-          {geo.groups.map((g) => (
+          {/* Per-bank caption: media type and cage count. Counted by
+              groupIndex — the earlier version matched cages to banks by
+              comparing float x-coordinates, which is both O(banks x cages) and
+              a geometric answer to an identity question. */}
+          {geo.groups.map((g, i) => (
             <text
-              key={`${g.prefix}-label`}
+              key={`${g.prefix}-${i}-label`}
               x={g.x}
               y={g.y + g.h + LABEL_H - 3}
               className="fill-fg-subtle"
               style={{ fontSize: 7, letterSpacing: 0.4 }}
             >
-              {CONNECTOR_LABEL[g.connector]} ·{' '}
-              {geo.cages.filter((c) => c.connector === g.connector && c.x >= g.x && c.x < g.x + g.w).length}
+              {CONNECTOR_LABEL[g.connector]} · {cageCountByGroup[i] ?? 0}
             </text>
           ))}
 

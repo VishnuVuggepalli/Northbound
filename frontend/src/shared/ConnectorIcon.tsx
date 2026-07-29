@@ -10,8 +10,11 @@
  * matches the house convention (inline JSX + lucide, zero .svg files).
  *
  * Colour comes from `currentColor` and design tokens only, so these inherit
- * light/dark from whatever renders them. The 3D faceplate models the same cues
- * (see components/three/Switch3D).
+ * light/dark from whatever renders them.
+ *
+ * These are the small inline glyphs (port cards, lists). The full-size panel
+ * geometry lives in components/faceplate/PortCage — same cues, different
+ * scale. If you change what an RJ45 looks like, change both.
  */
 
 import type { SVGProps } from 'react';
