@@ -1,6 +1,6 @@
 # Design — Auto-generated device faceplate & pinned port references
 
-Status: proposed
+Status: implemented (2026-07-29)
 Scope: `frontend/` only unless a step is explicitly marked **backend**.
 
 ## Scope: switches only
@@ -168,22 +168,46 @@ and all, auto".
 Adopted from Patchdocs: faceplate as the primary surface, port-level detail,
 per-port notes/labels, change history.
 
-## Where we are today (verified, not assumed)
+## Status — implemented
 
-| Fact | Anchor |
+This design has shipped. What follows records the reasoning and the acceptance
+cases; the "before" state is kept because it explains why the shape is what it
+is, not because it still exists.
+
+**As built:**
+
+| Piece | Where |
 |---|---|
-| A faceplate renderer already exists (R3F) | `components/three/Switch3D.tsx` |
-| Layout comes from a fixed enum → rows/cols | `Switch3D.tsx:26-38` (`portLayout`) |
-| `portKind` is a **guess from the platform string** | `mappers.ts:69-80` (`portKindFor`) |
-| It is assigned once and never refined | `mappers.ts:115` → `Switch3D.tsx:350` |
-| 2D port views also exist | `components/PortStrip.tsx`, `PortPanel.tsx`, `PortCard.tsx` |
+| Logical model — groups, cages, numbering, breakout | `lib/faceplate.ts` |
+| Connector geometry, single owner | `lib/connectorShape.ts` |
+| Absolute SVG coordinates | `components/faceplate/geometry.ts` |
+| One cage: styling + live state | `components/faceplate/PortCage.tsx` |
+| Panel: chassis, banks, captions, legend | `components/faceplate/DeviceFaceplate.tsx` |
+| Inline glyph (port cards, lists) | `shared/ConnectorIcon.tsx` |
 
-**The gap.** `portKindFor` maps `arista→qsfp-32`, `pica8→sfp-48`,
-`freebsd→rj45-4`, everything else→`rj45-24-2sfp`. Its docstring claims the guess
-is "refined once ports are known". A repo-wide search for `portKind` returns 7
-references and **none of them refine it** — the comment is false and should be
-deleted. Consequence: every pica8 device renders 48 SFP cages regardless of the
-port inventory the backend actually discovered.
+The renderer is **2D SVG**, not WebGL. The original plan below was to keep the
+R3F chassis (`components/three/Switch3D.tsx`) and feed it the derived layout.
+That was done, then abandoned and the component deleted, for reasons worth
+recording:
+
+- Overlapping plates with coincident depths **z-fought and flickered** as the
+  camera orbited. Fixable, but the fix is a depth ladder maintained by hand.
+- Metallic materials slid a specular across every cage while orbiting.
+- The canvas had **no keyboard path** — a port could only be selected by mouse.
+- A faceplate is read, not admired. Vector stays crisp at any zoom, prints and
+  screenshots cleanly, and needs no GPU context.
+
+`Topology3D` still uses R3F for the environment view, so the `three` /
+`@react-three` dependencies remain justified.
+
+### The original gap (what prompted this)
+
+`portKindFor` (`mappers.ts`) maps `arista→qsfp-32`, `pica8→sfp-48`,
+`freebsd→rj45-4`, everything else→`rj45-24-2sfp`, from the platform string
+alone. Its docstring claimed the guess was "refined once ports are known";
+nothing refined it. Consequence: every pica8 device rendered 48 SFP cages
+regardless of the inventory actually discovered. `portKind` now survives only as
+the empty-port-list fallback in `deriveFaceplate`, and its docstring says so.
 
 ### The two real inventories (read from the live API)
 
@@ -261,8 +285,8 @@ template is an *override on top of* discovered truth, never a replacement for
 it: if the template and the live inventory disagree, that disagreement is drift
 to surface, by the same rule as a pinned port reference.
 
-`Switch3D` then consumes `Faceplate` instead of `PortKind`. `PortKind` stays
-only as the fallback stereotype.
+The renderer consumes `Faceplate` instead of `PortKind`. `PortKind` stays only
+as the fallback stereotype for a device whose ports have not loaded.
 
 > Switches only (see Scope). The component takes a port list and a layout, not a
 > device role — so it stays reusable if routers ever become writable, without
@@ -312,28 +336,56 @@ Per-port overlay state, all already available:
 Selecting a port drives the existing `PortPanel`. The faceplate replaces the
 port *picker*, not the port *editor*.
 
-## Staging
+## Staging — outcome
 
-| # | Step | Risk |
+| # | Step | Status |
 |---|---|---|
-| 1 | `lib/faceplate.ts` + unit tests over real port inventories | none (pure) |
-| 2 | Delete the false "refined once ports are known" comment | none |
-| 3 | `Switch3D` consumes `Faceplate`; keep stereotype as tagged fallback | low |
-| 4 | Overlays (VLAN, tagged count, pending-change halo) | low |
-| 5 | Faceplate as picker on `DeviceDetailPage` | medium — real estate |
-| 6 | **backend** — expose `_kind` in the OpenAPI contract (see below) | medium |
+| 1 | `lib/faceplate.ts` + unit tests over real port inventories | done |
+| 2 | Delete the false "refined once ports are known" comment | done |
+| 3 | Renderer consumes `Faceplate`; stereotype as tagged fallback | done |
+| 4 | Overlays — VLAN stripe, link LED, pending marker, breakout ×N | done |
+| 4b | Overlay — **tagged-VLAN count on the cage** | NOT done |
+| 5 | Faceplate as the picker on `DeviceDetailPage` | done |
+| 6 | **backend** — declare the response variants (see below) | NOT done |
 
-Steps 1-2 are independent and can land immediately.
+Two items remain open. 4b is cosmetic: a trunk port currently shows only its
+untagged VLAN on the panel, so a 32-tag trunk and an access port look alike
+there — the tag count is visible on the port card but not the cage. 6 is
+discussed below and is deliberately deferred.
 
 ## Known contract debt (backend)
 
-`services/requests.py:305,351,395,444` file requests as
-`{"_kind": <kind>, **change.model_dump()}` into a field the OpenAPI schema
-declares as `PortChange` (`schema.gen.ts:1801`). The discriminator therefore
-exists at runtime but is **invisible to generated TypeScript**, which is why
-`mapRequest` only ever handled the port shape.
+**Correction.** An earlier revision of this document claimed the OpenAPI schema
+declares `requested_changes` as `PortChange` on the response, and that the
+`_kind` discriminator was therefore "invisible to generated TypeScript". That is
+wrong. Checked against `schema.gen.ts`:
 
-`lib/changeSummary.ts` narrows this defensively at the boundary. The real fix is
-a discriminated union in the response model so `schema.gen.ts` carries the
-variants and the frontend narrowing becomes type-checked rather than hand-rolled.
-Until then the hand-rolled narrowing is load-bearing — do not delete it.
+| Schema | `requested_changes` | Direction |
+|---|---|---|
+| `RequestCreateIn` (1801) | `PortChange` | request body |
+| `RequestResubmitIn` (1965) | `PortChange \| null` | request body |
+| **`RequestOut` (1923)** | **`{ [key: string]: unknown }`** | **response** |
+
+The response type is already an honest opaque dict — `RequestOut.requested_changes`
+is `dict[str, object]` in `schemas/request.py:131`. So the frontend narrowing is
+not compensating for a *wrong* type; it is compensating for an *unspecific* one.
+`mapRequest` had to cast to `Record<string, unknown>` regardless.
+
+The debt is real but smaller than stated: the **inputs** are typed `PortChange`,
+while the vlan/l3/vrf/ospf endpoints take their own bodies and the service layer
+writes `{"_kind": …}` dicts. Nothing lies; the response is simply untyped.
+
+Worth doing eventually: declare a discriminated union on the response so
+`schema.gen.ts` carries the variants and `lib/changeSummary` narrowing becomes
+type-checked instead of hand-rolled. Two things make it more than a type change,
+and are the reason it has not been done:
+
+- `requested_changes` is stored as JSON, and legacy port rows carry **no**
+  `_kind` at all — the union needs a defaulted variant, matching
+  `change_apply.py`'s own `raw_changes.pop("_kind", "port")`.
+- Emitting a validated union means parsing on read, so a row written by an older
+  version that fails validation would break the list endpoint. Today an
+  unrecognised payload degrades to "no details" in the UI instead.
+
+Until then the hand-rolled narrowing in `lib/changeSummary.ts` is load-bearing —
+do not delete it.
