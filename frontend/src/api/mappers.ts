@@ -65,7 +65,16 @@ function defaultPortFor(platformId: string): number {
   }
 }
 
-/** Physical port layout guess from platform; refined once ports are known. */
+/**
+ * Coarse per-platform stereotype, used ONLY as a fallback for a device whose
+ * ports have not loaded yet.
+ *
+ * It is a guess and frequently a wrong one — it maps every pica8 to `sfp-48`,
+ * while the pica8 in the fleet is a 32-port QSFP switch. Real layout comes from
+ * `lib/faceplate.deriveFaceplate`, which reads the ports the device actually
+ * reported. (This used to claim it was "refined once ports are known"; nothing
+ * refined it, so the claim is gone along with the behaviour it implied.)
+ */
 function portKindFor(platform: Platform): PortKind {
   switch (platform) {
     case 'arista':

@@ -3,7 +3,8 @@ import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, type OrbitControlsProps } from '@react-three/drei';
 import { RotateCcw } from 'lucide-react';
 import * as THREE from 'three';
-import type { Device, Port, PortKind } from '@/models';
+import type { Device, Port } from '@/models';
+import { deriveFaceplate, type ConnectorType } from '@/lib/faceplate';
 import { vlanRGB } from '@/lib/vlan';
 import type { ThemeMode } from '@/lib/palette';
 
@@ -15,27 +16,17 @@ interface Switch3DProps {
   theme: ThemeMode;
 }
 
+/** Chassis sizing + port body geometry, derived from the faceplate below. */
 interface PortLayout {
   rows: number;
   cols: number;
   type: 'rj45' | 'sfp' | 'qsfp';
-  extra?: { kind: 'sfp'; count: number };
 }
 
-function portLayout(kind: PortKind): PortLayout {
-  switch (kind) {
-    case 'rj45-24-2sfp':
-      return { rows: 2, cols: 12, type: 'rj45', extra: { kind: 'sfp', count: 2 } };
-    case 'sfp-5':
-      return { rows: 1, cols: 5, type: 'sfp' };
-    case 'qsfp-32':
-      return { rows: 2, cols: 16, type: 'qsfp' };
-    case 'sfp-48':
-      return { rows: 4, cols: 12, type: 'sfp' };
-    case 'rj45-4':
-      return { rows: 1, cols: 4, type: 'rj45' };
-  }
-}
+// The old `portLayout(kind)` stereotype table lived here. It is gone: layout is
+// now derived from the ports the device actually reports (lib/faceplate), and
+// the per-platform stereotype survives only as that module's empty-list
+// fallback. Keeping a second table here would let the two drift apart.
 
 const PORT_BODY: Record<PortLayout['type'], { w: number; h: number; color: number }> = {
   rj45: { w: 0.42, h: 0.46, color: 0x0a0d10 },
@@ -345,42 +336,77 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
  * Public component — owns the canvas and the orbit controls.
  * ------------------------------------------------------------------------- */
 
+/** Faceplate connector type -> the three port body geometries this scene has. */
+function bodyTypeFor(connector: ConnectorType): PortLayout['type'] {
+  switch (connector) {
+    case 'qsfp':
+      return 'qsfp';
+    case 'sfp':
+    case 'sfp28':
+      return 'sfp';
+    default:
+      return 'rj45';
+  }
+}
+
 export function Switch3D({ device, ports, selectedPort, onPick, theme }: Switch3DProps) {
   const isFreebsd = device.platform === 'freebsd';
-  const layout = portLayout(device.portKind);
   const orbitRef = useRef<OrbitControlsProps & { reset?: () => void } & { object?: unknown }>(null);
 
+  // Layout comes from the ports the device actually reported, not from a guess
+  // keyed off the platform string. `device.portKind` survives only as the
+  // fallback for a device whose ports have not loaded yet.
+  const faceplate = useMemo(() => deriveFaceplate(ports, device.portKind), [ports, device.portKind]);
+
+  // Groups sit side by side, so a switch's SFP uplinks render to the right of
+  // its access ports — one grid, group-aware, plus a one-column gap between.
+  const layout = useMemo<PortLayout>(() => {
+    if (faceplate.groups.length === 0) return { rows: 1, cols: 1, type: 'rj45' };
+    const cols =
+      faceplate.groups.reduce((n, g) => n + g.cols, 0) + (faceplate.groups.length - 1);
+    const rows = faceplate.groups.reduce((n, g) => Math.max(n, g.rows), 1);
+    // Body geometry follows the biggest group — the panel's dominant media.
+    const dominant = faceplate.groups.reduce((a, b) => (b.slots.length > a.slots.length ? b : a));
+    return { rows, cols, type: bodyTypeFor(dominant.connector) };
+  }, [faceplate]);
+
   const positions = useMemo<THREE.Vector3[]>(() => {
-    const out: THREE.Vector3[] = [];
     const chassisD = 3.2;
     if (isFreebsd) {
       const startX = -1.65;
-      for (let i = 0; i < ports.length; i++) {
-        out.push(new THREE.Vector3(startX + i * 0.7, 0, chassisD / 2 + 0.15));
-      }
-      return out;
+      return ports.map((_, i) => new THREE.Vector3(startX + i * 0.7, 0, chassisD / 2 + 0.15));
     }
-    // Lay EVERY port out in a `layout.cols`-wide grid, flowing into as many
-    // rows as needed. The faceplate's nominal row count is a hint for sizing,
-    // but real devices can report more ports than rows*cols (e.g. PicOS
-    // breakout sub-interfaces). Capping positions at the faceplate size left
-    // positions[i] === undefined for the overflow and crashed the instanced
-    // renderer — so we never cap: one position per port, always.
-    const cols = Math.max(1, layout.cols);
-    const rowCount = Math.max(layout.rows, Math.ceil(ports.length / cols));
-    const colsW = cols * 0.55;
-    const rowsH = rowCount * 0.65;
+
+    const colsW = layout.cols * 0.55;
+    const rowsH = layout.rows * 0.65;
     const startX = -colsW / 2 + 0.275 + 0.7;
     const startY = rowsH / 2 - 0.325 - 0.05;
-    for (let i = 0; i < ports.length; i++) {
-      const r = Math.floor(i / cols);
-      const c = i % cols;
-      const x = startX + c * 0.55;
-      const y = startY - r * 0.65;
-      out.push(new THREE.Vector3(x, y, chassisD / 2 + 0.15));
+
+    // Place by CAGE, then hand each port the position of the cage it lives in.
+    // Breakout lanes share one cage (see lib/faceplate), so they land together
+    // and are nudged apart only enough to stay individually pickable.
+    const byPort = new Map<string, THREE.Vector3>();
+    let colOffset = 0;
+    for (const group of faceplate.groups) {
+      for (const slot of group.slots) {
+        const x = startX + (colOffset + slot.col) * 0.55;
+        const y = startY - slot.row * 0.65;
+        slot.ports.forEach((p, lane) => {
+          const spread = slot.ports.length > 1 ? (lane - (slot.ports.length - 1) / 2) * 0.12 : 0;
+          byPort.set(p.name, new THREE.Vector3(x, y + spread, chassisD / 2 + 0.15));
+        });
+      }
+      colOffset += group.cols + 1;
     }
-    return out;
-  }, [layout, ports.length, isFreebsd]);
+
+    // One position per port, always — a missing entry would leave
+    // positions[i] undefined and crash the instanced renderer.
+    return ports.map(
+      (p, i) =>
+        byPort.get(p.name) ??
+        new THREE.Vector3(startX + (i % Math.max(1, layout.cols)) * 0.55, startY, chassisD / 2 + 0.15),
+    );
+  }, [faceplate, layout, ports, isFreebsd]);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-bg-sunken shadow-[0_2px_24px_-8px_rgba(0,0,0,0.6)_inset]">
