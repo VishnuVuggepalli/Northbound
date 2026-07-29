@@ -1,25 +1,27 @@
 /**
- * 2D connector faces — RJ45, SFP/SFP+, QSFP.
+ * Inline connector glyph — RJ45, SFP/SFP+/SFP28, QSFP.
  *
- * Why hand-authored rather than an icon pack: the free packs (SVG Repo, Noun
- * Project, Flaticon, UXWing) ship a single decorative "ethernet port" glyph.
- * None covers RJ45 + SFP + QSFP as one coherent set, and none is drawn to be
- * repeated 32 times at 16px while carrying link state. These are simple
- * geometry — a keyway and eight contacts, or a letterbox mouth behind a shield
- * lip — so drawing them keeps the repo free of third-party asset licensing and
- * matches the house convention (inline JSX + lucide, zero .svg files).
+ * Geometry is NOT defined here. It comes from lib/connectorShape, the single
+ * owner of what each connector looks like; this file owns only how those parts
+ * are STYLED at glyph scale. The panel-scale renderer
+ * (components/faceplate/PortCage) draws the same parts with heavier styling.
+ * To change what an RJ45 looks like, change connectorShape — once.
  *
- * Colour comes from `currentColor` and design tokens only, so these inherit
- * light/dark from whatever renders them.
+ * On drawing rather than sourcing: the free packs (SVG Repo — CC0, UXWing,
+ * Noun Project, Flaticon) ship a single decorative "ethernet port" glyph. None
+ * covers RJ45 + SFP + QSFP as a set, and none is drawn to repeat 32 times at
+ * 13px while carrying link state. Drawing them also keeps the repo free of
+ * third-party asset licensing and matches the house convention (inline JSX +
+ * lucide, zero .svg files).
  *
- * These are the small inline glyphs (port cards, lists). The full-size panel
- * geometry lives in components/faceplate/PortCage — same cues, different
- * scale. If you change what an RJ45 looks like, change both.
+ * Colour is `currentColor` only, so the glyph inherits light/dark from whatever
+ * renders it.
  */
 
 import type { SVGProps } from 'react';
 import { cn } from '@/lib/cn';
 import type { ConnectorType } from '@/lib/faceplate';
+import { connectorParts, type ConnectorPart, type ShapeBox } from '@/lib/connectorShape';
 
 export interface ConnectorIconProps extends Omit<SVGProps<SVGSVGElement>, 'children'> {
   kind: ConnectorType;
@@ -32,83 +34,65 @@ export interface ConnectorIconProps extends Omit<SVGProps<SVGSVGElement>, 'child
 }
 
 /**
- * RJ45 — a rectangular opening with the latch keyway hanging below centre and
- * eight contacts along the top. The keyway is the cue that identifies an RJ45
- * at a glance; without it the shape is just a box.
+ * Outer cage footprint per type, in the 24x24 viewBox. Proportions follow the
+ * hardware: RJ45 is near-square and tall, transceivers are letterboxes.
  */
-function Rj45Face() {
-  return (
-    <>
-      <rect x="3.5" y="2.5" width="17" height="19" rx="1.5" className="fill-none" strokeWidth="1.4" />
-      {/* Opening + keyway as one silhouette */}
-      <path
-        d="M6 5h12v9.5h-2.75V18h-6.5v-3.5H6z"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-        className="fill-none"
-      />
-      {/* Eight contacts */}
-      {Array.from({ length: 8 }, (_, i) => (
-        <line
-          key={i}
-          x1={7.2 + i * 1.37}
-          y1="5.8"
-          x2={7.2 + i * 1.37}
-          y2="9.4"
-          strokeWidth="0.9"
-          strokeLinecap="round"
-          opacity="0.75"
-        />
-      ))}
-    </>
-  );
-}
-
-/** SFP / SFP+ / SFP28 — letterbox cage mouth behind a shield lip. */
-function SfpFace() {
-  return (
-    <>
-      <rect x="1.5" y="5.5" width="21" height="13" rx="1.5" className="fill-none" strokeWidth="1.4" />
-      <rect x="4" y="8" width="16" height="8" rx="0.8" className="fill-none" strokeWidth="1.2" />
-      {/* Latch bale on the left, as on a real transceiver cage */}
-      <line x1="4" y1="12" x2="1.5" y2="12" strokeWidth="1.2" strokeLinecap="round" opacity="0.8" />
-    </>
-  );
-}
-
-/** QSFP — taller mouth than SFP, with the divider rib across it. */
-function QsfpFace() {
-  return (
-    <>
-      <rect x="1.5" y="4" width="21" height="16" rx="1.5" className="fill-none" strokeWidth="1.4" />
-      <rect x="4" y="6.5" width="16" height="11" rx="0.8" className="fill-none" strokeWidth="1.2" />
-      {/* Divider rib — the visual difference from a plain SFP mouth */}
-      <line x1="4" y1="12" x2="20" y2="12" strokeWidth="1" opacity="0.7" />
-      <line x1="4" y1="12" x2="1.5" y2="12" strokeWidth="1.2" strokeLinecap="round" opacity="0.8" />
-    </>
-  );
-}
-
-/** Unknown media — a plain cage, so it never masquerades as a known type. */
-function UnknownFace() {
-  return (
-    <>
-      <rect x="3" y="5" width="18" height="14" rx="1.5" className="fill-none" strokeWidth="1.4" />
-      <line x1="9" y1="12" x2="15" y2="12" strokeWidth="1.2" strokeLinecap="round" opacity="0.6" />
-    </>
-  );
-}
-
-const FACE: Record<ConnectorType, () => JSX.Element> = {
-  rj45: Rj45Face,
-  sfp: SfpFace,
-  sfp28: SfpFace,
-  qsfp: QsfpFace,
-  unknown: UnknownFace,
+const SHELL: Record<ConnectorType, ShapeBox> = {
+  rj45: { x: 3.5, y: 2.5, w: 17, h: 19 },
+  sfp: { x: 1.5, y: 5.5, w: 21, h: 13 },
+  sfp28: { x: 1.5, y: 5.5, w: 21, h: 13 },
+  qsfp: { x: 1.5, y: 4, w: 21, h: 16 },
+  unknown: { x: 3, y: 5, w: 18, h: 14 },
 };
 
+/** Style one part at glyph scale — hollow outlines, thin strokes. */
+function renderPart(part: ConnectorPart, i: number) {
+  switch (part.kind) {
+    case 'path':
+      return <path key={i} d={part.d} fill="none" strokeWidth={1.2} strokeLinejoin="round" />;
+    case 'rect':
+      // Contacts are solid at this size; a hollow sub-pixel box is just mud.
+      return part.role === 'contact' ? (
+        <rect
+          key={i}
+          x={part.x}
+          y={part.y}
+          width={part.w}
+          height={part.h}
+          fill="currentColor"
+          stroke="none"
+          opacity={0.75}
+        />
+      ) : (
+        <rect
+          key={i}
+          x={part.x}
+          y={part.y}
+          width={part.w}
+          height={part.h}
+          rx={0.8}
+          fill="none"
+          strokeWidth={1.2}
+        />
+      );
+    case 'line':
+      return (
+        <line
+          key={i}
+          x1={part.x1}
+          y1={part.y1}
+          x2={part.x2}
+          y2={part.y2}
+          strokeWidth={part.role === 'bale' ? 1.2 : 1}
+          strokeLinecap="round"
+          opacity={part.role === 'rib' ? 0.7 : 0.85}
+        />
+      );
+  }
+}
+
 export function ConnectorIcon({ kind, size = 16, title, className, ...rest }: ConnectorIconProps) {
-  const Face = FACE[kind] ?? UnknownFace;
+  const shell = SHELL[kind] ?? SHELL.unknown;
   const labelled = title !== undefined;
   return (
     <svg
@@ -124,7 +108,17 @@ export function ConnectorIcon({ kind, size = 16, title, className, ...rest }: Co
       focusable="false"
       {...rest}
     >
-      <Face />
+      {/* Cage shell */}
+      <rect
+        x={shell.x}
+        y={shell.y}
+        width={shell.w}
+        height={shell.h}
+        rx={1.5}
+        fill="none"
+        strokeWidth={1.4}
+      />
+      {connectorParts(kind, shell).map(renderPart)}
     </svg>
   );
 }

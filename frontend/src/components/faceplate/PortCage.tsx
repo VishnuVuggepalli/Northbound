@@ -1,16 +1,18 @@
 /**
  * One port cage on the SVG faceplate.
  *
- * Draws the connector at panel scale — an RJ45 keyway and contact block, or a
- * transceiver cage mouth with its latch bale — plus the live state an operator
- * reads at a glance: link LED, VLAN identity stripe, breakout marker, pending
- * change, selection.
+ * Geometry is NOT defined here. It comes from lib/connectorShape, the single
+ * owner of what each connector looks like; this file owns only panel-scale
+ * STYLING plus the live state an operator reads at a glance — link LED, VLAN
+ * identity stripe, breakout marker, pending change, selection. The inline glyph
+ * (shared/ConnectorIcon) draws the same parts, lighter.
  *
- * Everything is flat 2D. There is no lighting, no material and no depth buffer,
- * so nothing can shimmer or z-fight the way the WebGL faceplate did, and it
- * stays crisp at any zoom.
+ * Everything is flat 2D. No lighting, no material, no depth buffer — so nothing
+ * can shimmer or z-fight the way the WebGL faceplate did, and it stays crisp at
+ * any zoom.
  */
 
+import { connectorParts, type ConnectorPart } from '@/lib/connectorShape';
 import type { CageBox } from './geometry';
 import type { Port } from '@/models';
 
@@ -32,16 +34,64 @@ function ledClass(port: Port | undefined): string {
   return 'fill-fg-subtle';
 }
 
+/**
+ * Style one part at panel scale — filled mouths, gold contacts.
+ *
+ * NOTE the contacts use an explicit fill + fillOpacity rather than
+ * `fill-warn/70`. `warn` is a raw `var(--nb-warn)` and Tailwind's opacity
+ * modifier cannot inject an alpha into it for `fill`; the invalid value falls
+ * back to SVG black. That trap has already bitten this file and the vendor
+ * strip — do not reintroduce it.
+ */
+function renderPart(part: ConnectorPart, i: number) {
+  switch (part.kind) {
+    case 'path':
+      return (
+        <path key={i} d={part.d} className="fill-bg-sunken stroke-border" strokeWidth={0.6} />
+      );
+    case 'rect':
+      return part.role === 'contact' ? (
+        <rect
+          key={i}
+          x={part.x}
+          y={part.y}
+          width={part.w}
+          height={part.h}
+          fill="var(--nb-warn)"
+          fillOpacity={0.7}
+        />
+      ) : (
+        <rect
+          key={i}
+          x={part.x}
+          y={part.y}
+          width={part.w}
+          height={part.h}
+          rx={1}
+          className="fill-bg-sunken stroke-border"
+          strokeWidth={0.6}
+        />
+      );
+    case 'line':
+      return (
+        <line
+          key={i}
+          x1={part.x1}
+          y1={part.y1}
+          x2={part.x2}
+          y2={part.y2}
+          className={part.role === 'bale' ? 'stroke-fg-subtle' : 'stroke-border'}
+          strokeWidth={part.role === 'bale' ? 1 : 0.6}
+          strokeLinecap="round"
+        />
+      );
+  }
+}
+
 export function PortCage({ cage, selected, pending, vlanColor, onSelect }: PortCageProps) {
   const primary = cage.ports[0];
   const brokenOut = cage.ports.length > 1;
   const { x, y, w, h } = cage;
-
-  // Inner mouth, inset from the cage shell.
-  const mx = x + w * 0.14;
-  const my = y + h * 0.16;
-  const mw = w * 0.72;
-  const mh = h * (cage.connector === 'rj45' ? 0.5 : 0.46);
 
   return (
     <g
@@ -83,73 +133,8 @@ export function PortCage({ cage, selected, pending, vlanColor, onSelect }: PortC
         strokeWidth={1}
       />
 
-      {cage.connector === 'rj45' ? (
-        <>
-          {/* Mouth + latch keyway as one silhouette — the keyway is what makes
-              an RJ45 identifiable rather than a generic rectangle. */}
-          <path
-            d={[
-              `M${mx} ${my}`,
-              `h${mw}`,
-              `v${mh}`,
-              `h${-mw * 0.32}`,
-              `v${h * 0.16}`,
-              `h${-mw * 0.36}`,
-              `v${-h * 0.16}`,
-              `h${-mw * 0.32}`,
-              'z',
-            ].join(' ')}
-            className="fill-bg-sunken stroke-border"
-            strokeWidth={0.6}
-          />
-          {/* Contact block */}
-          {Array.from({ length: 8 }, (_, i) => (
-            <rect
-              key={i}
-              x={mx + mw * 0.08 + (i * mw * 0.84) / 8}
-              y={my + mh * 0.12}
-              width={mw * 0.055}
-              height={mh * 0.42}
-              fill="var(--nb-warn)"
-              fillOpacity={0.7}
-            />
-          ))}
-        </>
-      ) : (
-        <>
-          {/* Transceiver cage mouth */}
-          <rect
-            x={mx}
-            y={y + (h - mh) / 2}
-            width={mw}
-            height={mh}
-            rx={1}
-            className="fill-bg-sunken stroke-border"
-            strokeWidth={0.6}
-          />
-          {/* Latch bale on the left, as on a real cage */}
-          <line
-            x1={mx - w * 0.06}
-            y1={y + h / 2}
-            x2={mx}
-            y2={y + h / 2}
-            className="stroke-fg-subtle"
-            strokeWidth={1}
-            strokeLinecap="round"
-          />
-          {/* QSFP carries a divider rib; SFP does not */}
-          {cage.connector === 'qsfp' && (
-            <line
-              x1={mx + 1}
-              y1={y + h / 2}
-              x2={mx + mw - 1}
-              y2={y + h / 2}
-              className="stroke-border"
-              strokeWidth={0.6}
-            />
-          )}
-        </>
-      )}
+      {/* Connector geometry — shared with the inline glyph. */}
+      {connectorParts(cage.connector, cage).map(renderPart)}
 
       {/* VLAN identity stripe along the bottom edge */}
       {primary && primary.state !== 'down' && (
@@ -174,7 +159,13 @@ export function PortCage({ cage, selected, pending, vlanColor, onSelect }: PortC
 
       {/* Pending change marker */}
       {pending && (
-        <circle cx={x + w - 4} cy={y + h - 6} r={2} className="fill-accent stroke-bg" strokeWidth={0.8} />
+        <circle
+          cx={x + w - 4}
+          cy={y + h - 6}
+          r={2}
+          className="fill-accent stroke-bg"
+          strokeWidth={0.8}
+        />
       )}
     </g>
   );
