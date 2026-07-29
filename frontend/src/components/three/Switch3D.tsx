@@ -73,6 +73,22 @@ function facePalette(theme: ThemeMode) {
 }
 
 /**
+ * Depth ladder for the stacked plates that make up a port face.
+ *
+ * Every layer gets its OWN front-face depth, separated by a clear margin. Two
+ * surfaces at the same z fight for the depth buffer and flicker as the camera
+ * orbits — which is exactly what happened when the QSFP rib and the cage mouth
+ * both ended at 0.105, and the shield lip ended level with the cage body.
+ * Keep these distinct; do not collapse them to "close enough" values.
+ */
+const Z = {
+  bezel: -0.05, // depth 0.10 -> front face at  0.00
+  cage: 0.06, //   depth 0.10 -> front face at  0.11
+  mouth: 0.13, //  depth 0.03 -> front face at  0.145
+  detail: 0.17, // depth 0.02 -> front face at  0.18
+} as const;
+
+/**
  * The recognisable face of each connector type.
  *
  * A plain dark rectangle reads as "a hole", not as a port. Real panels are
@@ -81,6 +97,10 @@ function facePalette(theme: ThemeMode) {
  * exactly those cues. Only the per-port path draws this detail; the instanced
  * path (>60 ports) stays simple, where the extra geometry would cost far more
  * than it communicates.
+ *
+ * Materials are FLAT (lambert/basic, no metalness or roughness). Specular
+ * highlights from a metallic material slide across 32 cages as the camera
+ * moves and read as shimmer; a diffuse panel is calmer and easier to scan.
  */
 function ConnectorFace({
   type,
@@ -98,49 +118,48 @@ function ConnectorFace({
     return (
       <>
         {/* Main opening */}
-        <mesh position={[0, cy, 0.07]}>
-          <boxGeometry args={[ow, oh, 0.06]} />
+        <mesh position={[0, cy, Z.mouth]}>
+          <boxGeometry args={[ow, oh, 0.03]} />
           <meshBasicMaterial color={palette.slot} />
         </mesh>
-        {/* Latch keyway — the notch that makes an RJ45 unmistakable */}
-        <mesh position={[0, cy - oh / 2 - 0.035, 0.07]}>
-          <boxGeometry args={[ow * 0.36, 0.09, 0.06]} />
+        {/* Latch keyway — the notch that makes an RJ45 unmistakable. Sits at
+            the mouth depth and is only adjacent in Y, so no shared surface. */}
+        <mesh position={[0, cy - oh / 2 - 0.035, Z.mouth]}>
+          <boxGeometry args={[ow * 0.36, 0.09, 0.03]} />
           <meshBasicMaterial color={palette.slot} />
         </mesh>
-        {/* 8 gold contacts along the top of the opening */}
+        {/* 8 contacts along the top of the opening */}
         {Array.from({ length: 8 }, (_, i) => (
-          <mesh
-            key={i}
-            position={[-ow / 2 + (ow * (i + 0.5)) / 8, cy + oh * 0.2, 0.088]}
-          >
+          <mesh key={i} position={[-ow / 2 + (ow * (i + 0.5)) / 8, cy + oh * 0.2, Z.detail]}>
             <boxGeometry args={[ow / 18, oh * 0.42, 0.02]} />
-            <meshStandardMaterial color={palette.pin} metalness={0.85} roughness={0.32} />
+            <meshBasicMaterial color={palette.pin} />
           </mesh>
         ))}
       </>
     );
   }
 
-  // SFP / SFP+ / QSFP — a letterbox cage mouth behind a metal shield lip.
+  // SFP / SFP+ / QSFP — a letterbox cage mouth behind a shield lip.
   const ow = body.w * 0.82;
   const oh = body.h * (type === 'qsfp' ? 0.52 : 0.46);
   return (
     <>
-      {/* Shield lip around the mouth */}
-      <mesh position={[0, 0, 0.065]}>
-        <boxGeometry args={[ow + 0.05, oh + 0.05, 0.05]} />
-        <meshStandardMaterial color={palette.shield} metalness={0.8} roughness={0.35} />
+      {/* Shield lip — one step behind the mouth, never level with it. */}
+      <mesh position={[0, 0, Z.cage + 0.03]}>
+        <boxGeometry args={[ow + 0.05, oh + 0.05, 0.03]} />
+        <meshLambertMaterial color={palette.shield} />
       </mesh>
       {/* Cage mouth */}
-      <mesh position={[0, 0, 0.08]}>
-        <boxGeometry args={[ow, oh, 0.05]} />
+      <mesh position={[0, 0, Z.mouth]}>
+        <boxGeometry args={[ow, oh, 0.03]} />
         <meshBasicMaterial color={palette.slot} />
       </mesh>
-      {/* QSFP mouths are taller and carry a visible divider rib */}
+      {/* QSFP mouths carry a visible divider rib, at detail depth so its front
+          face never coincides with the mouth's. */}
       {type === 'qsfp' && (
-        <mesh position={[0, 0, 0.095]}>
+        <mesh position={[0, 0, Z.detail]}>
           <boxGeometry args={[ow * 0.9, 0.018, 0.02]} />
-          <meshStandardMaterial color={palette.shield} metalness={0.7} roughness={0.4} />
+          <meshBasicMaterial color={palette.shield} />
         </mesh>
       )}
     </>
@@ -215,33 +234,34 @@ function PortMesh({ port, type, position, selected, onPick, palette }: PortMeshP
           This is what makes an individual port visible: without it the cage is
           a dark rectangle on a dark faceplate and the whole panel reads as one
           slab. Contrasts against the chassis in both themes. */}
-      <mesh position={[0, 0, -0.02]}>
-        <boxGeometry args={[body.w + 0.08, body.h + 0.08, 0.16]} />
-        <meshStandardMaterial color={palette.bezel} metalness={0.55} roughness={0.45} />
+      <mesh position={[0, 0, Z.bezel]}>
+        <boxGeometry args={[body.w + 0.08, body.h + 0.08, 0.1]} />
+        <meshLambertMaterial color={palette.bezel} />
       </mesh>
-      {/* Port body — solid metallic shroud so the cage reads as a real
-          recessed connector housing, not a flat dark patch. */}
-      <mesh>
-        <boxGeometry args={[body.w, body.h, 0.18]} />
-        <meshStandardMaterial color={palette.cage} metalness={0.6} roughness={0.5} />
+      {/* Cage plate — flat diffuse, not a metallic shroud. Metalness made the
+          highlight slide across every cage as the camera moved. */}
+      <mesh position={[0, 0, Z.cage]}>
+        <boxGeometry args={[body.w, body.h, 0.1]} />
+        <meshLambertMaterial color={palette.cage} />
       </mesh>
       <ConnectorFace type={type} body={body} palette={palette} />
-      {/* LED */}
-      <mesh position={[-body.w * 0.2, -body.h / 2 + 0.07, 0.1]}>
-        <boxGeometry args={[body.w * 0.42, 0.05, 0.04]} />
+      {/* LED and VLAN stripe ride in FRONT of every plate, at their own depth —
+          previously both sat at 0.1, inside the cage plate's own span. */}
+      <mesh position={[-body.w * 0.2, -body.h / 2 + 0.07, Z.detail + 0.02]}>
+        <boxGeometry args={[body.w * 0.42, 0.05, 0.02]} />
         <meshBasicMaterial ref={ledRef} color={baseLed} />
       </mesh>
-      {/* VLAN identity stripe */}
       {port.state !== 'down' && (
-        <mesh position={[0, -body.h / 2 + 0.018, 0.1]}>
-          <boxGeometry args={[body.w * 0.86, 0.025, 0.04]} />
+        <mesh position={[0, -body.h / 2 + 0.018, Z.detail + 0.02]}>
+          <boxGeometry args={[body.w * 0.86, 0.025, 0.02]} />
           <meshBasicMaterial color={stripeColor} />
         </mesh>
       )}
-      {/* Selection ring — VLAN colored when selected */}
+      {/* Selection halo — must sit BEHIND the bezel and be wider than it, or it
+          is buried inside the bezel volume and fights it for depth. */}
       {selected && (
-        <mesh position={[0, 0, -0.05]}>
-          <boxGeometry args={[body.w + 0.1, body.h + 0.1, 0.02]} />
+        <mesh position={[0, 0, Z.bezel - 0.08]}>
+          <boxGeometry args={[body.w + 0.18, body.h + 0.18, 0.02]} />
           <meshBasicMaterial color={stripeColor} transparent opacity={0.95} />
         </mesh>
       )}
@@ -290,18 +310,18 @@ function InstancedPortGrid({
     ports.forEach((port, i) => {
       const pos = positions[i];
       if (!pos) return; // never index past the positions array
-      dummy.position.copy(pos);
+      dummy.position.set(pos.x, pos.y, pos.z + Z.cage);
       dummy.updateMatrix();
       meshRef.current!.setMatrixAt(i, dummy.matrix);
 
-      // Bezel sits just behind the cage so it shows as a rim around it.
-      dummy.position.set(pos.x, pos.y, pos.z - 0.02);
+      // Bezel on its own rung of the depth ladder — overlapping the cage here
+      // is what made the plates fight for depth and flicker.
+      dummy.position.set(pos.x, pos.y, pos.z + Z.bezel);
       dummy.updateMatrix();
       bezelRef.current!.setMatrixAt(i, dummy.matrix);
-      dummy.position.copy(pos);
 
       // LED instance
-      dummy.position.set(pos.x - body.w * 0.2, pos.y - body.h / 2 + 0.07, pos.z + 0.1);
+      dummy.position.set(pos.x - body.w * 0.2, pos.y - body.h / 2 + 0.07, pos.z + Z.detail + 0.02);
       dummy.scale.set(body.w * 0.42, 0.05, 0.04);
       dummy.updateMatrix();
       ledRef.current!.setMatrixAt(i, dummy.matrix);
@@ -310,7 +330,7 @@ function InstancedPortGrid({
       ledRef.current!.setColorAt(i, ledColor);
 
       // Stripe instance
-      dummy.position.set(pos.x, pos.y - body.h / 2 + 0.018, pos.z + 0.1);
+      dummy.position.set(pos.x, pos.y - body.h / 2 + 0.018, pos.z + Z.detail + 0.02);
       dummy.scale.set(body.w * 0.86, 0.025, 0.04);
       dummy.updateMatrix();
       stripeRef.current!.setMatrixAt(i, dummy.matrix);
@@ -353,16 +373,16 @@ function InstancedPortGrid({
           the cages are dark rectangles on a dark faceplate and no individual
           port is discernible. */}
       <instancedMesh ref={bezelRef} args={[undefined, undefined, ports.length]}>
-        <boxGeometry args={[body.w + 0.08, body.h + 0.08, 0.16]} />
-        <meshStandardMaterial color={palette.bezel} metalness={0.55} roughness={0.45} />
+        <boxGeometry args={[body.w + 0.08, body.h + 0.08, 0.1]} />
+        <meshLambertMaterial color={palette.bezel} />
       </instancedMesh>
       <instancedMesh
         ref={meshRef}
         args={[undefined, undefined, ports.length]}
         onClick={handlePick}
       >
-        <boxGeometry args={[body.w, body.h, 0.18]} />
-        <meshStandardMaterial color={palette.cage} metalness={0.6} roughness={0.5} />
+        <boxGeometry args={[body.w, body.h, 0.1]} />
+        <meshLambertMaterial color={palette.cage} />
       </instancedMesh>
       <instancedMesh ref={ledRef} args={[undefined, undefined, ports.length]}>
         <boxGeometry args={[1, 1, 1]} />
@@ -373,8 +393,8 @@ function InstancedPortGrid({
         <meshBasicMaterial />
       </instancedMesh>
       {selectedPos && (
-        <mesh position={[selectedPos.x, selectedPos.y, selectedPos.z - 0.05]}>
-          <boxGeometry args={[body.w + 0.1, body.h + 0.1, 0.02]} />
+        <mesh position={[selectedPos.x, selectedPos.y, selectedPos.z + Z.bezel - 0.08]}>
+          <boxGeometry args={[body.w + 0.18, body.h + 0.18, 0.02]} />
           <meshBasicMaterial color={selectedColor} transparent opacity={0.95} />
         </mesh>
       )}
@@ -416,37 +436,32 @@ function Scene({ device, ports, selectedPort, onPick, theme, layout, positions, 
     <>
       {/* Instrument lighting: soft fill + a warm key + a cool accent rim so
           the chassis reads as a real material under control-room light. */}
-      {/* Dark theme gets a stronger key and a dedicated front fill: with the
-          page background near-black there is no bounce light, so without this
-          the machined bezels never catch a highlight and the panel flattens
-          back into a slab. */}
-      <ambientLight intensity={theme === 'dark' ? 0.72 : 0.6} />
-      <directionalLight position={[4, 6, 5]} intensity={theme === 'dark' ? 1.05 : 0.85} />
-      <directionalLight position={[-5, 2, -3]} intensity={0.42} color={0x7fa8ff} />
-      <directionalLight
-        position={[0, 1, 9]}
-        intensity={theme === 'dark' ? 0.75 : 0.35}
-        color={0xcfe2ff}
-      />
+      {/* Flat, even lighting: one ambient plus one white key from the front.
+          The previous rig had two extra coloured rim lights and metallic
+          materials, which slid a specular highlight across all 32 cages as the
+          camera orbited and read as shimmer. Diffuse-only keeps the panel
+          steady and legible while the camera moves. */}
+      <ambientLight intensity={theme === 'dark' ? 0.9 : 0.85} />
+      <directionalLight position={[1, 3, 8]} intensity={theme === 'dark' ? 0.55 : 0.45} />
 
-      {/* Chassis body — meshStandardMaterial (low metalness, mid roughness) so
-          the flat faces catch a subtle specular off the key/rim lights and
-          read as solid brushed steel rather than flat painted card. */}
+      {/* Chassis body — flat diffuse. It was a metallic standard material lit
+          by a three-light rig; the moving specular was a large part of the
+          shimmer, and a painted-card look is steadier to read anyway. */}
       <mesh castShadow>
         <boxGeometry args={[chassisW, chassisH, chassisD]} />
-        <meshStandardMaterial color={chassisColor} metalness={0.45} roughness={0.62} />
+        <meshLambertMaterial color={chassisColor} />
       </mesh>
       {/* Top plate (fine bevel suggestion) — slightly smoother so the lid edge
           highlight separates it from the body and gives a dimensional read. */}
       <mesh position={[0, chassisH / 2 + 0.001, 0]}>
         <boxGeometry args={[chassisW * 0.99, 0.08, chassisD * 0.99]} />
-        <meshStandardMaterial color={topColor} metalness={0.5} roughness={0.5} />
+        <meshLambertMaterial color={topColor} />
       </mesh>
       {/* Front inset — recessed faceplate; a touch rougher/less metallic so it
           reads as a solid sunken panel the ports sit in, not a void. */}
       <mesh position={[0, 0, chassisD / 2 + 0.025]}>
         <boxGeometry args={[chassisW - 0.4, chassisH - 0.3, 0.05]} />
-        <meshStandardMaterial color={frontColor} metalness={0.35} roughness={0.72} />
+        <meshLambertMaterial color={frontColor} />
       </mesh>
       {/* Brand chip */}
       <mesh position={[-chassisW / 2 + 0.55, 0, chassisD / 2 + 0.05]}>
