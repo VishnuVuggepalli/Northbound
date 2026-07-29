@@ -18,14 +18,63 @@ the violation is named with a `file:line` anchor.
 fetches, so the product description below comes from its public marketing and
 docs listings, not from a first-hand read of the app.
 
-What Patchdocs does:
+What Patchdocs does (from its features page):
 
 - a "digital twin ... from the building down to the port"
 - **custom device templates** — "tailored to your equipment, your naming
   conventions, and your workflows"
 - port-level documentation: "every port, every patch, every connection"
 - locations → racks → devices → ports → connections
+- **visual rack rendering** — "showing you exactly what's installed, where, and
+  how everything connects"
 - floor plans, photos, notes, full change history
+- **reports & export** — "professional reports in seconds", structured data and
+  visuals "to share with customers, auditors, or internal teams"
+- 2FA and access control
+- **multi-customer management** — "manage all your customers in one centralized
+  system"
+
+That last pair matters for positioning: Patchdocs is an **MSP documentation-of-
+record** product. Its output is a report for a customer or an auditor, and its
+input is a human declaring what exists. Northbound is a **live-state control
+plane** for one estate: its input is the device itself, and its output is a
+change pushed to that device. They overlap only on the port-level visual.
+
+### Connections: the one feature we should NOT copy by hand
+
+"Every patch, every connection" is Patchdocs' headline, and in that product it is
+**manually recorded** — a human types which port patches to which. Northbound
+already has this discovered, for free:
+
+| Piece | Anchor |
+|---|---|
+| `get_neighbors(port) -> list[Neighbor]` on the Driver ABC | `drivers/base.py:114` |
+| Normalization shared across drivers | `_lib/lldp.py` |
+| `supports_lldp` capability per platform | `schemas/driver.py:40` |
+| Per-port neighbors already on the wire | `port.neighbors` |
+| Already rendered as a "Neighbor (LLDP)" section | `PortPanel.tsx:379-382` |
+
+So the faceplate can draw **discovered** adjacency (chassis id, remote port,
+system name) instead of asking anyone to record patches. Build the connection
+view on LLDP; do not add a manual patch-entry UI.
+
+Caveat, and it is the same rule as everywhere else in this document: LLDP is
+observed truth about what is *currently* plugged in. If a recorded expectation
+and the live neighbor disagree, that is drift to flag — not a cue to silently
+rewrite the record. `models/index.ts:369` already states the existing boundary:
+neighbors are display-only and never auto-onboard a device.
+
+### Deliberately out of scope
+
+- **Racks, buildings, floor plans.** A headline Patchdocs feature; ruled out by
+  the user — "racks are not needed, but the switch or router". The unit is the
+  device faceplate.
+- **Multi-customer / MSP tenancy.** Northbound is single-estate.
+- **Manual patch recording.** Superseded by LLDP, per above.
+
+Worth considering later (a real Patchdocs capability with no Northbound
+equivalent): **export of the faceplate + port assignments** as a report or
+structured data, for audits or handover.
 
 **The key divergence.** Patchdocs is a *manual documentation* tool: it needs
 device templates because it has no connection to the live equipment — a human
@@ -37,10 +86,6 @@ and all, auto".
 
 Adopted from Patchdocs: faceplate as the primary surface, port-level detail,
 per-port notes/labels, change history.
-
-**Explicitly NOT adopted: racks, buildings, floor plans.** The user ruled these
-out — "racks are not needed, but the switch or router". The unit is the device
-faceplate; there is no rack elevation and no location hierarchy in this design.
 
 ## Where we are today (verified, not assumed)
 
