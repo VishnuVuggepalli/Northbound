@@ -26,6 +26,15 @@ import type { Port, PortKind } from '@/models';
 /** Physical cage type, inferred from the port group. */
 export type ConnectorType = 'rj45' | 'sfp' | 'sfp28' | 'qsfp' | 'unknown';
 
+/** Human label for a cage type. Lives with the type so there is one owner. */
+export const CONNECTOR_LABEL: Record<ConnectorType, string> = {
+  rj45: 'RJ45',
+  sfp: 'SFP',
+  sfp28: 'SFP28',
+  qsfp: 'QSFP',
+  unknown: 'Unknown connector',
+};
+
 /** One physical cage on the faceplate. Carries >1 port when broken out. */
 export interface PortSlot {
   /** Physical cage identity — the port name minus any breakout lane suffix. */

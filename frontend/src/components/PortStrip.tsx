@@ -4,6 +4,7 @@ import { Kbd } from '@/shared/Kbd';
 import { Input } from '@/shared/Input';
 import { cn } from '@/lib/cn';
 import { PortCard } from './PortCard';
+import { deriveFaceplate, type ConnectorType } from '@/lib/faceplate';
 import type { ThemeMode } from '@/lib/palette';
 import type { ChangeRequest, Device, Port } from '@/models';
 
@@ -64,6 +65,20 @@ export function PortStrip({
       return true;
     });
   }, [ports, query, bmcOnly, untagged, tagged]);
+
+  // Connector type per port, resolved through the SAME derivation the faceplate
+  // uses (lib/faceplate) rather than classified per card. Classification needs
+  // the whole group: `speed_mbps` is the negotiated rate, so a down QSFP
+  // reports null and would render as a plain SFP if judged alone.
+  const connectorByPort = useMemo(() => {
+    const map = new Map<string, ConnectorType>();
+    for (const group of deriveFaceplate(ports).groups) {
+      for (const slot of group.slots) {
+        for (const port of slot.ports) map.set(port.name, group.connector);
+      }
+    }
+    return map;
+  }, [ports]);
 
   // Auto-scroll the selected port into view (used by `j`/`k` shortcuts).
   useEffect(() => {
@@ -193,6 +208,7 @@ export function PortStrip({
               <PortCard
                 key={p.name}
                 port={p}
+                connector={connectorByPort.get(p.name) ?? 'unknown'}
                 theme={theme}
                 selected={selected === p.name}
                 pendingRequests={requests.filter(

@@ -1,12 +1,16 @@
 import { Inbox } from 'lucide-react';
 import { StatusDot } from '@/shared/StatusDot';
+import { ConnectorIcon } from '@/shared/ConnectorIcon';
 import { vlanColor, vlanColorMuted } from '@/lib/vlan';
 import type { ThemeMode } from '@/lib/palette';
 import { cn } from '@/lib/cn';
 import type { ChangeRequest, Port } from '@/models';
+import type { ConnectorType } from '@/lib/faceplate';
 
 interface PortCardProps {
   port: Port;
+  /** Media type, resolved by the caller from the device-wide faceplate. */
+  connector: ConnectorType;
   selected: boolean;
   theme: ThemeMode;
   pendingRequests: ChangeRequest[];
@@ -19,7 +23,7 @@ const STATE_BG: Record<Port['state'], string> = {
   disabled: 'bg-bg-elev-1/60',
 };
 
-export function PortCard({ port, selected, theme, pendingRequests, onClick }: PortCardProps) {
+export function PortCard({ port, connector, selected, theme, pendingRequests, onClick }: PortCardProps) {
   const color = vlanColor(port.untagged_vlan, theme);
   const muted = vlanColorMuted(port.untagged_vlan, theme);
   return (
@@ -42,7 +46,13 @@ export function PortCard({ port, selected, theme, pendingRequests, onClick }: Po
       style={selected ? { borderColor: color, boxShadow: `0 0 24px -4px ${muted}` } : undefined}
     >
       <header className="flex items-center justify-between">
-        <span className="nb-mono text-[11px] text-fg">{port.name}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          {/* Media type at a glance — copper vs fibre is the first thing you
+              need when deciding what can plug in. Decorative: the port name
+              beside it already carries the accessible text. */}
+          <ConnectorIcon kind={connector} size={13} className="text-fg-subtle" />
+          <span className="nb-mono truncate text-[11px] text-fg">{port.name}</span>
+        </span>
         <StatusDot
           state={port.state}
           pulse={port.state === 'up' && port.traffic > 0.4}
