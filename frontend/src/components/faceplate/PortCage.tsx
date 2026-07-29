@@ -93,11 +93,26 @@ export function PortCage({ cage, selected, pending, vlanColor, onSelect }: PortC
   const brokenOut = cage.ports.length > 1;
   const { x, y, w, h } = cage;
 
+  // Trunk vs access. Until now the panel drew only the untagged VLAN, so a
+  // 32-tag trunk and a plain access port were indistinguishable here — the tag
+  // count was visible on the port card but not on the cage you actually scan.
+  const taggedCount = primary?.tagged_vlans.length ?? 0;
+  const isTrunk = taggedCount > 0;
+
+  const label = [
+    `Port ${cage.id}`,
+    primary && primary.state,
+    isTrunk ? `trunk, ${taggedCount} tagged VLAN${taggedCount === 1 ? '' : 's'}` : primary && 'access',
+    brokenOut && `${cage.ports.length} breakout lanes`,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
   return (
     <g
       role="button"
       tabIndex={0}
-      aria-label={`Port ${cage.id}${primary ? `, ${primary.state}` : ''}`}
+      aria-label={label}
       aria-pressed={selected}
       className="group cursor-pointer outline-none [&:focus-visible>.cage-shell]:stroke-accent"
       onClick={() => primary && onSelect(primary.name)}
@@ -136,19 +151,47 @@ export function PortCage({ cage, selected, pending, vlanColor, onSelect }: PortC
       {/* Connector geometry — shared with the inline glyph. */}
       {connectorParts(cage.connector, cage).map(renderPart)}
 
-      {/* VLAN identity stripe along the bottom edge */}
+      {/* Untagged VLAN identity stripe along the bottom edge */}
       {primary && primary.state !== 'down' && (
         <rect x={x + 2} y={y + h - 3.2} width={w - 4} height={2} rx={1} fill={vlanColor} />
+      )}
+
+      {/* Trunk marker — a second, shorter stripe above the untagged one. Shape
+          carries the access/trunk distinction so it is scannable across a whole
+          bank without reading any text; the exact count is the label below. */}
+      {primary && isTrunk && primary.state !== 'down' && (
+        <rect
+          x={x + 2}
+          y={y + h - 5.6}
+          width={(w - 4) * 0.55}
+          height={1.2}
+          rx={0.6}
+          fill={vlanColor}
+          fillOpacity={0.55}
+        />
       )}
 
       {/* Link LED */}
       <circle cx={x + 4} cy={y + 4} r={1.7} className={ledClass(primary)} />
 
-      {/* Breakout marker — this cage carries several logical ports */}
-      {brokenOut && (
+      {/* Tagged-VLAN count, and the breakout multiplier when the cage is split.
+          Both live top-right, so they stack rather than overlap on the rare
+          cage that is both a trunk AND broken out. */}
+      {isTrunk && (
         <text
           x={x + w - 3}
           y={y + 6}
+          textAnchor="end"
+          className="fill-fg-muted"
+          style={{ fontSize: 6, fontWeight: 600 }}
+        >
+          +{taggedCount}
+        </text>
+      )}
+      {brokenOut && (
+        <text
+          x={x + w - 3}
+          y={y + (isTrunk ? 12 : 6)}
           textAnchor="end"
           className="fill-fg-muted"
           style={{ fontSize: 6, fontWeight: 600 }}

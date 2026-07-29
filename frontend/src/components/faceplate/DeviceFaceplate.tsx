@@ -163,6 +163,14 @@ export function DeviceFaceplate({
         <span className="flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 rounded-full bg-accent" /> Pending change
         </span>
+        <span className="flex items-center gap-1.5">
+          {/* Mirrors the cage's double stripe: two bars = trunk, one = access. */}
+          <span className="flex h-1.5 w-2.5 flex-col justify-between">
+            <span className="h-[1px] w-1.5 bg-fg-muted" />
+            <span className="h-[1px] w-2.5 bg-fg-muted" />
+          </span>
+          Trunk <span className="nb-mono">+N</span> tagged
+        </span>
         <span className="ml-auto nb-mono">
           {faceplate.slotCount} cages · {faceplate.portCount} ports
         </span>
