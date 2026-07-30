@@ -60,6 +60,12 @@ async def get_current_user(
     # column's backfill default, so sessions survive the upgrade itself.
     if payload.ver != user.token_version:
         raise _CREDENTIALS_EXCEPTION
+    # Disabled accounts cannot authenticate. Checked here rather than only at
+    # login so an already-issued token stops working the moment the account is
+    # disabled — disabling also bumps token_version, so this is belt-and-braces
+    # against any future path that forgets to.
+    if not user.is_active:
+        raise _CREDENTIALS_EXCEPTION
     # Stash the verified subject for the write rate-limiter's key func (it runs
     # after dependencies): avoids a second JWT decode per write, and gives
     # cookie-authenticated browser sessions (no Authorization header) a

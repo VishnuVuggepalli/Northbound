@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import Integer, String
+from sqlalchemy import Boolean, Integer, String
+from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from northbound.db import Base
@@ -24,5 +25,16 @@ class User(Base):
     # and are rejected on mismatch — the only way to revoke stateless tokens.
     token_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
+    )
+    # Disabled accounts keep their history (audit rows and change requests
+    # reference user ids) but cannot authenticate — ``deps.get_current_user``
+    # rejects them, and disabling also bumps ``token_version`` so existing
+    # sessions die immediately rather than lingering until expiry.
+    #
+    # Disable is the reversible lever; DELETE is for accounts that should never
+    # have existed. Backfills to true so every pre-existing account keeps
+    # working across the upgrade.
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa_true()
     )
     created_at: Mapped[dt.datetime] = created_at_col()

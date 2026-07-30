@@ -55,6 +55,16 @@ class UserOut(BaseModel):
     username: str
     role: UserRole
     email: str | None = None
+    # Disabled accounts keep their history but cannot authenticate. Exposed so
+    # the admin UI can show and toggle the state; there is nothing sensitive
+    # about it that the admin listing does not already reveal.
+    is_active: bool = True
+
+
+class UserActiveIn(BaseModel):
+    """Body of ``PATCH /api/users/{id}/active`` (admin only)."""
+
+    is_active: bool
 
 
 class UserCreate(BaseModel):
