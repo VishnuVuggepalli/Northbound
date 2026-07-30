@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, Cpu, FileText, Power, RefreshCw, Trash2 } from 'lucide-react';
-import { Switch3D } from '@/components/three/Switch3D';
+import { DeviceFaceplate } from '@/components/faceplate/DeviceFaceplate';
 import { PortStrip } from '@/components/PortStrip';
 import { PortPanel } from '@/components/PortPanel';
 import { DeviceConfigView } from '@/components/DeviceConfigView';
@@ -269,12 +269,13 @@ export function DeviceDetailPage() {
               className="nb-reveal overflow-hidden p-4"
               style={{ '--nb-reveal-i': 1 } as React.CSSProperties}
             >
-              <Switch3D
+              <DeviceFaceplate
                 device={device}
                 ports={ports}
+                requests={requests}
                 theme={theme}
                 selectedPort={selectedPort}
-                onPick={(p) => selectPort(p.name)}
+                onSelect={selectPort}
               />
             </div>
             <div className="overflow-hidden border-t border-border bg-bg-elev-1/40">

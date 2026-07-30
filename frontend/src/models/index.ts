@@ -138,6 +138,20 @@ export interface RequestedChanges {
   notes?: string;
 }
 
+/**
+ * Which subsystem a change request targets — the backend's `_kind`
+ * discriminator (services/requests.py stuffs it into `requested_changes`).
+ *
+ * `'port'` is the original per-switchport shape, which predates the
+ * discriminator and therefore carries no `_kind` on the wire. Everything else
+ * is device-level: those requests have an EMPTY `port_name`, so any UI that
+ * keys off a port must handle their absence explicitly rather than rendering
+ * blanks.
+ */
+export type ChangeKind = 'port' | 'vlan' | 'l3' | 'vrf' | 'ospf';
+
+export const CHANGE_KINDS: readonly ChangeKind[] = ['port', 'vlan', 'l3', 'vrf', 'ospf'];
+
 export interface RequestEvent {
   id: string;
   kind: 'comment' | 'transition';
@@ -156,7 +170,20 @@ export interface ChangeRequest {
   requested_by: string;
   /** Requester username resolved by the backend (null if the user was deleted). */
   requested_by_username: string | null;
+  /**
+   * Legacy per-switchport fields. Populated ONLY when `kind === 'port'` — for
+   * device-level kinds every field here is `undefined`, which is why rendering
+   * them unconditionally produced empty rows.
+   */
   requested_changes: RequestedChanges;
+  /** Which subsystem this request targets (backend `_kind`, defaulting to `'port'`). */
+  kind: ChangeKind;
+  /**
+   * The wire payload with `_kind` stripped, preserved verbatim. `requested_changes`
+   * above is a lossy projection that only covers the `'port'` shape; this keeps
+   * the vlan/l3/vrf/ospf parameters renderable instead of silently dropping them.
+   */
+  change_params: Readonly<Record<string, unknown>>;
   reason: string;
   status: ChangeRequestStatus;
   reviewer_id: string | null;

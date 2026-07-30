@@ -1,0 +1,69 @@
+# Northbound — TLS-terminating, host-network production deployment.
+#
+# This is the shape actually running on the lab node, captured so the deploy is
+# one reproducible command instead of a hand-typed `docker run` with a dozen
+# flags. STANDALONE — do not combine with docker-compose.yml (that one publishes
+# `ports:`, which Compose rejects alongside `network_mode: host`).
+#
+#   make deploy-prod          # build SPA + image, then up -d
+#   docker compose -f docker-compose.prod.yml logs -f
+#   docker compose -f docker-compose.prod.yml down
+#
+# Differences from the base docker-compose.yml, and why:
+#   network_mode: host  — the app must reach managed switches on the host's own
+#                         routes/VLANs; bridge NAT can't always get there. It
+#                         also sidesteps a VPN that route-hijacks 172.17.0.0/16.
+#   TLS in-app          — uvicorn --ssl-* with a step-ca cert; no reverse proxy.
+#   healthcheck override— the image's baked-in probe is plain HTTP and would
+#                         report false "unhealthy" against a TLS port.
+#
+# PREREQUISITES on the host (not managed by this file — see deploy/README-prod.md):
+#   /etc/northbound/tls/{cert.pem,key.pem,root_ca.crt}   issued by step-ca
+#   /etc/northbound/healthcheck.py                        from deploy/healthcheck.py
+#   northbound-443-redirect.service                       443 -> 8090 NAT
+#   .env with NB_MASTER_KEY / NB_SECRET_KEY               see .env.example
+
+services:
+  northbound:
+    build:
+      context: .
+      # pip must reach PyPI; on this host the bridge network has no usable DNS.
+      network: host
+    image: northbound:latest
+    # Pinned, NOT compose's generated `<project>_<service>_1`. Two things depend
+    # on this exact name: `northbound-cert-renew.service` runs
+    # `docker restart northbound` after renewing the cert, and the deploy target
+    # polls `docker inspect northbound` for health.
+    container_name: northbound
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NB_SEED: "1"
+      NB_ENABLE_SCHEDULER: "true"
+    volumes:
+      - nb-data:/data
+      # Certs + the TLS-aware healthcheck. Read-only: the cert-renew timer
+      # writes on the HOST, the container only reads.
+      - /etc/northbound:/etc/northbound:ro
+    command:
+      - uvicorn
+      - northbound.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8090"
+      - --ssl-certfile
+      - /etc/northbound/tls/cert.pem
+      - --ssl-keyfile
+      - /etc/northbound/tls/key.pem
+    healthcheck:
+      test: ["CMD", "python", "/etc/northbound/healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      start_period: 25s
+      retries: 3
+
+volumes:
+  nb-data:
+    external: true

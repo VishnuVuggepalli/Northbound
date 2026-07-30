@@ -100,9 +100,30 @@ docker-build: frontend-build
 docker-build-selfcontained:
 	DOCKER_BUILDKIT=1 docker build -f Dockerfile.selfcontained --network=host -t northbound:latest .
 
+# Compose v2 plugin (`docker compose`) when present, else the legacy v1 binary
+# (`docker-compose`). The lab node ships only v1.29.2, so hardcoding either one
+# breaks on some host.
+COMPOSE := $(shell docker compose version >/dev/null 2>&1 && echo "docker compose" || echo "docker-compose")
+
 # Run via compose (reads .env — see .env.example). Builds first.
 docker-up: frontend-build
-	docker compose up --build -d
+	$(COMPOSE) up --build -d
 
 docker-down:
-	docker compose down
+	$(COMPOSE) down
+
+# Production deploy: host networking + in-app TLS, the shape running on the lab
+# node. One command instead of a hand-typed `docker run` with a dozen flags.
+# Host prerequisites (certs, healthcheck, 443 redirect) — see deploy/README-prod.md.
+deploy-prod: frontend-build
+	$(COMPOSE) -f docker-compose.prod.yml up --build -d
+	@echo "waiting for health…"
+	@for i in $$(seq 1 30); do \
+	  s=$$(docker inspect -f '{{.State.Health.Status}}' northbound 2>/dev/null || echo starting); \
+	  [ "$$s" = healthy ] && echo "healthy" && exit 0; \
+	  [ "$$s" = unhealthy ] && echo "UNHEALTHY — docker logs northbound" && exit 1; \
+	  sleep 3; \
+	done; echo "timed out waiting for health" && exit 1
+
+deploy-prod-down:
+	$(COMPOSE) -f docker-compose.prod.yml down

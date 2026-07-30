@@ -223,6 +223,8 @@ export interface AdminUser {
   username: string;
   role: 'admin' | 'requester';
   email: string | null;
+  /** Disabled accounts keep their history but cannot authenticate. */
+  is_active: boolean;
 }
 
 export async function listUsersAdmin(): Promise<AdminUser[]> {
@@ -232,7 +234,32 @@ export async function listUsersAdmin(): Promise<AdminUser[]> {
     username: u.username,
     role: u.role,
     email: u.email ?? null,
+    // Older servers predate the field; treat its absence as active rather than
+    // rendering every account as disabled.
+    is_active: (u as { is_active?: boolean }).is_active ?? true,
   }));
+}
+
+/**
+ * Enable or disable an account (admin).
+ *
+ * Prefer this over deleteUser: a disabled user keeps their history, and audit
+ * rows and change requests keep resolving to a real username. Disabling also
+ * revokes the target's live sessions server-side.
+ */
+export async function setUserActive(userId: string, isActive: boolean): Promise<void> {
+  await request<UserOut>(`/api/users/${encodeURIComponent(userId)}/active`, {
+    method: 'PATCH',
+    body: { is_active: isActive },
+  });
+}
+
+/**
+ * Permanently delete a user (admin). Irreversible — the id lives on in audit
+ * rows and change requests where it will no longer resolve to a username.
+ */
+export async function deleteUser(userId: string): Promise<void> {
+  await request<void>(`/api/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
 }
 
 /** Self-service password change. The response re-issues session cookies, so the

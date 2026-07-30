@@ -12,6 +12,7 @@
 import type { components } from './schema.gen';
 import type {
   AuditEntry,
+  ChangeKind,
   ChangeRequest,
   Device,
   Platform,
@@ -20,6 +21,7 @@ import type {
   Port,
   PortKind,
 } from '@/models';
+import { CHANGE_KINDS } from '@/models';
 
 type DeviceOut = components['schemas']['DeviceOut'];
 type PortStateOut = components['schemas']['PortStateOut'];
@@ -63,7 +65,16 @@ function defaultPortFor(platformId: string): number {
   }
 }
 
-/** Physical port layout guess from platform; refined once ports are known. */
+/**
+ * Coarse per-platform stereotype, used ONLY as a fallback for a device whose
+ * ports have not loaded yet.
+ *
+ * It is a guess and frequently a wrong one — it maps every pica8 to `sfp-48`,
+ * while the pica8 in the fleet is a 32-port QSFP switch. Real layout comes from
+ * `lib/faceplate.deriveFaceplate`, which reads the ports the device actually
+ * reported. (This used to claim it was "refined once ports are known"; nothing
+ * refined it, so the claim is gone along with the behaviour it implied.)
+ */
 function portKindFor(platform: Platform): PortKind {
   switch (platform) {
     case 'arista':
@@ -162,14 +173,33 @@ function asNumberArray(v: unknown): number[] | undefined {
   return nums.length === v.length ? nums : undefined;
 }
 
+/**
+ * Read the backend's `_kind` discriminator off a `requested_changes` payload.
+ *
+ * The OpenAPI contract types this field as `PortChange`, but
+ * `services/requests.py` files vlan/l3/vrf/ospf requests as
+ * `{"_kind": <kind>, ...}` — so the discriminator exists at runtime while being
+ * invisible to `schema.gen.ts`. Absent `_kind` means the original per-port
+ * shape, which is why the fallback is `'port'` (matching change_apply.py's own
+ * `raw_changes.pop("_kind", "port")`).
+ */
+function toChangeKind(raw: unknown): ChangeKind {
+  return (CHANGE_KINDS as readonly string[]).includes(raw as string)
+    ? (raw as ChangeKind)
+    : 'port';
+}
+
 export function mapRequest(r: RequestOut): ChangeRequest {
   const changes = (r.requested_changes ?? {}) as Record<string, unknown>;
+  const { _kind, ...params } = changes;
   return {
     id: r.id,
     device_id: r.device_id,
     port_name: r.port_name,
     requested_by: r.requested_by,
     requested_by_username: r.requested_by_username ?? null,
+    kind: toChangeKind(_kind),
+    change_params: params,
     requested_changes: {
       untagged_vlan: asNumber(changes.untagged_vlan),
       tagged_vlans: asNumberArray(changes.tagged_vlans),

@@ -10,6 +10,12 @@ import { Diff, ConfigDiff } from '@/components/Diff';
 import { RequestThread } from '@/components/requests/RequestThread';
 import { ApplyConfirmModal } from '@/modals/ApplyConfirmModal';
 import { applyChangeToPort, mergeChange, portToRequestedChanges } from '@/lib/config';
+import {
+  changeKindLabel,
+  hasUnresolvedPortReference,
+  isDeviceLevel,
+  summarizeChange,
+} from '@/lib/changeSummary';
 import { timeAgo } from '@/lib/format';
 import type { ThemeMode } from '@/lib/palette';
 import type { ChangeRequest, Device, Port, User } from '@/models';
@@ -81,8 +87,16 @@ export function RequestRow({
   const { data: platforms } = usePlatforms();
   const isAdmin = user.role === 'admin';
   const requesterLabel = request.requested_by_username ?? request.requested_by.slice(0, 8);
-  if (!device || !port) return null;
-  const after = applyChangeToPort(port, request.requested_changes);
+  // Only the device is structurally required. A missing PORT is not a reason to
+  // drop the row: device-level kinds (vlan/l3/vrf/ospf) are filed with an empty
+  // `port_name` and legitimately have no port, while a port-kind request whose
+  // pinned port no longer resolves is DRIFT worth surfacing. Returning null for
+  // both — as this did — silently hid every device-level request in the queue.
+  if (!device) return null;
+  const summary = summarizeChange(request);
+  const deviceLevel = isDeviceLevel(request);
+  const portDrift = hasUnresolvedPortReference(request, port);
+  const after = port ? applyChangeToPort(port, request.requested_changes) : undefined;
   // Write-lock check is centralized in lib/devicePolicy. Combines role
   // (router/vpn) with platform capability (writable=false on SwOS+FreeBSD).
   // Approve-only stays available so admins can still triage the queue; the
@@ -100,27 +114,66 @@ export function RequestRow({
       <button
         type="button"
         onClick={onToggle}
-        className="grid w-full grid-cols-[40px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 text-left hover:bg-bg-elev-1"
+        /* First column sized for the chevron + an 8-char short id; at 40px the
+           id was clipped mid-characters. */
+        className="grid w-full grid-cols-[104px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 text-left hover:bg-bg-elev-1"
       >
         <span className="flex items-center gap-1 nb-mono text-[11px] text-fg-muted">
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-          <span className="font-semibold text-fg">#{request.id}</span>
+          {/* Short id: the raw value is a UUID, which wrapped across four lines and
+              ate the whole first column. Same 8-char convention already used for
+              `requested_by` below; full id on hover and in the title attribute. */}
+          <span className="font-semibold text-fg" title={request.id}>
+            #{request.id.slice(0, 8)}
+          </span>
         </span>
         <span className="flex items-center gap-1.5 text-xs">
           <Badge variant="muted">{device.env}</Badge>
           <span className="nb-mono truncate text-fg">{device.name}</span>
           <ChevronRight size={11} className="shrink-0 text-fg-subtle" />
-          <span className="nb-mono truncate text-fg">{request.port_name}</span>
+          {/* The pinned reference: a switchport for port kinds, the device-level
+              target (e.g. "VLAN 1234") otherwise. Never blank. */}
+          <span className="nb-mono truncate text-fg">
+            {deviceLevel ? summary.target : request.port_name}
+          </span>
+          {deviceLevel && (
+            <Badge variant="muted" className="shrink-0">
+              {changeKindLabel(request.kind)}
+            </Badge>
+          )}
+          {portDrift && (
+            <Badge
+              variant="warn"
+              className="shrink-0"
+              title={`Port ${request.port_name} is pinned by this request but did not resolve on ${device.name}. Not re-resolved — review before applying.`}
+            >
+              drift
+            </Badge>
+          )}
         </span>
         <span className="flex items-center gap-1.5">
-          <VlanChip vlan={port.untagged_vlan} theme={theme} />
-          <ArrowRight size={11} className="text-fg-subtle" />
-          <VlanChip vlan={request.requested_changes.untagged_vlan} theme={theme} />
-          {request.requested_changes.tagged_vlans?.length ? (
-            <Badge variant="muted" className="ml-1">
-              +{request.requested_changes.tagged_vlans.length}T
-            </Badge>
-          ) : null}
+          {deviceLevel || !port ? (
+            // No switchport to diff against — show what the change actually does.
+            <span className="flex min-w-0 items-center gap-1.5 text-xs">
+              {summary.action && <Badge variant="muted">{summary.action}</Badge>}
+              {summary.details.slice(0, 3).map((d) => (
+                <span key={d.label} className="nb-mono truncate text-fg-muted">
+                  {d.label}={d.value}
+                </span>
+              ))}
+            </span>
+          ) : (
+            <>
+              <VlanChip vlan={port.untagged_vlan} theme={theme} />
+              <ArrowRight size={11} className="text-fg-subtle" />
+              <VlanChip vlan={request.requested_changes.untagged_vlan} theme={theme} />
+              {request.requested_changes.tagged_vlans?.length ? (
+                <Badge variant="muted" className="ml-1">
+                  +{request.requested_changes.tagged_vlans.length}T
+                </Badge>
+              ) : null}
+            </>
+          )}
         </span>
         <span className="flex items-center justify-end gap-2 text-xs text-fg-muted">
           {/* Prefer the resolved username; fall back to a short id (e.g. if the
@@ -157,17 +210,50 @@ export function RequestRow({
             <KV label="Reviewer comment" variant="stacked">{request.reviewer_comment}</KV>
           )}
           <RequestThread requestId={request.id} open={expanded} />
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <KV label="Field changes" variant="stacked">
-              <Diff
-                before={portToRequestedChanges(port)}
-                after={mergeChange(port, request.requested_changes)}
-              />
+          {port && after ? (
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <KV label="Field changes" variant="stacked">
+                <Diff
+                  before={portToRequestedChanges(port)}
+                  after={mergeChange(port, request.requested_changes)}
+                />
+              </KV>
+              <KV label="Rendered config delta" variant="stacked">
+                <ConfigDiff device={device} portBefore={port} portAfter={after} />
+              </KV>
+            </div>
+          ) : (
+            // No port to diff against. Show the change parameters verbatim so the
+            // reviewer still sees exactly what will be pushed, and say WHY there
+            // is no diff rather than rendering an empty panel.
+            <KV
+              label={deviceLevel ? `${changeKindLabel(request.kind)} change` : 'Requested change'}
+              variant="stacked"
+            >
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="nb-mono text-xs text-fg">{summary.target}</span>
+                  {summary.action && <Badge variant="muted">{summary.action}</Badge>}
+                </div>
+                {summary.details.length > 0 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {summary.details.map((d) => (
+                      <span key={d.label} className="nb-mono text-xs text-fg-muted">
+                        {d.label}=<span className="text-fg">{d.value}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {portDrift && (
+                  <p className="text-xs text-warn">
+                    Pinned port <strong>{request.port_name}</strong> did not resolve on{' '}
+                    {device.name}. It has NOT been re-resolved to another port — review the device
+                    before applying.
+                  </p>
+                )}
+              </div>
             </KV>
-            <KV label="Rendered config delta" variant="stacked">
-              <ConfigDiff device={device} portBefore={port} portAfter={after} />
-            </KV>
-          </div>
+          )}
 
           {panel !== null ? (
             <div
@@ -351,7 +437,10 @@ export function RequestRow({
           )}
         </div>
       )}
-      {isAdmin && (
+      {/* ApplyConfirmModal renders a port-level config diff and requires a real
+          Port. Device-level kinds and unresolved pins have none, so the modal is
+          mounted only when a port resolved. */}
+      {isAdmin && port && (
         <ApplyConfirmModal
           open={confirmingApply}
           request={request}

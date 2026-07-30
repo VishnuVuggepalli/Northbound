@@ -192,6 +192,25 @@ export function usePlatforms() {
   return useQuery({ queryKey: queryKeys.platforms(), queryFn: () => api.listPlatforms() });
 }
 
+/** Enable/disable an account. Invalidates the user list so the row updates. */
+export function useSetUserActive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, isActive }: { userId: string; isActive: boolean }) =>
+      api.setUserActive(userId, isActive),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.users() }),
+  });
+}
+
+/** Permanently delete an account. Irreversible — callers must confirm first. */
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => api.deleteUser(userId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.users() }),
+  });
+}
+
 export function useUsersAdmin(opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: queryKeys.users(),

@@ -345,7 +345,16 @@ class Pica8Driver(Driver):
         # live-validated for member CHANGES, so it is refused pending rework.
         # Access-mode / single untagged-VLAN / description / mtu / enabled writes are
         # unaffected and still go through the single-phase builder below.
-        if change.tagged_vlans and _effective_mode(change) == "trunk":
+        # `is not None`, NOT truthiness: an EMPTY tagged list is still a member
+        # edit — it clears the whole member set and makes the builder emit the
+        # very `<vlan operation="remove">` this guard exists to prevent (see
+        # _build_edit_config_xml). A truthiness test let tagged_vlans=[] fall
+        # through to that path unrefused and untested.
+        #
+        # Scoped to effective mode "trunk" on purpose: the request flow sends
+        # untagged + tagged=[] with no port_mode to mean ACCESS intent, which
+        # infers mode "access" and must keep working.
+        if change.tagged_vlans is not None and _effective_mode(change) == "trunk":
             raise NotSupported(
                 "Pica8 trunk tagged-VLAN member edits are disabled pending rework "
                 "(caused NETCONF candidate corruption on a live switch); use the "

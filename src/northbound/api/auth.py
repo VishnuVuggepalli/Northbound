@@ -84,6 +84,11 @@ async def login(
         raise _INVALID_CREDENTIALS
     if not verify_password(body.password, user.password_hash):
         raise _INVALID_CREDENTIALS
+    # Disabled accounts get the SAME generic error as a bad password. Saying
+    # "your account is disabled" would confirm the username exists, which is
+    # the enumeration leak the dummy-hash dance above exists to prevent.
+    if not user.is_active:
+        raise _INVALID_CREDENTIALS
 
     return _issue_session(response, user)
 

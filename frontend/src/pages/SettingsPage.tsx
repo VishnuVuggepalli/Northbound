@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Gauge, KeyRound, Save, Users } from 'lucide-react';
+import { Gauge, KeyRound, Save, Trash2, UserCheck, UserX, Users } from 'lucide-react';
 import { Button } from '@/shared/Button';
 import { Input } from '@/shared/Input';
 import { Section } from '@/shared/Section';
+import { Badge } from '@/shared/Badge';
+import { Modal } from '@/modals/Modal';
 import {
   useResetUserPassword,
   useSettings,
   useUpdateSettings,
   useUsersAdmin,
+  useSetUserActive,
+  useDeleteUser,
 } from '@/api/queries';
 import { useAuthStore } from '@/store/auth';
 import { pushToast } from '@/store/toast';
@@ -109,9 +113,61 @@ export function SettingsPage() {
 function UsersTable() {
   const { data: users = [], isLoading } = useUsersAdmin();
   const reset = useResetUserPassword();
+  const active = useSetUserActive();
+  const remove = useDeleteUser();
   const me = useAuthStore((s) => s.user?.username);
   const [resetting, setResetting] = useState<string | null>(null);
   const [newPw, setNewPw] = useState('');
+  // Delete is irreversible, so it goes through an explicit confirm rather than
+  // firing on the first click.
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; username: string } | null>(null);
+
+  const toggleActive = (userId: string, username: string, isActive: boolean) => {
+    active.mutate(
+      { userId, isActive },
+      {
+        onSuccess: () =>
+          pushToast({
+            kind: 'success',
+            title: isActive ? 'Account enabled' : 'Account disabled',
+            message: isActive
+              ? `@${username} can sign in again.`
+              : `@${username} was signed out everywhere and can no longer sign in.`,
+          }),
+        onError: (e: unknown) =>
+          pushToast({
+            kind: 'error',
+            // The server refuses self-disable and last-admin with a 409; surface
+            // its reason rather than a generic failure.
+            title: 'Could not change account state',
+            message: e instanceof Error ? e.message : 'Failed.',
+          }),
+      },
+    );
+  };
+
+  const doDelete = () => {
+    if (!confirmDelete) return;
+    const { id, username } = confirmDelete;
+    remove.mutate(id, {
+      onSuccess: () => {
+        pushToast({
+          kind: 'success',
+          title: 'User deleted',
+          message: `@${username} was removed.`,
+        });
+        setConfirmDelete(null);
+      },
+      onError: (e: unknown) => {
+        pushToast({
+          kind: 'error',
+          title: 'Delete failed',
+          message: e instanceof Error ? e.message : 'Failed.',
+        });
+        setConfirmDelete(null);
+      },
+    });
+  };
 
   const submit = (userId: string, username: string) => {
     reset.mutate(
@@ -139,7 +195,8 @@ function UsersTable() {
   if (isLoading) return <p className="mt-3 text-xs text-fg-muted">Loading users…</p>;
 
   return (
-    <ul className="mt-4 divide-y divide-border">
+    <>
+      <ul className="mt-4 divide-y divide-border">
       {users.map((u) => (
         <li key={u.id} className="flex flex-wrap items-center gap-2 py-2">
           <div className="min-w-40">
@@ -148,6 +205,11 @@ function UsersTable() {
             <span className="ml-2 text-[10px] uppercase tracking-wider text-fg-subtle">
               {u.role}
             </span>
+            {!u.is_active && (
+              <Badge variant="warn" className="ml-2">
+                disabled
+              </Badge>
+            )}
           </div>
           {resetting === u.id ? (
             <form
@@ -187,20 +249,83 @@ function UsersTable() {
               </Button>
             </form>
           ) : (
-            <Button
-              size="sm"
-              kind="outline"
-              leftIcon={<KeyRound size={12} />}
-              onClick={() => {
-                setResetting(u.id);
-                setNewPw('');
-              }}
-            >
-              Reset password…
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                kind="outline"
+                leftIcon={<KeyRound size={12} />}
+                onClick={() => {
+                  setResetting(u.id);
+                  setNewPw('');
+                }}
+              >
+                Reset password…
+              </Button>
+              {/* Disable is the reversible lever and comes first. Both are
+                  hidden on your own row — the server refuses either with a
+                  409, so this only avoids offering an action that cannot
+                  succeed. */}
+              {u.username !== me && (
+                <>
+                  <Button
+                    size="sm"
+                    kind="outline"
+                    leftIcon={u.is_active ? <UserX size={12} /> : <UserCheck size={12} />}
+                    disabled={active.isPending}
+                    onClick={() => toggleActive(u.id, u.username, !u.is_active)}
+                  >
+                    {u.is_active ? 'Disable' : 'Enable'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    kind="danger"
+                    leftIcon={<Trash2 size={12} />}
+                    disabled={remove.isPending}
+                    onClick={() => setConfirmDelete({ id: u.id, username: u.username })}
+                  >
+                    Delete…
+                  </Button>
+                </>
+              )}
+            </div>
           )}
         </li>
-      ))}
-    </ul>
+        ))}
+      </ul>
+
+      {/* Delete is irreversible and the id lives on in audit rows and change
+          requests, so say that plainly rather than asking "are you sure?". */}
+      <Modal
+        open={confirmDelete !== null}
+        onClose={() => setConfirmDelete(null)}
+        title={`Delete @${confirmDelete?.username ?? ''}?`}
+      >
+        <p className="text-sm text-fg-muted">
+          This cannot be undone. Their past change requests and audit entries stay, but will no
+          longer show a username.
+        </p>
+        <p className="mt-2 text-sm text-fg-muted">
+          To keep the history readable and reversible, <strong className="text-fg">disable</strong>{' '}
+          the account instead — it blocks sign-in immediately and can be undone.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button kind="ghost" onClick={() => setConfirmDelete(null)}>
+            Cancel
+          </Button>
+          <Button
+            kind="outline"
+            onClick={() => {
+              if (confirmDelete) toggleActive(confirmDelete.id, confirmDelete.username, false);
+              setConfirmDelete(null);
+            }}
+          >
+            Disable instead
+          </Button>
+          <Button kind="danger" disabled={remove.isPending} onClick={doDelete}>
+            {remove.isPending ? 'Deleting…' : 'Delete permanently'}
+          </Button>
+        </div>
+      </Modal>
+    </>
   );
 }
